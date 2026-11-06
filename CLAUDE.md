@@ -1,0 +1,92 @@
+# TraceScan
+
+Multi-agent LLM failure triage (AI Engineering capstone). It reads an LLM app's traces, clusters the failures, diagnoses each cluster, and drafts GitHub issues plus regression tests for a human to approve. First target app: Medas, a clinician-facing RAG assistant.
+
+## Project state
+
+Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next.js, default starter page only), same layout as the `coa-agent` project. There is no `tracescan/` package, `pyproject.toml`, tests or git repo yet. What exists:
+
+| Path | What it is |
+| --- | --- |
+| `PLAN.md` | Source of truth for scope, architecture, task order and "Done when" checks |
+| `.claude/prds/tracescan.prd.md` | PRD: problem, metrics, scope, open questions |
+| `.claude/prds/tracescan.work-packages.md` | Features and cards split for parallel subagents. Generated; do not hand-edit |
+| `backend/tracedoctor_graph.py` | LangGraph sketch with stubbed nodes; the starting point for the real graph |
+| `backend/main.py` | Minimal FastAPI app (`GET /health` only); the future home of the trace collector (`POST /v1/traces`) |
+| `backend/requirements.txt` | `fastapi` and `uvicorn`, unpinned; to be replaced by `pyproject.toml` |
+| `backend/.venv` | Virtualenv for the backend (gitignored) |
+| `pyrightconfig.json` | Points Pylance/Pyright at `backend/.venv` so imports resolve when the editor opens the repo root |
+| `frontend/` | Next.js 16 (App Router, TypeScript, Tailwind 4, Biome, React Compiler, npm) scaffolded with the `create-next-app` starter page; the future trace viewer and review UI. Read `frontend/AGENTS.md` before frontend work: this Next.js version differs from older docs, and its guides live in `frontend/node_modules/next/dist/docs/` |
+| `tools/board/` | `build-board.js` and `card-details.js`: single source for the Kanban cards |
+| `tracescan-board.html` | Generated Kanban board |
+
+## Working rules
+
+- Follow `PLAN.md` "Implementation plan" phase by phase. Tick a task's checkbox only when its "Done when" check passes.
+- Keep the MVP tight. Do not start stretch tasks until the MVP gate (day 10) passes.
+- Diagnoses are `unverified` in the MVP. Never drop a cluster because it did not reproduce.
+- Cite evidence: every diagnosis must reference real trace ids and spans from its cluster.
+- Medas traces may contain clinical content. Do not copy raw span attributes into issues, fixtures or logs without checking for personal data.
+
+## Architecture (see PLAN.md for detail)
+
+One LangGraph `StateGraph`:
+`collect_traces → cluster_failures → diagnose_cluster ×N (parallel, via Send) → join_diagnoses → reproduce_failure ×N → match_known_issues → draft_proposals → human_review (interrupt) → apply_actions → END`
+
+- `diagnose_cluster` is itself a LangChain `create_agent` with `response_format=Diagnosis` and a low recursion limit (~12). The outer pipeline stays a plain `StateGraph`.
+- Parallel branches get small private inputs (`ClusterTask`, `ReproTask`), not the whole state. Fields filled by parallel branches use `Annotated[list[...], operator.add]`.
+- Clustering is code (embeddings + HDBSCAN), not LLM calls. LLM calls happen per cluster, never per trace.
+- Tracing stack is our own: Medas (OpenTelemetry, `gen_ai.*` attributes) → FastAPI OTLP collector → Postgres (`traces`, `spans`, `scores`) → FastMCP read-only server → graph. Decided: no third-party observability platform (no Langfuse). The Langfuse mentions in `tracedoctor_graph.py` are stale.
+
+## Safety invariants
+
+- Trace access is read-only: the MCP server (`search_failed_traces`, `get_trace_tree`, `get_span`) connects with a read-only Postgres role. The agent never touches the DB directly.
+- All writes (GitHub, eval dataset, known-issues store) happen only in `apply_actions`, only for human-approved proposals.
+- `dry_run` defaults to `True`. Dry run writes `out/issues/<cluster>.md` and appends regression cases to a local JSONL file, and nothing else.
+- The known-issues store is written only after an approved action, so rejected proposals never become "known".
+
+## Commands
+
+Backend commands run from `backend/`. Set up the virtualenv (`python3 -m venv` fails on this machine because `ensurepip` is missing, so use `uv`):
+
+```bash
+cd backend && uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
+```
+
+Run the FastAPI app (docs at `/docs`):
+
+```bash
+cd backend && .venv/bin/uvicorn main:app --reload
+```
+
+Run the graph sketch (needs `langgraph` 1.x, which `requirements.txt` does not install yet):
+
+```bash
+cd backend && .venv/bin/python tracedoctor_graph.py
+```
+
+It runs to the review pause, prints proposals, then resumes with decisions on the same `thread_id`.
+
+Frontend commands run from `frontend/` (install with `npm install`):
+
+```bash
+cd frontend && npm run dev
+```
+
+`npm run build` builds, `npm run lint` runs Biome, and `npx tsc --noEmit` typechecks. There is no test runner yet.
+
+Regenerate the board and work-packages brief after editing `tools/board/*.js` (from the repo root):
+
+```bash
+node tools/board/build-board.js tracescan-board.html .claude/prds/tracescan.work-packages.md
+```
+
+Planned, once the package exists: `pytest`, `ruff` (pre-commit), `langgraph dev` for Studio (compile without a local checkpointer/store and point `langgraph.json` at the module's `graph`).
+
+## Conventions
+
+- Python, Pydantic models for all structured output and state. Store plain dicts in state, or register the models module with the checkpoint serializer, to avoid the LangGraph serialization warning.
+- Target layout: `backend/tracescan/` with `graph.py`, `nodes/`, `tools/`, `models.py`, `evals/`; Next.js UI in `frontend/` (PLAN.md still says `ui/`).
+- Failure categories: `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, plus MAST top-level `system_design`, `inter_agent_misalignment`, `task_verification`, and `unknown`.
+- Eval = fault injection in Medas (6 seeded faults, varied inputs, healthy controls). Grade on the injected cause, not just the visible symptom.
+- For parallel subagent work: contracts and fixtures first, one owner per path, stubs for neighbouring features. See `.claude/prds/tracescan.work-packages.md`.
