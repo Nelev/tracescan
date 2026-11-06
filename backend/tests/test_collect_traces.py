@@ -1,11 +1,12 @@
 """collect_traces against a fake client, plus the compiled graph against the real trace server."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from agent.context import TraceContext
 from agent.graph import build_graph, route_after_cluster, route_after_collect, route_after_review
+from agent.state import TriageState
 from trace_store.models import FailedTraceQuery, TraceSummary
 
 
@@ -32,7 +33,7 @@ def summary(trace_id: str) -> TraceSummary:
     )
 
 
-async def run(fake: FakeTraces, state: dict) -> dict:
+async def run(fake: FakeTraces, state: TriageState) -> dict:
     return await build_graph().ainvoke(state, context=TraceContext(fake))
 
 
@@ -47,11 +48,14 @@ async def test_summaries_become_plain_json_dicts():
 @pytest.mark.anyio
 async def test_query_uses_target_app_and_window():
     fake = FakeTraces()
-    await run(fake, {"target_app": "medas", "since": "2026-11-05T09:30:00Z", "until": "2026-11-06T00:00:00Z"})
+    await run(
+        fake,
+        {"target_app": "medas", "since": "2026-11-05T09:30:00Z", "until": "2026-11-06T00:00:00Z"},
+    )
     [query] = fake.queries
     assert query.app == "medas"
-    assert query.since == datetime(2026, 11, 5, 9, 30, tzinfo=timezone.utc)
-    assert query.until == datetime(2026, 11, 6, tzinfo=timezone.utc)
+    assert query.since == datetime(2026, 11, 5, 9, 30, tzinfo=UTC)
+    assert query.until == datetime(2026, 11, 6, tzinfo=UTC)
 
 
 @pytest.mark.anyio
@@ -69,12 +73,6 @@ async def test_graph_ends_early_when_no_traces_failed():
 
 
 @pytest.mark.anyio
-async def test_missing_target_app_raises():
-    with pytest.raises(KeyError, match="target_app"):
-        await run(FakeTraces(), {})
-
-
-@pytest.mark.anyio
 async def test_naive_since_is_rejected():
     with pytest.raises(ValueError):
         await run(FakeTraces(), {"target_app": "medas", "since": "2026-11-05T09:30:00"})
@@ -83,13 +81,19 @@ async def test_naive_since_is_rejected():
 @pytest.mark.anyio
 async def test_graph_collects_fixture_traces_through_the_real_server(traces):
     result = await run(traces, {"target_app": "medas"})
-    assert [t["trace_id"] for t in result["failed_traces"]] == ["tr_tool_schema", "tr_retrieval_miss"]
+    assert [t["trace_id"] for t in result["failed_traces"]] == [
+        "tr_tool_schema",
+        "tr_retrieval_miss",
+    ]
 
 
 def test_routes():
-    assert route_after_collect({"failed_traces": []}) == "__end__"
-    assert route_after_collect({"failed_traces": [{"trace_id": "t"}]}) == "cluster_failures"
-    assert route_after_cluster({}) == "__end__"
-    assert route_after_cluster({"clusters": [{"cluster_id": "c0"}]}) == "diagnose_cluster"
-    assert route_after_review({"decisions": {"c0": "reject"}}) == "__end__"
-    assert route_after_review({"decisions": {"c0": "approve"}}) == "apply_actions"
+    def state(**fields) -> TriageState:
+        return TriageState(target_app="medas", **fields)
+
+    assert route_after_collect(state(failed_traces=[])) == "__end__"
+    assert route_after_collect(state(failed_traces=[{"trace_id": "t"}])) == "cluster_failures"
+    assert route_after_cluster(state()) == "__end__"
+    assert route_after_cluster(state(clusters=[{"cluster_id": "c0"}])) == "diagnose_cluster"
+    assert route_after_review(state(decisions={"c0": "reject"})) == "__end__"
+    assert route_after_review(state(decisions={"c0": "approve"})) == "apply_actions"

@@ -9,7 +9,7 @@ import asyncio
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # so `agent` imports when run as a script
@@ -38,7 +38,7 @@ async def main() -> None:
             print(f"    error_message: {s.error_message}")
 
         print("\n== same query, only traces after 09:30 UTC ==")
-        since = datetime(2026, 11, 5, 9, 30, tzinfo=timezone.utc)
+        since = datetime(2026, 11, 5, 9, 30, tzinfo=UTC)
         later = await traces.search_failed_traces(FailedTraceQuery(app="medas", since=since))
         print("  ", [s.trace_id for s in later])
 
@@ -52,12 +52,14 @@ async def main() -> None:
     trace_id = failed[-1].trace_id
     async with MultiServerMCPClient({"traces": TRACE_SERVER}).session("traces") as session:
         tree = (await session.call_tool("get_trace_tree", {"trace_id": trace_id})).structuredContent
+        assert tree is not None
         print(f"\n== get_trace_tree({trace_id}) ==")
         show_tree(tree)
 
         span_id = tree["children"][0]["span_id"]
         args = {"trace_id": trace_id, "span_id": span_id}
         span = (await session.call_tool("get_span", args)).structuredContent
+        assert span is not None
         print(f"\n== get_span({span_id}) ==")
         keys = ("name", "status", "status_message", "attributes", "children")
         print(json.dumps({k: span[k] for k in keys}, indent=2))

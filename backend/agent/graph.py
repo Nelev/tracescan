@@ -12,7 +12,6 @@ are placeholders. Fan-out (Send), interrupt() and a checkpointer come later.
 """
 
 import asyncio
-from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
 
@@ -62,17 +61,17 @@ def apply_actions(state: TriageState) -> dict:
     return {"actions_log": ["[dry-run] create_issue c0"]}
 
 
-def route_after_collect(state: TriageState) -> Literal["cluster_failures", "__end__"]:
+def route_after_collect(state: TriageState) -> str:
     """Nothing failed in the window: end the run."""
     return "cluster_failures" if state.get("failed_traces") else END
 
 
-def route_after_cluster(state: TriageState) -> Literal["diagnose_cluster", "__end__"]:
+def route_after_cluster(state: TriageState) -> str:
     """No clusters (e.g. all noise): end the run."""
     return "diagnose_cluster" if state.get("clusters") else END
 
 
-def route_after_review(state: TriageState) -> Literal["apply_actions", "__end__"]:
+def route_after_review(state: TriageState) -> str:
     """Nothing approved: end the run without calling apply_actions."""
     return "apply_actions" if "approve" in state.get("decisions", {}).values() else END
 
@@ -92,14 +91,14 @@ def build_graph():
     g.add_node("apply_actions", apply_actions)
 
     g.add_edge(START, "collect_traces")
-    g.add_conditional_edges("collect_traces", route_after_collect)
-    g.add_conditional_edges("cluster_failures", route_after_cluster)
+    g.add_conditional_edges("collect_traces", route_after_collect, ["cluster_failures", END])
+    g.add_conditional_edges("cluster_failures", route_after_cluster, ["diagnose_cluster", END])
     g.add_edge("diagnose_cluster", "join_diagnoses")
     g.add_edge("join_diagnoses", "reproduce_failure")
     g.add_edge("reproduce_failure", "match_known_issues")
     g.add_edge("match_known_issues", "draft_proposals")
     g.add_edge("draft_proposals", "human_review")
-    g.add_conditional_edges("human_review", route_after_review)
+    g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)
 
     return g.compile()

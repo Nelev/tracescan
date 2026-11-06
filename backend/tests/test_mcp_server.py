@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastmcp import Client
@@ -14,7 +14,7 @@ from trace_store.mcp_server import build_server, sanitize_span, sanitize_summary
 from trace_store.models import SpanNode, TraceSummary
 from trace_store.reader import FixtureTraceReader
 
-T0 = datetime(2026, 11, 5, 9, tzinfo=timezone.utc)
+T0 = datetime(2026, 11, 5, 9, tzinfo=UTC)
 LONG = MAX_ATTR_CHARS_TREE + 1  # over the tree limit, well under the single-span limit
 
 
@@ -42,7 +42,10 @@ SPAN = make_span(
     events=[
         {
             "name": "e",
-            "attributes": {"exception.type": "ValidationError", "exception.message": "patient text"},
+            "attributes": {
+                "exception.type": "ValidationError",
+                "exception.message": "patient text",
+            },
         }
     ],
     children=[make_span(span_id="s2", attributes={"gen_ai.tool.name": "y" * LONG})],
@@ -162,7 +165,9 @@ def test_sanitize_summary_truncates_free_text_only():
     assert sanitized.error_message == "e" * MAX_SUMMARY_CHARS + TRUNCATION_SUFFIX
     assert sanitized.signature == "s" * MAX_SUMMARY_CHARS + TRUNCATION_SUFFIX
     assert sanitized.trace_id == "t1"
-    assert sanitize_summary(SUMMARY.model_copy(update={"error_message": None})).error_message is None
+    assert (
+        sanitize_summary(SUMMARY.model_copy(update={"error_message": None})).error_message is None
+    )
 
 
 @pytest.mark.anyio
