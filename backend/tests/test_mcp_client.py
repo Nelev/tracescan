@@ -1,6 +1,6 @@
 """Integration tests: the client against the real trace server, started as a subprocess."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -17,7 +17,7 @@ async def test_search_returns_typed_summaries(traces):
 
 @pytest.mark.anyio
 async def test_query_datetimes_reach_the_server(traces):
-    since = datetime(2026, 11, 5, 9, 30, tzinfo=timezone.utc)
+    since = datetime(2026, 11, 5, 9, 30, tzinfo=UTC)
     found = await traces.search_failed_traces(FailedTraceQuery(app="medas", since=since))
     assert [t.trace_id for t in found] == ["tr_tool_schema"]
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from trace_store.models import FailedTraceQuery, SpanNode
 from trace_store.reader import FixtureTraceReader, build_tree
 
-T0 = datetime(2026, 11, 5, 9, tzinfo=timezone.utc)
+T0 = datetime(2026, 11, 5, 9, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ async def test_search_returns_failed_traces_newest_first(reader):
 
 @pytest.mark.anyio
 async def test_search_time_window_drops_traces(reader):
-    query = FailedTraceQuery(app="medas", since=datetime(2026, 11, 5, 9, 30, tzinfo=timezone.utc))
+    query = FailedTraceQuery(app="medas", since=datetime(2026, 11, 5, 9, 30, tzinfo=UTC))
     found = await reader.search_failed_traces(query)
     assert [t.trace_id for t in found] == ["tr_tool_schema"]
 

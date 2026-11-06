@@ -64,4 +64,8 @@ class TraceClient:
         )
         if result.isError:
             raise RuntimeError(f"search_failed_traces failed: {result.content}")
+        if result.structuredContent is None:
+            raise RuntimeError(
+                f"search_failed_traces returned no structured content: {result.content}"
+            )
         return [TraceSummary.model_validate(row) for row in result.structuredContent["result"]]

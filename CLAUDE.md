@@ -83,7 +83,15 @@ Regenerate the board and work-packages brief after editing `tools/board/*.js` (f
 node tools/board/build-board.js tracescan-board.html .claude/prds/tracescan.work-packages.md
 ```
 
-Planned, once the package exists: `pytest`, `ruff` (pre-commit), `langgraph dev` for Studio (compile without a local checkpointer/store and point `langgraph.json` at the module's `graph`).
+Backend checks (run from `backend/`; the Backend CI workflow runs the first three):
+
+```bash
+cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest
+```
+
+`uv run ruff check --fix .` and `uv run ruff format .` fix what they report. Ruff is configured in `backend/pyproject.toml` (rules `E,F,I,UP,B`, line length 100).
+
+Planned: a ruff pre-commit hook, `langgraph dev` for Studio (compile without a local checkpointer/store and point `langgraph.json` at the module's `graph`).
 
 ## Conventions
 
