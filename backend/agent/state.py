@@ -3,6 +3,8 @@ from typing import TypedDict
 
 class TriageState(TypedDict, total=False):
     target_app: str
+    since: str  # ISO 8601 with timezone, inclusive; optional
+    until: str  # ISO 8601 with timezone, exclusive; optional
     failed_traces: list[dict]
     clusters: list[dict]
     diagnoses: list[dict]

@@ -8,12 +8,6 @@ from agent.mcp_client import TraceClient
 from trace_store.models import FailedTraceQuery, TraceSummary
 
 
-@pytest.fixture
-async def traces():
-    async with TraceClient() as client:
-        yield client
-
-
 @pytest.mark.anyio
 async def test_search_returns_typed_summaries(traces):
     found = await traces.search_failed_traces(FailedTraceQuery(app="medas"))
