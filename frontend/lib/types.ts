@@ -7,6 +7,7 @@ export type RunRequest = {
 };
 
 export type RunResponse = {
+  run_id: string;
   failed_traces: number;
   clusters: number;
   diagnoses: number;

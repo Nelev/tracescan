@@ -6,6 +6,8 @@ from pathlib import Path
 AGENT_DIR = Path(__file__).parent.parent / "agent"
 ALLOWED_TRACE_STORE_MODULE = "trace_store.models"  # shared contracts, used for typing
 DB_DRIVERS = {"psycopg", "psycopg2", "asyncpg", "sqlalchemy"}
+# Postgres persistence is wired in the backend/main.py lifespan and handed to build_graph.
+POSTGRES_PERSISTENCE = ("langgraph.checkpoint.postgres", "langgraph.store.postgres")
 
 
 def imported_names(path: Path):
@@ -27,3 +29,4 @@ def test_agent_package_only_imports_trace_store_models_and_no_db_drivers():
                 )
                 assert allowed, f"{path.name} imports {name}"
             assert top not in DB_DRIVERS, f"{path.name} imports {name}"
+            assert not name.startswith(POSTGRES_PERSISTENCE), f"{path.name} imports {name}"
