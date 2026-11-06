@@ -4,7 +4,7 @@ Multi-agent LLM failure triage (AI Engineering capstone). It reads an LLM app's 
 
 ## Project state
 
-Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next.js, default starter page only), same layout as the `coa-agent` project. The code package is `backend/agent/` (there is no `tracescan/` package). What exists:
+Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next.js, default starter page only), same layout as the `coa-agent` project. The code lives in two backend packages: `backend/agent/` (the graph) and `backend/trace_store/` (trace contracts, reader and MCP server). There is no `tracescan/` package. What exists:
 
 | Path | What it is |
 | --- | --- |
@@ -12,7 +12,8 @@ Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next
 | `.claude/prds/tracescan.prd.md` | PRD: problem, metrics, scope, open questions |
 | `.claude/prds/tracescan.work-packages.md` | Features and cards split for parallel subagents. Generated; do not hand-edit |
 | `backend/tracedoctor_graph.py` | LangGraph sketch with stubbed nodes; the starting point for the real graph |
-| `backend/agent/` | The `agent` package: `graph.py` (placeholder graph), `state.py` (`TriageState`), `models.py` (`TraceSummary`, `SpanNode` contracts for the MCP tools), `fixtures/medas_traces.json` (synthetic traces) |
+| `backend/agent/` | The graph: `graph.py` (placeholder graph), `state.py` (`TriageState`). May import only `trace_store.models` from the server side |
+| `backend/trace_store/` | Server side of trace access: `models.py` (`TraceSummary`, `SpanNode`, `FailedTraceQuery` contracts), `const.py`, `reader.py` (`TraceReader` protocol, `FixtureTraceReader`), `mcp_server.py` (read-only FastMCP server; run with `uv run python -m trace_store.mcp_server`), `fixtures/medas_traces.json` (synthetic traces) |
 | `backend/main.py` | Minimal FastAPI app (`GET /health` only); the future home of the trace collector (`POST /v1/traces`) |
 | `backend/pyproject.toml`, `backend/uv.lock` | uv project (dependencies: `fastapi`, `uvicorn`); add packages with `uv add`, never `pip` |
 | `backend/.venv` | Virtualenv for the backend (gitignored) |
@@ -41,7 +42,7 @@ One LangGraph `StateGraph`:
 
 ## Safety invariants
 
-- Trace access is read-only: the MCP server (`search_failed_traces`, `get_trace_tree`, `get_span`) connects with a read-only Postgres role. The agent never touches the DB directly.
+- Trace access is read-only: the MCP server (`search_failed_traces`, `get_trace_tree`, `get_span`) connects with a read-only Postgres role. The agent never touches the DB directly: `agent/` imports only `trace_store.models` and no DB drivers, and `backend/tests/test_boundaries.py` enforces it.
 - All writes (GitHub, eval dataset, known-issues store) happen only in `apply_actions`, only for human-approved proposals.
 - `dry_run` defaults to `True`. Dry run writes `out/issues/<cluster>.md` and appends regression cases to a local JSONL file, and nothing else.
 - The known-issues store is written only after an approved action, so rejected proposals never become "known".
@@ -87,7 +88,7 @@ Planned, once the package exists: `pytest`, `ruff` (pre-commit), `langgraph dev`
 ## Conventions
 
 - Python, Pydantic models for all structured output and state. Store plain dicts in state, or register the models module with the checkpoint serializer, to avoid the LangGraph serialization warning.
-- Target layout: `backend/agent/` with `graph.py`, `state.py`, `models.py`, `fixtures/`, and later `nodes/`, `tools/`, `evals/` (run modules from `backend/`, e.g. `uv run python -m agent.graph`); Next.js UI in `frontend/` (PLAN.md still says `ui/`).
+- Target layout: `backend/agent/` (graph, later `nodes/`, the MCP client, `evals/`) and `backend/trace_store/` (contracts, reader, MCP server, later the Postgres reader); run modules from `backend/`, e.g. `uv run python -m agent.graph`. Do not name a package `mcp/`: it would shadow the official `mcp` package that FastMCP imports; Next.js UI in `frontend/` (PLAN.md still says `ui/`).
 - Failure categories: `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, plus MAST top-level `system_design`, `inter_agent_misalignment`, `task_verification`, and `unknown`.
 - Eval = fault injection in Medas (6 seeded faults, varied inputs, healthy controls). Grade on the injected cause, not just the visible symptom.
 - For parallel subagent work: contracts and fixtures first, one owner per path, stubs for neighbouring features. See `.claude/prds/tracescan.work-packages.md`.

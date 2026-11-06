@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, Field
 
-from agent.const import MAX_LIMIT
+from trace_store.const import MAX_LIMIT
 
 SpanStatus = Literal["unset", "ok", "error"]
 
@@ -31,7 +31,7 @@ class TraceSummary(BaseModel):
     failing_span_id: str | None = None
     failing_span_name: str | None = None
     min_score: float | None = None
-    # Short, truncated, redacted text used for embedding. Never raw clinical content.
+    # Short text used for embedding. The producer keeps clinical content out; the MCP server truncates it.
     signature: str
 
 

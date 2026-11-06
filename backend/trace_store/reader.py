@@ -10,7 +10,7 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from agent.models import FailedTraceQuery, SpanNode, TraceSummary
+from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
 DEFAULT_FIXTURE = Path(__file__).parent / "fixtures" / "medas_traces.json"
 
