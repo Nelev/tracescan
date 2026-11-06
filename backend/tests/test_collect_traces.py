@@ -7,30 +7,8 @@ import pytest
 from agent.context import TraceContext
 from agent.graph import build_graph, route_after_cluster, route_after_collect, route_after_review
 from agent.state import TriageState
-from trace_store.models import FailedTraceQuery, TraceSummary
-
-
-class FakeTraces:
-    def __init__(self, found: list[TraceSummary] | None = None) -> None:
-        self.found = found or []
-        self.queries: list[FailedTraceQuery] = []
-
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
-        self.queries.append(query)
-        return self.found
-
-
-def summary(trace_id: str) -> TraceSummary:
-    return TraceSummary.model_validate(
-        {
-            "trace_id": trace_id,
-            "app": "medas",
-            "start_time": "2026-11-05T10:00:00Z",
-            "duration_ms": 120.0,
-            "status": "error",
-            "signature": "retrieve: empty result",
-        }
-    )
+from tests.fakes import FakeTraces, summary
+from trace_store.models import TraceSummary
 
 
 async def run(fake: FakeTraces, state: TriageState) -> dict:
