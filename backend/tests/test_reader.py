@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from agent.models import FailedTraceQuery, SpanNode
-from agent.reader import FixtureTraceReader, build_tree
+from trace_store.models import FailedTraceQuery, SpanNode
+from trace_store.reader import FixtureTraceReader, build_tree
 
 T0 = datetime(2026, 11, 5, 9, tzinfo=timezone.utc)
 
