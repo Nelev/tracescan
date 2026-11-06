@@ -84,10 +84,12 @@ Key models, all Pydantic: `TraceSummary`, `Cluster`, `Diagnosis` (category, root
 
 | Kind | Component | Scope | Holds |
 | --- | --- | --- | --- |
-| Short-term | Checkpointer (`InMemorySaver`, later `PostgresSaver`) | One run, keyed by `thread_id` | Graph state at every step, so a run can pause at review and resume later |
+| Short-term | Checkpointer (`AsyncPostgresSaver`, opened in the API lifespan from `DATABASE_URL`) | One run, keyed by `thread_id` (a fresh id per run, returned as `run_id`) | Graph state at every step, so a run can pause at review and resume later |
 | Long-term | Store (`InMemoryStore`, later `PostgresStore`) | All runs, namespaced by target app | Known issues: cluster signature → issue id |
 
 The store is written only after an approved action, so rejected proposals never become "known".
+
+Checkpoints hold graph state in Postgres, so state stays at trace ids and signatures, never raw span attributes. Give `DATABASE_URL` a role that is separate from the read-only trace role.
 
 ### Safety invariants
 
@@ -124,8 +126,8 @@ Diagnoses are graded on the injected cause, not just the visible symptom. Metric
 | --- | --- |
 | `PLAN.md` | Scope, architecture, task order and "Done when" checks |
 | `.claude/prds/` | PRD and the generated work-packages brief |
-| `backend/` | Python (FastAPI + LangGraph); `main.py` is the future trace collector, `tracedoctor_graph.py` the graph sketch |
-| `frontend/` | Next.js 16 app: the future trace viewer and review UI |
+| `backend/` | Python (FastAPI + LangGraph); `main.py` opens the Postgres checkpointer and is the future trace collector, `api/runs.py` is `POST /v1/runs`, `tracedoctor_graph.py` the graph sketch |
+| `frontend/` | Next.js 16 app: a run console today, the trace viewer and review UI later |
 | `tools/board/`, `tracescan-board.html` | Kanban board generator and its output |
 | `CLAUDE.md` | Working rules and commands for Claude Code |
 
@@ -137,16 +139,30 @@ Python is managed with [uv](https://docs.astral.sh/uv/); do not use `pip`.
 cd backend && uv sync
 ```
 
-Run the API (docs at `/docs`):
+The API checkpoints each run into Postgres. Start one (this is a throwaway database; any Postgres works):
 
 ```bash
-cd backend && uv run uvicorn main:app --reload
+docker run -d --name tracescan-db -e POSTGRES_PASSWORD=tracescan -p 127.0.0.1:5433:5432 pgvector/pgvector:pg17
 ```
 
-Run the graph sketch. It needs LangGraph 1.x, which is not a dependency yet:
+Run the API (docs at `/docs`). It fails at startup without `DATABASE_URL` and creates the checkpoint tables on first start:
 
 ```bash
-cd backend && uv add langgraph && uv run python tracedoctor_graph.py
+cd backend && DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres uv run uvicorn main:app --reload
+```
+
+`POST /v1/runs` with `{"target_app": "medas"}` runs the graph once and returns counts, the actions log and a `run_id`, which is the run's `thread_id`.
+
+Run the backend tests. Set `TEST_DATABASE_URL` to a Postgres as well to run the persistence test (see the top of `backend/tests/test_persistence.py`):
+
+```bash
+cd backend && uv run pytest
+```
+
+Run the graph sketch:
+
+```bash
+cd backend && uv run python tracedoctor_graph.py
 ```
 
 It runs to the review pause, prints the proposals, then resumes with decisions on the same `thread_id`.
