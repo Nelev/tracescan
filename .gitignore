@@ -1,0 +1,11 @@
+node_modules/
+.next/
+next-env.d.ts
+__pycache__/
+.venv/
+.env*
+!.env.example
+*.tsbuildinfo
+
+# dry-run output of apply_actions (issues, regression cases)
+/out/
