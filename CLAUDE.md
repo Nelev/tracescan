@@ -4,7 +4,7 @@ Multi-agent LLM failure triage (AI Engineering capstone). It reads an LLM app's 
 
 ## Project state
 
-Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next.js, default starter page only), same layout as the `coa-agent` project. There is no `tracescan/` package, `pyproject.toml`, tests or git repo yet. What exists:
+Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next.js, default starter page only), same layout as the `coa-agent` project. The code package is `backend/agent/` (there is no `tracescan/` package). What exists:
 
 | Path | What it is |
 | --- | --- |
@@ -12,6 +12,7 @@ Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next
 | `.claude/prds/tracescan.prd.md` | PRD: problem, metrics, scope, open questions |
 | `.claude/prds/tracescan.work-packages.md` | Features and cards split for parallel subagents. Generated; do not hand-edit |
 | `backend/tracedoctor_graph.py` | LangGraph sketch with stubbed nodes; the starting point for the real graph |
+| `backend/agent/` | The `agent` package: `graph.py` (placeholder graph), `state.py` (`TriageState`), `models.py` (`TraceSummary`, `SpanNode` contracts for the MCP tools), `fixtures/medas_traces.json` (synthetic traces) |
 | `backend/main.py` | Minimal FastAPI app (`GET /health` only); the future home of the trace collector (`POST /v1/traces`) |
 | `backend/pyproject.toml`, `backend/uv.lock` | uv project (dependencies: `fastapi`, `uvicorn`); add packages with `uv add`, never `pip` |
 | `backend/.venv` | Virtualenv for the backend (gitignored) |
@@ -86,7 +87,7 @@ Planned, once the package exists: `pytest`, `ruff` (pre-commit), `langgraph dev`
 ## Conventions
 
 - Python, Pydantic models for all structured output and state. Store plain dicts in state, or register the models module with the checkpoint serializer, to avoid the LangGraph serialization warning.
-- Target layout: `backend/tracescan/` with `graph.py`, `nodes/`, `tools/`, `models.py`, `evals/`; Next.js UI in `frontend/` (PLAN.md still says `ui/`).
+- Target layout: `backend/agent/` with `graph.py`, `state.py`, `models.py`, `fixtures/`, and later `nodes/`, `tools/`, `evals/` (run modules from `backend/`, e.g. `uv run python -m agent.graph`); Next.js UI in `frontend/` (PLAN.md still says `ui/`).
 - Failure categories: `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, plus MAST top-level `system_design`, `inter_agent_misalignment`, `task_verification`, and `unknown`.
 - Eval = fault injection in Medas (6 seeded faults, varied inputs, healthy controls). Grade on the injected cause, not just the visible symptom.
 - For parallel subagent work: contracts and fixtures first, one owner per path, stubs for neighbouring features. See `.claude/prds/tracescan.work-packages.md`.
