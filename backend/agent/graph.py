@@ -8,12 +8,14 @@ Flow (linear):
 
 Conditional edges end the run early when no traces failed, when no clusters were
 found, or when no proposal was approved. collect_traces is real; the other nodes
-are placeholders. Fan-out (Send), interrupt() and a checkpointer come later.
+are placeholders. Fan-out (Send) and interrupt() come later.
 """
 
 import asyncio
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.store.base import BaseStore
 
 from agent.context import TraceContext
 from agent.mcp_client import TraceClient
@@ -76,8 +78,11 @@ def route_after_review(state: TriageState) -> str:
     return "apply_actions" if "approve" in state.get("decisions", {}).values() else END
 
 
-def build_graph():
-    """Compile the graph. Invoke it with ainvoke(..., context=TraceContext(traces))."""
+def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStore | None = None):
+    """Compile the graph. Invoke it with ainvoke(..., context=TraceContext(traces)).
+
+    With a checkpointer, every invoke needs a thread_id in its config.
+    """
     g = StateGraph(TriageState, context_schema=TraceContext)
 
     g.add_node("collect_traces", collect_traces)
@@ -101,7 +106,7 @@ def build_graph():
     g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)
 
-    return g.compile()
+    return g.compile(checkpointer=checkpointer, store=store)
 
 
 async def main() -> None:
