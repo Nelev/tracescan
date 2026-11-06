@@ -1,0 +1,12 @@
+[project]
+name = "tracescan"
+version = "0.1.0"
+description = "Multi-agent LLM failure triage"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[tool.uv]
+package = false

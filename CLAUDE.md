@@ -13,7 +13,7 @@ Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next
 | `.claude/prds/tracescan.work-packages.md` | Features and cards split for parallel subagents. Generated; do not hand-edit |
 | `backend/tracedoctor_graph.py` | LangGraph sketch with stubbed nodes; the starting point for the real graph |
 | `backend/main.py` | Minimal FastAPI app (`GET /health` only); the future home of the trace collector (`POST /v1/traces`) |
-| `backend/requirements.txt` | `fastapi` and `uvicorn`, unpinned; to be replaced by `pyproject.toml` |
+| `backend/pyproject.toml`, `backend/uv.lock` | uv project (dependencies: `fastapi`, `uvicorn`); add packages with `uv add`, never `pip` |
 | `backend/.venv` | Virtualenv for the backend (gitignored) |
 | `pyrightconfig.json` | Points Pylance/Pyright at `backend/.venv` so imports resolve when the editor opens the repo root |
 | `frontend/` | Next.js 16 (App Router, TypeScript, Tailwind 4, Biome, React Compiler, npm) scaffolded with the `create-next-app` starter page; the future trace viewer and review UI. Read `frontend/AGENTS.md` before frontend work: this Next.js version differs from older docs, and its guides live in `frontend/node_modules/next/dist/docs/` |
@@ -47,22 +47,22 @@ One LangGraph `StateGraph`:
 
 ## Commands
 
-Backend commands run from `backend/`. Set up the virtualenv (`python3 -m venv` fails on this machine because `ensurepip` is missing, so use `uv`):
+Backend commands run from `backend/`. This project uses `uv`, not `pip` (and `python3 -m venv` fails on this machine because `ensurepip` is missing). Create the virtualenv and install dependencies:
 
 ```bash
-cd backend && uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
+cd backend && uv sync
 ```
 
 Run the FastAPI app (docs at `/docs`):
 
 ```bash
-cd backend && .venv/bin/uvicorn main:app --reload
+cd backend && uv run uvicorn main:app --reload
 ```
 
-Run the graph sketch (needs `langgraph` 1.x, which `requirements.txt` does not install yet):
+Run the graph sketch (needs `langgraph` 1.x, which `pyproject.toml` does not list yet; add it with `uv add langgraph`):
 
 ```bash
-cd backend && .venv/bin/python tracedoctor_graph.py
+cd backend && uv run python tracedoctor_graph.py
 ```
 
 It runs to the review pause, prints proposals, then resumes with decisions on the same `thread_id`.
