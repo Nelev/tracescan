@@ -4,7 +4,7 @@ Multi-agent LLM failure triage (AI Engineering capstone). It reads an LLM app's 
 
 ## Project state
 
-Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next.js, default starter page only), same layout as the `coa-agent` project. The code lives in two backend packages: `backend/agent/` (the graph) and `backend/trace_store/` (trace contracts, reader and MCP server). There is no `tracescan/` package. What exists:
+Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next.js, a single run-console page), same layout as the `coa-agent` project. The code lives in two backend packages: `backend/agent/` (the graph) and `backend/trace_store/` (trace contracts, reader and MCP server). There is no `tracescan/` package. What exists:
 
 | Path | What it is |
 | --- | --- |
@@ -19,7 +19,7 @@ Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next
 | `backend/pyproject.toml`, `backend/uv.lock` | uv project (dependencies include `fastapi`, `langgraph`, `fastmcp`, `langchain-mcp-adapters`, `uvicorn`); add packages with `uv add`, never `pip`. `fastmcp` is pinned `<4` because `langchain-mcp-adapters` requires `mcp<2` and FastMCP 4 needs `mcp` 2 (the adapters fail to import against it); lift the pin once the adapters support `mcp` 2 |
 | `backend/.venv` | Virtualenv for the backend (gitignored) |
 | `pyrightconfig.json` | Points Pylance/Pyright at `backend/.venv` so imports resolve when the editor opens the repo root |
-| `frontend/` | Next.js 16 (App Router, TypeScript, Tailwind 4, Biome, React Compiler, npm) scaffolded with the `create-next-app` starter page; the future trace viewer and review UI. Read `frontend/AGENTS.md` before frontend work: this Next.js version differs from older docs, and its guides live in `frontend/node_modules/next/dist/docs/` |
+| `frontend/` | Next.js 16 (App Router, TypeScript, Tailwind 4, Biome, React Compiler, npm, shadcn/ui on Base UI): one page, `app/page.tsx` with the client component `app/_components/run-panel.tsx` (form, then idle/running/success/empty/error result states, Cancel via `AbortController`). `lib/api.ts` is the only code that knows the backend URL (`runTriage`, `checkHealth`, `RunError`); `lib/types.ts` mirrors `RunRequest`/`RunResponse` by hand. `next.config.ts` rewrites `/api/:path*` to `${BACKEND_URL:-http://localhost:8000}/v1/:path*` (and `/api/health` to `/health`) because the backend has no CORS. shadcn primitives are in `components/ui/` (add more with `npx shadcn@latest add <name>`); the future trace viewer and review UI go here too. Read `frontend/AGENTS.md` before frontend work: this Next.js version differs from older docs, and its guides live in `frontend/node_modules/next/dist/docs/` |
 | `tools/board/` | `build-board.js` and `card-details.js`: single source for the Kanban cards |
 | `tracescan-board.html` | Generated Kanban board |
 
@@ -76,7 +76,7 @@ Frontend commands run from `frontend/` (install with `npm install`):
 cd frontend && npm run dev
 ```
 
-`npm run build` builds, `npm run lint` runs Biome, and `npx tsc --noEmit` typechecks. There is no test runner yet.
+`npm run build` builds, `npm run lint` runs Biome, and `npx tsc --noEmit` typechecks. There is no test runner yet. The UI needs the backend running too; if ports 3000 or 8000 are taken, start the backend with `--port 8010` and the frontend with `BACKEND_URL=http://localhost:8010 npm run dev -- --port 3010`.
 
 Regenerate the board and work-packages brief after editing `tools/board/*.js` (from the repo root):
 
@@ -99,5 +99,6 @@ Planned: a ruff pre-commit hook, `langgraph dev` for Studio (compile without a l
 - Python, Pydantic models for all structured output and state. Store plain dicts in state, or register the models module with the checkpoint serializer, to avoid the LangGraph serialization warning.
 - Target layout: `backend/agent/` (graph, `mcp_client.py`, later `nodes/` and `evals/`) and `backend/trace_store/` (contracts, reader, MCP server, later the Postgres reader); run modules from `backend/`, e.g. `uv run python -m agent.graph`. Do not name a package `mcp/`: it would shadow the official `mcp` package that FastMCP imports; Next.js UI in `frontend/` (PLAN.md still says `ui/`).
 - Failure categories: `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, plus MAST top-level `system_design`, `inter_agent_misalignment`, `task_verification`, and `unknown`.
+- Frontend design system lives in `frontend/app/globals.css` (see the comment block there): dark navy surfaces with one electric blue accent (`primary`), `success`/`destructive` for status only. Four type sizes via `type-h1` (24), `type-h2` (16), `type-h3` (14), `type-h4` (12 mono overline) plus `type-body` (14), and two weights (400, 500); do not use `text-xs`/`text-lg`/`text-3xl` or `font-semibold`. Desktop layout is a 12-column grid with body content on 9 columns (3/4).
 - Eval = fault injection in Medas (6 seeded faults, varied inputs, healthy controls). Grade on the injected cause, not just the visible symptom.
 - For parallel subagent work: contracts and fixtures first, one owner per path, stubs for neighbouring features. See `.claude/prds/tracescan.work-packages.md`.

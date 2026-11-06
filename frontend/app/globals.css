@@ -1,26 +1,174 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/*
+ * Design system
+ *
+ * Type: four sizes and two weights (400 body, 500 emphasis). Use these, not text-xs/lg/3xl.
+ *   h1  24/32  500  page title and key metrics (mono)
+ *   h2  16/24  500  panel titles
+ *   h3  14/20  500  field labels, section headings
+ *   h4  12/16  400  mono uppercase overline, muted
+ *   body 14/22 400  paragraphs and log text
+ *
+ * Color roles, one job each:
+ *   foreground        primary text          muted-foreground  secondary text, overlines
+ *   background < card < muted   surfaces, page to inset
+ *   primary (electric blue)     the one accent: actions, focus, key metric
+ *   success / destructive       status only, never decoration
+ */
+@utility type-h1 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+@utility type-h2 {
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 500;
+}
+
+@utility type-h3 {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+}
+
+@utility type-h4 {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+@utility type-body {
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  font-weight: 400;
+}
+
+/* Dark only: layout.tsx sets the `dark` class on <html>. These light values are shadcn's
+   defaults, kept so its `dark:` variants keep working, and are never rendered. */
+:root {
+  --success: oklch(0.55 0.15 160);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.625rem;
+}
+
+.dark {
+  color-scheme: dark;
+  /* Surfaces step up from the page: background < card < muted. Hue 265 tints them navy. */
+  --background: oklch(0.13 0.025 265);
+  --foreground: oklch(0.97 0.01 265);
+  --card: oklch(0.18 0.03 265);
+  --card-foreground: oklch(0.97 0.01 265);
+  --popover: oklch(0.2 0.03 265);
+  --popover-foreground: oklch(0.97 0.01 265);
+  /* Electric blue accent. */
+  --primary: oklch(0.62 0.25 264);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.25 0.04 265);
+  --secondary-foreground: oklch(0.97 0.01 265);
+  --muted: oklch(0.145 0.025 265);
+  --muted-foreground: oklch(0.72 0.03 265);
+  --accent: oklch(0.28 0.08 264);
+  --accent-foreground: oklch(0.97 0.01 265);
+  --destructive: oklch(0.7 0.19 22);
+  --success: oklch(0.78 0.17 160);
+  --border: oklch(0.75 0.08 265 / 16%);
+  --input: oklch(0.75 0.08 265 / 20%);
+  --ring: oklch(0.72 0.2 262);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground;
+    /* Faint blue glow from the top edge plus a dot grid, fixed so cards scroll over it. */
+    background-image:
+      radial-gradient(
+        60rem 28rem at 50% -8rem,
+        oklch(0.62 0.25 264 / 0.2),
+        transparent 70%
+      ),
+      radial-gradient(oklch(0.8 0.08 265 / 0.1) 1px, transparent 1px);
+    background-size:
+      100% 100%,
+      22px 22px;
+    background-attachment: fixed;
+  }
+  html {
+    @apply font-sans type-body;
+  }
+  h1 {
+    @apply type-h1;
+  }
+  h2 {
+    @apply type-h2;
+  }
+  h3 {
+    @apply type-h3;
+  }
+  h4 {
+    @apply type-h4;
+  }
 }
