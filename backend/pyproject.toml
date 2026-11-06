@@ -5,6 +5,7 @@ description = "Multi-agent LLM failure triage"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi",
+    "langgraph>=1.2.20",
     "uvicorn[standard]",
 ]
 
