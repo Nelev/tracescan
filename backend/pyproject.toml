@@ -5,7 +5,8 @@ description = "Multi-agent LLM failure triage"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi",
-    "fastmcp>=4.1.6",
+    "fastmcp>=3.4,<4",
+    "langchain-mcp-adapters>=0.3.2",
     "langgraph>=1.2.20",
     "uvicorn[standard]",
 ]

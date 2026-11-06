@@ -12,10 +12,10 @@ Planning stage. Monorepo with `backend/` (Python, FastAPI) and `frontend/` (Next
 | `.claude/prds/tracescan.prd.md` | PRD: problem, metrics, scope, open questions |
 | `.claude/prds/tracescan.work-packages.md` | Features and cards split for parallel subagents. Generated; do not hand-edit |
 | `backend/tracedoctor_graph.py` | LangGraph sketch with stubbed nodes; the starting point for the real graph |
-| `backend/agent/` | The graph: `graph.py` (placeholder graph), `state.py` (`TriageState`). May import only `trace_store.models` from the server side |
+| `backend/agent/` | The graph: `graph.py` (placeholder graph), `state.py` (`TriageState`), `mcp_client.py` (`TraceClient`: async context manager holding one stdio session to the trace server for a graph run, typed `search_failed_traces`; LangChain `tools()` come with the diagnoser). May import only `trace_store.models` from the server side |
 | `backend/trace_store/` | Server side of trace access: `models.py` (`TraceSummary`, `SpanNode`, `FailedTraceQuery` contracts), `const.py`, `reader.py` (`TraceReader` protocol, `FixtureTraceReader`), `mcp_server.py` (read-only FastMCP server; run with `uv run python -m trace_store.mcp_server`), `fixtures/medas_traces.json` (synthetic traces) |
 | `backend/main.py` | Minimal FastAPI app (`GET /health` only); the future home of the trace collector (`POST /v1/traces`) |
-| `backend/pyproject.toml`, `backend/uv.lock` | uv project (dependencies: `fastapi`, `uvicorn`); add packages with `uv add`, never `pip` |
+| `backend/pyproject.toml`, `backend/uv.lock` | uv project (dependencies include `fastapi`, `langgraph`, `fastmcp`, `langchain-mcp-adapters`, `uvicorn`); add packages with `uv add`, never `pip`. `fastmcp` is pinned `<4` because `langchain-mcp-adapters` requires `mcp<2` and FastMCP 4 needs `mcp` 2 (the adapters fail to import against it); lift the pin once the adapters support `mcp` 2 |
 | `backend/.venv` | Virtualenv for the backend (gitignored) |
 | `pyrightconfig.json` | Points Pylance/Pyright at `backend/.venv` so imports resolve when the editor opens the repo root |
 | `frontend/` | Next.js 16 (App Router, TypeScript, Tailwind 4, Biome, React Compiler, npm) scaffolded with the `create-next-app` starter page; the future trace viewer and review UI. Read `frontend/AGENTS.md` before frontend work: this Next.js version differs from older docs, and its guides live in `frontend/node_modules/next/dist/docs/` |
@@ -88,7 +88,7 @@ Planned, once the package exists: `pytest`, `ruff` (pre-commit), `langgraph dev`
 ## Conventions
 
 - Python, Pydantic models for all structured output and state. Store plain dicts in state, or register the models module with the checkpoint serializer, to avoid the LangGraph serialization warning.
-- Target layout: `backend/agent/` (graph, later `nodes/`, the MCP client, `evals/`) and `backend/trace_store/` (contracts, reader, MCP server, later the Postgres reader); run modules from `backend/`, e.g. `uv run python -m agent.graph`. Do not name a package `mcp/`: it would shadow the official `mcp` package that FastMCP imports; Next.js UI in `frontend/` (PLAN.md still says `ui/`).
+- Target layout: `backend/agent/` (graph, `mcp_client.py`, later `nodes/` and `evals/`) and `backend/trace_store/` (contracts, reader, MCP server, later the Postgres reader); run modules from `backend/`, e.g. `uv run python -m agent.graph`. Do not name a package `mcp/`: it would shadow the official `mcp` package that FastMCP imports; Next.js UI in `frontend/` (PLAN.md still says `ui/`).
 - Failure categories: `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, plus MAST top-level `system_design`, `inter_agent_misalignment`, `task_verification`, and `unknown`.
 - Eval = fault injection in Medas (6 seeded faults, varied inputs, healthy controls). Grade on the injected cause, not just the visible symptom.
 - For parallel subagent work: contracts and fixtures first, one owner per path, stubs for neighbouring features. See `.claude/prds/tracescan.work-packages.md`.

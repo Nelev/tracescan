@@ -94,7 +94,7 @@ async def stub_client():
 async def test_exposes_exactly_the_three_read_only_tools(client):
     tools = await client.list_tools()
     assert {t.name for t in tools} == {"search_failed_traces", "get_trace_tree", "get_span"}
-    assert all(t.annotations.read_only_hint for t in tools)
+    assert all(t.annotations.readOnlyHint for t in tools)
 
 
 @pytest.mark.anyio
