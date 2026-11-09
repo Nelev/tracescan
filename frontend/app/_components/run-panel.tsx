@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SEGMENT_ITEM, SEGMENT_LIST } from "@/components/ui/tabs";
 import type { RunRequest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RunConsole } from "./run-console";
@@ -135,7 +136,7 @@ export function RunPanel() {
 
         <fieldset className="flex min-w-0 flex-col gap-2" disabled={running}>
           <legend className="type-h3 mb-2">Time window</legend>
-          <div className="flex gap-1 rounded-lg border bg-muted p-1">
+          <div className={SEGMENT_LIST}>
             {WINDOWS.map((w) => (
               <label
                 key={w.id}
@@ -144,7 +145,8 @@ export function RunPanel() {
                 }
                 onFocus={w.id === "custom" ? loadDateTimeField : undefined}
                 className={cn(
-                  "type-body cursor-pointer rounded-md px-3 py-1 text-center text-muted-foreground transition-colors select-none hover:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                  SEGMENT_ITEM,
+                  "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
                   win === w.id &&
                     "bg-primary text-primary-foreground hover:text-primary-foreground",
                 )}
@@ -221,6 +223,7 @@ export function RunPanel() {
 
       <RunConsole
         lines={run.lines}
+        view={run.view}
         phase={run.phase}
         events={run.events}
         startedAt={run.startedAt}

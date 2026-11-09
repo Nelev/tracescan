@@ -1,10 +1,13 @@
 "use client";
 
 import { Check, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { RunView } from "@/lib/run-view";
 import { RUN_EVENTS } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { RunProgress } from "./run-progress";
 import type { ConsoleLine, Phase, Tone } from "./use-run-stream";
 
 const TONE: Record<Tone, string> = {
@@ -122,7 +125,8 @@ function StatusChip({ phase }: { phase: Phase }) {
   );
 }
 
-function Line({ line }: { line: ConsoleLine }) {
+// A line never changes once printed, so a new batch re-renders only the lines it adds.
+const Line = memo(function Line({ line }: { line: ConsoleLine }) {
   const head = line.at !== undefined || line.label !== undefined;
   return (
     <li className="flex flex-col gap-0.5 sm:grid sm:grid-cols-[4rem_9rem_minmax(0,1fr)] sm:items-baseline sm:gap-x-4">
@@ -144,10 +148,13 @@ function Line({ line }: { line: ConsoleLine }) {
       </span>
     </li>
   );
-}
+});
+
+type Tab = "progress" | "raw";
 
 export function RunConsole({
   lines,
+  view,
   phase,
   events,
   startedAt,
@@ -155,6 +162,7 @@ export function RunConsole({
   onClear,
 }: {
   lines: ConsoleLine[];
+  view: RunView;
   phase: Phase;
   events: number;
   startedAt: number | null;
@@ -165,13 +173,15 @@ export function RunConsole({
   const scrollRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<Tab>("progress");
 
-  // Follow the newest line, unless the reader scrolled up to look at an earlier one.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: lines.length is the trigger
+  // Follow the newest line, unless the reader scrolled up to look at an earlier one. The raw log
+  // mounts only while its tab is open, so opening the tab scrolls it to the newest line too.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lines.length and tab are the triggers
   useEffect(() => {
     const el = scrollRef.current;
     if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [lines.length]);
+  }, [lines.length, tab]);
 
   function onScroll() {
     const el = scrollRef.current;
@@ -191,20 +201,26 @@ export function RunConsole({
   }
 
   return (
-    <div className="flex flex-col">
+    <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
-        <div className="flex items-center gap-3">
-          <h2>Console</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="sr-only">Run output</h2>
+          <TabsList aria-label="Run output">
+            <TabsTrigger value="progress">Progress</TabsTrigger>
+            <TabsTrigger value="raw">Raw events</TabsTrigger>
+          </TabsList>
           <StatusChip phase={phase} />
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={copy}
-            disabled={lines.length === 0}
-          >
-            {copied ? "Copied" : "Copy"}
-          </Button>
+          {tab === "raw" && (
+            <Button
+              variant="outline"
+              onClick={copy}
+              disabled={lines.length === 0}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() => {
@@ -218,37 +234,43 @@ export function RunConsole({
         </div>
       </div>
 
+      {/* Both panels have the same fixed height, so switching tabs does not move the page. */}
       <div className="mx-6 rounded-xl border bg-muted shadow-[inset_0_2px_8px_0_oklch(0.05_0.05_265/0.6)]">
-        <div
-          ref={scrollRef}
-          onScroll={onScroll}
-          className="h-[36rem] overflow-y-auto sm:h-[28.75rem]"
-        >
-          <ol
-            role="log"
-            aria-label="Events as they arrive"
-            className="type-body flex min-h-full flex-col justify-end gap-2 p-4 font-mono"
+        <TabsContent value="progress" className="h-[36rem] sm:h-[28.75rem]">
+          <RunProgress view={view} phase={phase} />
+        </TabsContent>
+        <TabsContent value="raw">
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="h-[36rem] overflow-y-auto sm:h-[28.75rem]"
           >
-            {lines.length === 0 ? (
-              <li className="text-muted-foreground">
-                Run a triage to see its events here.
-              </li>
-            ) : (
-              lines.map((line) => <Line key={line.id} line={line} />)
-            )}
-            {running && (
-              <li aria-hidden="true">
-                <span className="inline-block h-4 w-2 bg-primary align-[-3px] motion-safe:animate-pulse" />
-              </li>
-            )}
-          </ol>
-        </div>
+            <ol
+              role="log"
+              aria-label="Events as they arrive"
+              className="type-body flex min-h-full flex-col justify-end gap-2 p-4 font-mono"
+            >
+              {lines.length === 0 ? (
+                <li className="text-muted-foreground">
+                  Run a triage to see its events here.
+                </li>
+              ) : (
+                lines.map((line) => <Line key={line.id} line={line} />)
+              )}
+              {running && (
+                <li aria-hidden="true">
+                  <span className="inline-block h-4 w-2 bg-primary align-[-3px] motion-safe:animate-pulse" />
+                </li>
+              )}
+            </ol>
+          </div>
+        </TabsContent>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 pt-3 pb-6">
         <span className="type-h4">{PHASE[phase].footer(events)}</span>
         <Elapsed startedAt={startedAt} endedAt={endedAt} />
       </div>
-    </div>
+    </Tabs>
   );
 }
