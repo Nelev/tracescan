@@ -44,7 +44,11 @@ async def _diagnose(cluster: Cluster, context: TraceContext) -> dict:
     )
     # json_schema, not the default function_calling: that forces a tool_choice, which some models
     # (Claude through OpenRouter) reject with a 400.
-    structured = context.model.with_structured_output(Diagnosis, method="json_schema")
+    # One structured answer per call, so nobody reads tokens. Without this, a v3 event stream
+    # routes the call through LangChain's token-streaming path; this keeps any injected model on
+    # the same path as ainvoke.
+    model = context.model.model_copy(update={"disable_streaming": True})
+    structured = model.with_structured_output(Diagnosis, method="json_schema")
     answer = await structured.ainvoke([SystemMessage(TAXONOMY), HumanMessage(prompt)])
     diagnosis = Diagnosis.model_validate(answer).model_dump(mode="json")
     # The cluster id is known, so the model does not get to name it.

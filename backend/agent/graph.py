@@ -26,6 +26,7 @@ from agent.model import build_diagnoser_model
 from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
 from agent.nodes.diagnose_cluster import diagnose_cluster
+from agent.progress import ProgressTransformer
 from agent.schemas import ClusterTask
 from agent.state import TriageState
 
@@ -106,10 +107,11 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)
 
-    # The cap lives on the graph, so every caller (API, demo, Studio, resume) gets it.
-    return g.compile(checkpointer=checkpointer, store=store).with_config(
-        {"max_concurrency": MAX_PARALLEL_BRANCHES}
-    )
+    # The cap and the progress transformer live on the graph, so every caller (API, demo, Studio,
+    # resume) gets them. The transformer only matters to astream_events(version="v3") callers.
+    return g.compile(
+        checkpointer=checkpointer, store=store, transformers=[ProgressTransformer]
+    ).with_config({"max_concurrency": MAX_PARALLEL_BRANCHES})
 
 
 async def main() -> None:
