@@ -52,6 +52,10 @@ class FakeDiagnoserModel(GenericFakeChatModel):
 
     seen: list[list[BaseMessage]] = Field(default_factory=list)
 
+    def with_structured_output(self, schema, *, method=None, **kwargs):
+        # Accepts `method` like ChatOpenRouter does, but the fake only ever answers with a tool call.
+        return super().with_structured_output(schema, **kwargs)
+
     def bind_tools(self, tools, **kwargs):
         return self  # the reply below already is the tool call that structured output parses
 

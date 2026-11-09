@@ -42,9 +42,10 @@ async def _diagnose(cluster: Cluster, context: TraceContext) -> dict:
         "Cite only trace ids and span ids that appear in the exemplar traces below.\n"
         + "\n".join(tree.model_dump_json(exclude_defaults=True) for tree in trees)
     )
-    answer = await context.model.with_structured_output(Diagnosis).ainvoke(
-        [SystemMessage(TAXONOMY), HumanMessage(prompt)]
-    )
+    # json_schema, not the default function_calling: that forces a tool_choice, which some models
+    # (Claude through OpenRouter) reject with a 400.
+    structured = context.model.with_structured_output(Diagnosis, method="json_schema")
+    answer = await structured.ainvoke([SystemMessage(TAXONOMY), HumanMessage(prompt)])
     diagnosis = Diagnosis.model_validate(answer).model_dump(mode="json")
     # The cluster id is known, so the model does not get to name it.
     return {**diagnosis, "cluster_id": cluster["cluster_id"]}
