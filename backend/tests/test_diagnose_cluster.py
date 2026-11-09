@@ -1,5 +1,6 @@
 """diagnose_cluster against fake traces and a fake chat model, so no model is ever called."""
 
+import asyncio
 import json
 import os
 
@@ -7,6 +8,7 @@ import pytest
 from langgraph.runtime import Runtime
 
 from agent.clustering import cluster_summaries
+from agent.const import MAX_PARALLEL_BRANCHES
 from agent.context import TraceContext
 from agent.graph import build_graph
 from agent.mcp_client import TraceClient
@@ -70,14 +72,6 @@ async def test_the_prompt_carries_the_taxonomy_and_only_the_exemplar_trees():
 
 
 @pytest.mark.anyio
-async def test_a_failing_cluster_is_recorded_not_raised():
-    # No tree for t1 and a model that is never called: the node must not raise.
-    node_context = fake_context(FakeTraces())
-    result = await diagnose_cluster(ClusterTask(cluster=CLUSTER), Runtime(context=node_context))
-    assert result == {"diagnosis_failures": ["c0"]}
-
-
-@pytest.mark.anyio
 async def test_the_graph_diagnoses_every_cluster():
     result = await run_graph({t: span_tree(t) for t in ("t1", "t2")}, fake_diagnoser(DIAGNOSIS))
     assert sorted(d["cluster_id"] for d in result["diagnoses"]) == ["c0", "c1"]
@@ -87,9 +81,33 @@ async def test_the_graph_diagnoses_every_cluster():
 @pytest.mark.anyio
 async def test_a_failed_cluster_does_not_cost_the_others_their_diagnosis():
     result = await run_graph({"t1": span_tree("t1")}, fake_diagnoser(DIAGNOSIS))  # no tree for t2
-    assert len(result["diagnoses"]) == 1
-    assert len(result["diagnosis_failures"]) == 1
-    assert {result["diagnoses"][0]["cluster_id"], *result["diagnosis_failures"]} == {"c0", "c1"}
+    diagnosed = [d["cluster_id"] for d in result["diagnoses"]]
+    assert len(diagnosed) == 1  # one cluster diagnosed, the other recorded as failed
+    assert sorted(diagnosed + result["diagnosis_failures"]) == ["c0", "c1"]
+
+
+class SlowTraces(FakeTraces):
+    """Counts how many span-tree fetches are in flight at once."""
+
+    active = peak = 0
+
+    async def get_trace_tree(self, trace_id: str):
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        await asyncio.sleep(0.01)
+        self.active -= 1
+        return await super().get_trace_tree(trace_id)
+
+
+@pytest.mark.anyio
+async def test_the_graph_diagnoses_at_most_the_capped_number_of_clusters_at_once():
+    # Five failures stay below the HDBSCAN threshold, so each failing step is its own cluster.
+    ids = [f"t{i}" for i in range(MAX_PARALLEL_BRANCHES + 1)]
+    failures = [summary(i, failing_span_name=f"step_{i}") for i in ids]
+    traces = SlowTraces(failures, {i: span_tree(i) for i in ids})
+    context = fake_context(traces, fake_diagnoser(DIAGNOSIS))  # one exemplar per cluster
+    await build_graph().ainvoke({"target_app": "medas"}, context=context)
+    assert traces.peak == MAX_PARALLEL_BRANCHES
 
 
 @pytest.mark.skipif(not os.environ.get("RUN_LLM"), reason="set RUN_LLM=1 (and OPENROUTER_API_KEY)")

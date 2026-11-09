@@ -35,7 +35,7 @@ async def client():
     # ASGITransport does not run the lifespan, so attach an in-memory graph to the app here.
     app.state.graph = build_graph(InMemorySaver(), InMemoryStore())
     app.state.embedder = HashingEmbedder()  # offline: the real model is never downloaded in tests
-    app.state.model = fake_model()  # and no chat model is ever called
+    app.state.model = fake_model()  # never called; tests that diagnose set their own
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as c:

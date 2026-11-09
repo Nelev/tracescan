@@ -396,8 +396,9 @@ function Result({ result }: { result: RunResponse }) {
         </p>
       )}
       {result.diagnosis_failures > 0 && (
-        <p className="type-body text-muted-foreground">
-          {result.diagnosis_failures} cluster(s) could not be diagnosed.
+        <p className="type-body text-destructive">
+          {result.diagnosis_failures} cluster(s) failed diagnosis. Check the
+          server log for the error type.
         </p>
       )}
       {empty && (

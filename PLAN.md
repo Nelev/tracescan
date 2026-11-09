@@ -68,6 +68,7 @@ One shared state object flows through the graph; the two fields filled by parall
 | `clusters` | list\[Cluster\] | cluster\_failures | Groups with a signature and a few exemplar traces |
 | `unclustered` | list\[str\] | cluster\_failures | Ids of isolated failures; each is diagnosed on its own as a one-trace cluster, up to a cap |
 | `diagnoses` | list\[Diagnosis\], append reducer | diagnose\_cluster (parallel) | Category, root cause, fix, confidence, evidence spans |
+| `diagnosis_failures` | list\[str\], append reducer | diagnose\_cluster (parallel) | Ids of clusters whose diagnosis failed; reported, not dropped |
 | `reproductions` | list\[Reproduction\], append reducer | reproduce\_failure (parallel) | Unverified in the MVP; with replay, confirmed, flaky or unconfirmed |
 | `known_matches` | dict cluster → issue id | match\_known\_issues | Links to issues from earlier runs |
 | `proposals` | list\[IssueProposal\] | draft\_proposals | Create or update issue, body, regression case |

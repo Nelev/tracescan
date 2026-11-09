@@ -1,14 +1,14 @@
 """
-TraceScan: simplest LangGraph structure, every node a placeholder.
+TraceScan graph. collect_traces, cluster_failures and diagnose_cluster are real; the other
+nodes are placeholders.
 
-Flow (linear):
-  collect_traces -> cluster_failures -> diagnose_cluster -> join_diagnoses
+Flow (diagnose_cluster runs once per cluster, in parallel, through Send):
+  collect_traces -> cluster_failures -> diagnose_cluster x N -> join_diagnoses
     -> reproduce_failure -> match_known_issues -> draft_proposals
     -> human_review -> apply_actions -> END
 
 Conditional edges end the run early when no traces failed, when no clusters were
-found, or when no proposal was approved. collect_traces and cluster_failures are real; the
-other nodes are placeholders. Fan-out (Send) and interrupt() come later.
+found, or when no proposal was approved. interrupt() comes later.
 """
 
 import asyncio
@@ -18,6 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.store.base import BaseStore
 from langgraph.types import Send
 
+from agent.const import MAX_PARALLEL_BRANCHES
 from agent.context import TraceContext
 from agent.embeddings import FastEmbedEmbedder
 from agent.mcp_client import TraceClient
@@ -105,7 +106,10 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)
 
-    return g.compile(checkpointer=checkpointer, store=store)
+    # The cap lives on the graph, so every caller (API, demo, Studio, resume) gets it.
+    return g.compile(checkpointer=checkpointer, store=store).with_config(
+        {"max_concurrency": MAX_PARALLEL_BRANCHES}
+    )
 
 
 async def main() -> None:

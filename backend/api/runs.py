@@ -11,7 +11,6 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request
 from langchain_core.runnables import RunnableConfig
 
-from agent.const import MAX_PARALLEL_BRANCHES
 from agent.context import TraceContext
 from agent.mcp_client import TraceClient
 from agent.state import TriageState
@@ -32,10 +31,7 @@ async def create_run(body: RunRequest, request: Request) -> RunResponse:
 
     # A fresh thread per run: reusing a thread id would continue the earlier run's state.
     run_id = str(uuid4())
-    config: RunnableConfig = {
-        "configurable": {"thread_id": run_id},
-        "max_concurrency": MAX_PARALLEL_BRANCHES,
-    }
+    config: RunnableConfig = {"configurable": {"thread_id": run_id}}
 
     try:
         async with TraceClient() as traces:
