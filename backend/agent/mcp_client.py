@@ -8,7 +8,8 @@ the session open, so many calls cost one server start:
         failed = await traces.search_failed_traces(FailedTraceQuery(app="medas"))
 
 Open and close it in the same async task. It cannot span the human-review pause
-(that ends the graph invocation), so it lives for one graph invocation.
+(that ends the graph invocation), so it lives for one graph invocation. The server's
+per-process call budget (trace_store/guard.py) relies on this: one session, one run.
 
 The server command is a string on purpose: the agent package must not import
 the server, the reader or any DB driver (see tests/test_boundaries.py).

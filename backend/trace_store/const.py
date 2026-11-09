@@ -2,6 +2,11 @@
 
 MAX_LIMIT = 200  # hard cap on rows returned by search_failed_traces
 
+# Per-call limits in the MCP server.
+ALLOWED_APPS = frozenset({"medas"})  # apps search_failed_traces serves
+ID_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"  # trace and span ids (models.TraceId): fixture ids, 32/16-hex OTel ids
+MAX_TOOL_CALLS = 300  # per server process, which is one graph run (trace_store/guard.py)
+
 # Sanitizing in the MCP server (clinical text must not leave in bulk).
 MAX_ATTR_CHARS_TREE = 200  # per string attribute in get_trace_tree
 MAX_ATTR_CHARS_SPAN = 2000  # per string attribute in get_span

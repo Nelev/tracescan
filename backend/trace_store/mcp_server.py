@@ -8,21 +8,26 @@ span and event attributes outside an allowlist are redacted, and free text is tr
 Run over stdio with: uv run python -m trace_store.mcp_server
 """
 
+import logging
+from collections.abc import Iterable
 from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from trace_store.const import (
+    ALLOWED_APPS,
     MAX_ATTR_CHARS_SPAN,
     MAX_ATTR_CHARS_TREE,
     MAX_SUMMARY_CHARS,
+    MAX_TOOL_CALLS,
     REDACTED,
     SAFE_ATTRIBUTE_KEYS,
     SAFE_ATTRIBUTE_PREFIXES,
     TRUNCATION_SUFFIX,
 )
-from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
+from trace_store.guard import TraceGuard
+from trace_store.models import FailedTraceQuery, SpanNode, TraceId, TraceSummary
 from trace_store.reader import FixtureTraceReader, TraceReader
 
 
@@ -89,15 +94,25 @@ def sanitize_summary(summary: TraceSummary) -> TraceSummary:
     )
 
 
-def build_server(reader: TraceReader) -> FastMCP:
+def build_server(
+    reader: TraceReader,
+    *,
+    allowed_apps: Iterable[str] = ALLOWED_APPS,
+    max_calls: int = MAX_TOOL_CALLS,
+) -> FastMCP:
     """Build the MCP server with its three read-only tools, all reading through `reader`.
 
     Any TraceReader works (fixture now, Postgres later); the server never touches the data store itself.
+    Every tool call passes through TraceGuard (a budget of `max_calls` per server process, so per
+    graph run, plus an audit log). search_failed_traces serves only `allowed_apps`, and trace and
+    span ids must match TraceId.
     """
     mcp = FastMCP(
         "tracescan-traces",
         instructions="Read-only access to an LLM app's traces. Nothing here can modify data.",
     )
+    mcp.add_middleware(TraceGuard(max_calls))
+    allowed = frozenset(allowed_apps)
     read_only = {"readOnlyHint": True}
 
     # The docstrings below are sent to the agent as the tool descriptions, so they
@@ -106,11 +121,13 @@ def build_server(reader: TraceReader) -> FastMCP:
     @mcp.tool(annotations=read_only)
     async def search_failed_traces(query: FailedTraceQuery) -> list[TraceSummary]:
         """Find failed traces of an app, newest first, as short summaries."""
+        if query.app not in allowed:
+            raise ToolError("app not allowed")
         # Filtering, ordering and the row cap all live in the reader and in FailedTraceQuery.
         return [sanitize_summary(s) for s in await reader.search_failed_traces(query)]
 
     @mcp.tool(annotations=read_only)
-    async def get_trace_tree(trace_id: str) -> SpanNode:
+    async def get_trace_tree(trace_id: TraceId) -> SpanNode:
         """Get a trace's full span tree. Long attribute values are truncated; use get_span for more."""
         # Whole tree in one call, so the tight truncation limit.
         root = await reader.get_trace_tree(trace_id)
@@ -119,7 +136,7 @@ def build_server(reader: TraceReader) -> FastMCP:
         return sanitize_span(root, MAX_ATTR_CHARS_TREE)
 
     @mcp.tool(annotations=read_only)
-    async def get_span(trace_id: str, span_id: str) -> SpanNode:
+    async def get_span(trace_id: TraceId, span_id: TraceId) -> SpanNode:
         """Get one span with its attributes and events (no children)."""
         # One span, so a looser truncation limit; non-allowlisted attributes are still redacted.
         span = await reader.get_span(trace_id, span_id)
@@ -132,6 +149,9 @@ def build_server(reader: TraceReader) -> FastMCP:
 
 def main() -> None:
     """Serve the fixture reader over stdio. The Postgres reader replaces it once the trace store exists."""
+    # The guard's audit log goes to stderr; stdout belongs to the protocol.
+    logging.basicConfig(level=logging.WARNING)
+    logging.getLogger("trace_store.guard").setLevel(logging.INFO)
     build_server(FixtureTraceReader()).run()
 
 
