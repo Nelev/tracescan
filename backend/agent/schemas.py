@@ -54,6 +54,13 @@ class Evidence(BaseModel):
     note: str = Field(min_length=1, description="What this span shows that supports the cause.")
 
 
+# How a diagnosis's evidence fared against the traces the diagnoser was shown: valid at the first
+# answer, corrected by one retry, or unsupported (it still cited spans it was not shown, so those
+# were dropped and the confidence capped). diagnose_cluster adds it to the stored dict; the model
+# never fills it, which is why it is not a field of Diagnosis.
+EvidenceCheck = Literal["valid", "corrected", "unsupported"]
+
+
 class Diagnosis(BaseModel):
     """The diagnoser's answer for one cluster. Nodes keep it in state as a plain dict."""
 

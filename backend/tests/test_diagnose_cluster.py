@@ -8,19 +8,22 @@ import pytest
 from langgraph.runtime import Runtime
 
 from agent.clustering import cluster_summaries
-from agent.const import MAX_PARALLEL_BRANCHES
+from agent.const import MAX_PARALLEL_BRANCHES, UNSUPPORTED_CONFIDENCE_CAP
 from agent.context import TraceContext
+from agent.evidence import FALLBACK_NOTE
 from agent.graph import build_graph
 from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model
 from agent.nodes.diagnose_cluster import TAXONOMY, diagnose_cluster
-from agent.schemas import Cluster, ClusterTask, Diagnosis
+from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence
 from tests.fakes import (
     DIAGNOSIS,
+    FakeDiagnoserModel,
     FakeTraces,
     HashingEmbedder,
     fake_context,
     fake_diagnoser,
+    scripted_diagnoser,
     span_tree,
     summary,
 )
@@ -59,6 +62,7 @@ async def test_returns_the_diagnosis_as_a_plain_dict_with_the_clusters_own_id():
     assert diagnosis["cluster_id"] == "c0"
     assert diagnosis["category"] == "retrieval_miss"
     assert Diagnosis.model_validate(diagnosis).evidence[0].span_id == "s1"
+    assert diagnosis["evidence_check"] == "valid"
 
 
 @pytest.mark.anyio
@@ -75,6 +79,7 @@ async def test_the_prompt_carries_the_taxonomy_and_only_the_exemplar_trees():
 async def test_the_graph_diagnoses_every_cluster():
     result = await run_graph({t: span_tree(t) for t in ("t1", "t2")}, fake_diagnoser(DIAGNOSIS))
     assert sorted(d["cluster_id"] for d in result["diagnoses"]) == ["c0", "c1"]
+    assert {d["evidence_check"] for d in result["diagnoses"]} == {"valid"}
     assert result.get("diagnosis_failures", []) == []
 
 
@@ -110,6 +115,80 @@ async def test_the_graph_diagnoses_at_most_the_capped_number_of_clusters_at_once
     assert traces.peak == MAX_PARALLEL_BRANCHES
 
 
+def citing(*pairs: tuple[str, str]) -> Diagnosis:
+    evidence = [Evidence(trace_id=t, span_id=s, note="x") for t, s in pairs]
+    return DIAGNOSIS.model_copy(update={"evidence": evidence})
+
+
+GOOD = citing(("t1", "s1"))  # TREE is trace t1 with the failing span s1
+
+
+@pytest.mark.anyio
+async def test_a_valid_citation_costs_one_model_call():
+    model = scripted_diagnoser(GOOD)
+    (diagnosis,) = (await diagnose(model))["diagnoses"]
+    assert len(model.seen) == 1
+    assert diagnosis["evidence_check"] == "valid"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "fake",
+    [("t9", "s9"), ("t1", "nope"), ("t2", "t2_root")],
+    ids=["unknown trace", "unknown span", "a trace of the cluster that was not shown"],
+)
+async def test_a_fake_citation_is_retried_once_with_the_valid_spans_listed(fake):
+    model = scripted_diagnoser(citing(fake), GOOD)
+    (diagnosis,) = (await diagnose(model))["diagnoses"]
+
+    assert len(model.seen) == 2
+    retry = model.seen[1]
+    assert len(retry) == 4  # system, prompt, its own answer, the correction
+    assert f"{fake[0]}/{fake[1]}" in retry[3].content
+    assert "t1: s1" in retry[3].content
+    assert diagnosis["evidence_check"] == "corrected"
+    assert [(e["trace_id"], e["span_id"]) for e in diagnosis["evidence"]] == [("t1", "s1")]
+    assert diagnosis["confidence"] == DIAGNOSIS.confidence  # a corrected answer keeps it
+
+
+@pytest.mark.anyio
+async def test_a_citation_that_stays_fake_is_dropped_and_the_confidence_capped():
+    mixed = citing(("t1", "s1"), ("t9", "s9"))
+    model = scripted_diagnoser(mixed)  # answers the same after the correction
+    result = await diagnose(model)
+
+    (diagnosis,) = result["diagnoses"]  # not a failed cluster
+    assert "diagnosis_failures" not in result
+    assert len(model.seen) == 2  # retried once, not more
+    assert diagnosis["evidence_check"] == "unsupported"
+    assert [(e["trace_id"], e["span_id"]) for e in diagnosis["evidence"]] == [("t1", "s1")]
+    assert diagnosis["confidence"] == UNSUPPORTED_CONFIDENCE_CAP
+
+
+@pytest.mark.anyio
+async def test_with_no_valid_citation_left_the_clusters_own_failing_span_is_cited():
+    (diagnosis,) = (await diagnose(scripted_diagnoser(citing(("t9", "s9")))))["diagnoses"]
+    assert diagnosis["evidence_check"] == "unsupported"
+    (evidence,) = diagnosis["evidence"]
+    assert (evidence["trace_id"], evidence["span_id"]) == ("t1", "s1")
+    assert evidence["note"] == FALLBACK_NOTE
+    assert diagnosis["confidence"] == UNSUPPORTED_CONFIDENCE_CAP
+
+
+@pytest.mark.anyio
+async def test_a_failing_retry_is_a_failed_cluster_not_a_dropped_one():
+    calls = []
+
+    def answer(_):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("model down")
+        return citing(("t9", "s9"))
+
+    result = await diagnose(FakeDiagnoserModel(messages=iter(()), answer=answer))
+    assert result == {"diagnosis_failures": ["c0"]}
+
+
 @pytest.mark.skipif(not os.environ.get("RUN_LLM"), reason="set RUN_LLM=1 (and OPENROUTER_API_KEY)")
 @pytest.mark.anyio
 async def test_the_real_model_diagnoses_every_fixture_cluster():
@@ -120,4 +199,8 @@ async def test_the_real_model_diagnoses_every_fixture_cluster():
         for cluster in clusters:
             result = await diagnose_cluster(ClusterTask(cluster=cluster), Runtime(context=context))
             assert "diagnoses" in result, f"diagnosis failed, see the log: {result}"
-            Diagnosis.model_validate(result["diagnoses"][0])
+            diagnosis = result["diagnoses"][0]
+            Diagnosis.model_validate(diagnosis)
+            # How well the real model follows "cite only what is shown": unsupported means it did
+            # not, even after one retry.
+            assert diagnosis["evidence_check"] != "unsupported", diagnosis["cluster_id"]

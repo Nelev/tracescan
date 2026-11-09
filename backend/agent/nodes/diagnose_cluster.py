@@ -1,18 +1,28 @@
-"""diagnose_cluster: one structured-output call per cluster.
+"""diagnose_cluster: one structured-output call per cluster, and a check of what it cites.
 
 The cluster's exemplar span trees go into the prompt next to the taxonomy, so the model needs no
-tools of its own: the node fetches the trees, the model answers with a Diagnosis.
+tools of its own: the node fetches the trees, the model answers with a Diagnosis. Every citation
+must be a span of those trees. If one is not, the model is asked once more; if it still cites
+spans it was not shown, those are dropped and the confidence is capped (see agent.evidence).
 """
 
 import asyncio
 import logging
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
+from agent.const import UNSUPPORTED_CONFIDENCE_CAP
 from agent.context import TraceContext
-from agent.schemas import Cluster, ClusterTask, Diagnosis
+from agent.evidence import (
+    fallback_evidence,
+    invalid_citations,
+    keep_valid,
+    retry_message,
+    span_index,
+)
+from agent.schemas import Cluster, ClusterTask, Diagnosis, EvidenceCheck
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +59,39 @@ async def _diagnose(cluster: Cluster, context: TraceContext) -> dict:
     # the same path as ainvoke.
     model = context.model.model_copy(update={"disable_streaming": True})
     structured = model.with_structured_output(Diagnosis, method="json_schema")
-    answer = await structured.ainvoke([SystemMessage(TAXONOMY), HumanMessage(prompt)])
-    diagnosis = Diagnosis.model_validate(answer).model_dump(mode="json")
+
+    async def ask(messages: list[BaseMessage]) -> Diagnosis:
+        return Diagnosis.model_validate(await structured.ainvoke(messages))
+
+    messages: list[BaseMessage] = [SystemMessage(TAXONOMY), HumanMessage(prompt)]
+    diagnosis = await ask(messages)
+    index = span_index(trees)
+    bad = invalid_citations(diagnosis, index)
+    check: EvidenceCheck = "valid"
+    if bad:
+        logger.warning(
+            "diagnosis of %s cites %d span(s) it was not shown, asking again",
+            cluster["cluster_id"],
+            len(bad),
+        )
+        messages = [
+            *messages,
+            AIMessage(diagnosis.model_dump_json()),
+            HumanMessage(retry_message(bad, index)),
+        ]
+        diagnosis = await ask(messages)
+        bad = invalid_citations(diagnosis, index)
+        check = "unsupported" if bad else "corrected"
+
     # The cluster id is known, so the model does not get to name it.
-    return {**diagnosis, "cluster_id": cluster["cluster_id"]}
+    result = {
+        **diagnosis.model_dump(mode="json"),
+        "cluster_id": cluster["cluster_id"],
+        "evidence_check": check,
+    }
+    if check == "unsupported":
+        # Keep the real citations; with none left, cite the cluster's own failing spans instead.
+        kept = keep_valid(diagnosis, index) or fallback_evidence(trees)
+        result["evidence"] = [e.model_dump(mode="json") for e in kept]
+        result["confidence"] = min(diagnosis.confidence, UNSUPPORTED_CONFIDENCE_CAP)
+    return result
