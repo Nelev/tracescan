@@ -1,8 +1,8 @@
 """POST /v1/runs: trigger one triage run and return a summary; POST /v1/runs/stream: the same run
 as a server-sent event stream.
 
-The response carries counts and the actions log only, never the raw state: failed traces can hold
-clinical span data. A run opens its own TraceClient because the trace session lives for exactly
+The sync response carries counts and the actions log only, never the raw state: failed traces can
+hold clinical span data. Only the stream also sends the drafted proposals, as `proposal` events. A run opens its own TraceClient because the trace session lives for exactly
 one graph invocation (see agent.mcp_client).
 """
 
@@ -20,6 +20,7 @@ from langgraph.stream import AsyncGraphRunStream
 from agent.context import TraceContext
 from agent.mcp_client import TraceClient
 from agent.progress import progress_events
+from agent.schemas import Proposal
 from agent.state import TriageState
 from api.schemas import RunRequest, RunResponse
 
@@ -65,6 +66,16 @@ def _summary(run_id: str, result: dict) -> RunResponse:
     )
 
 
+def _proposals(result: dict) -> list[dict]:
+    """The drafted proposals, cut to the `Proposal` schema's fields.
+
+    The one part of state besides counts that leaves the server, and only on the stream. The issue
+    text is the diagnoser's own prose, so it can hold clinical content: it goes to whoever runs the
+    triage, to review it, and is never logged.
+    """
+    return [Proposal.model_validate(p).model_dump(mode="json") for p in result.get("proposals", [])]
+
+
 @router.post("/runs")
 async def create_run(body: RunRequest, request: Request) -> RunResponse:
     run_id, config = _new_run()
@@ -107,16 +118,26 @@ async def _open_run(
 async def stream_run(
     opened: Annotated[tuple[str, AsyncGraphRunStream], Depends(_open_run)],
 ) -> AsyncIterator[ServerSentEvent]:
-    """Stream a run: `run_started`, `progress`*, then `run_completed` or `run_failed`."""
+    """Stream a run: `run_started`, `progress`*, `proposal`*, then `run_completed` or `run_failed`.
+
+    A failed run sends no proposals.
+    """
     run_id, stream = opened
     yield ServerSentEvent(event="run_started", data={"run_id": run_id})
     try:
         async for progress in progress_events(stream):
             yield ServerSentEvent(event="progress", data=progress)
-        summary = _summary(run_id, await stream.output())
+        result = await stream.output()
+        if result is None:  # no final state: report the failure, not an empty run
+            raise RuntimeError("run produced no output")
+        summary = _summary(run_id, result)
+        # Built before the first yield: a bad entry fails the run, not half the stream.
+        proposals = _proposals(result)
     except Exception as exc:
         _log_failure(exc)
         # The status is already 200 once the stream opens, so the failure travels as an event.
         yield ServerSentEvent(event="run_failed", data={})
         return
+    for proposal in proposals:
+        yield ServerSentEvent(event="proposal", data=proposal)
     yield ServerSentEvent(event="run_completed", data=summary)
