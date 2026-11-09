@@ -19,9 +19,8 @@ export default function Home() {
           <div className="flex flex-col gap-1 lg:col-span-9">
             <h1>Triage console</h1>
             <p className="type-body text-muted-foreground">
-              Run the triage graph over a target app's failed traces. Failures
-              are clustered, diagnosed, and turned into proposals for you to
-              review.
+              Starts a triage run and prints each event as the server streams
+              it.
             </p>
           </div>
         </div>

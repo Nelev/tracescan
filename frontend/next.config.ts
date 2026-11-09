@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   reactCompiler: true,
+  // Next's gzip buffers a text/event-stream until the run ends, so off: progress events must pass
+  // through the /api rewrite below as they happen (see CLAUDE.md).
+  compress: false,
   turbopack: {
     rules: {
       "*.css": {
