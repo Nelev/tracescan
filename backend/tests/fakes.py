@@ -1,8 +1,11 @@
 """Test doubles shared by the graph and API tests."""
 
 import numpy as np
+from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from sklearn.feature_extraction.text import HashingVectorizer
 
+from agent.context import TraceContext, TraceSearch
 from trace_store.models import FailedTraceQuery, TraceSummary
 
 
@@ -26,6 +29,16 @@ class FakeTraces:
     async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
         self.queries.append(query)
         return self.found
+
+
+def fake_model() -> BaseChatModel:
+    """Offline stand-in for the diagnoser's chat model."""
+    return FakeListChatModel(responses=[])
+
+
+def fake_context(traces: TraceSearch) -> TraceContext:
+    """A run context whose embedder and chat model are offline stand-ins."""
+    return TraceContext(traces, HashingEmbedder(), fake_model())
 
 
 def summary(trace_id: str, **overrides) -> TraceSummary:

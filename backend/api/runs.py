@@ -35,9 +35,8 @@ async def create_run(body: RunRequest, request: Request) -> RunResponse:
 
     try:
         async with TraceClient() as traces:
-            result = await request.app.state.graph.ainvoke(
-                state, config, context=TraceContext(traces, embedder=request.app.state.embedder)
-            )
+            context = TraceContext(traces, request.app.state.embedder, request.app.state.model)
+            result = await request.app.state.graph.ainvoke(state, config, context=context)
     except Exception as exc:
         # Type name only: the message or traceback could carry span contents.
         logger.error("triage run failed: %s", type(exc).__name__)

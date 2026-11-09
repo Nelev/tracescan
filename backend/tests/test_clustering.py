@@ -15,10 +15,9 @@ import pytest
 
 from agent.clustering import cluster_summaries, failure_text, normalise_error
 from agent.const import MAX_EXEMPLARS
-from agent.context import TraceContext
 from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
-from tests.fakes import FakeTraces, HashingEmbedder, summary
+from tests.fakes import FakeTraces, HashingEmbedder, fake_context, summary
 from trace_store.models import TraceSummary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "failure_summaries.json"
@@ -186,9 +185,7 @@ def test_exemplars_are_the_newest_traces_of_the_cluster():
 @pytest.mark.anyio
 async def test_node_puts_plain_json_clusters_and_unclustered_into_state():
     fake = FakeTraces(load())
-    result = await build_graph().ainvoke(
-        {"target_app": "medas"}, context=TraceContext(fake, embedder=HashingEmbedder())
-    )
+    result = await build_graph().ainvoke({"target_app": "medas"}, context=fake_context(fake))
     json.dumps(result["clusters"])  # plain dicts: nothing for the checkpoint serializer to warn on
     assert len(result["clusters"]) == len(GROUPS)
     assert set(result["unclustered"]) == OUTLIERS

@@ -11,7 +11,7 @@ from langgraph.store.memory import InMemoryStore
 from agent.graph import build_graph
 from api import runs
 from main import app
-from tests.fakes import FakeTraces, HashingEmbedder, summary
+from tests.fakes import FakeTraces, HashingEmbedder, fake_model, summary
 
 
 def use_traces(monkeypatch, fake: FakeTraces) -> None:
@@ -27,6 +27,7 @@ async def client():
     # ASGITransport does not run the lifespan, so attach an in-memory graph to the app here.
     app.state.graph = build_graph(InMemorySaver(), InMemoryStore())
     app.state.embedder = HashingEmbedder()  # offline: the real model is never downloaded in tests
+    app.state.model = fake_model()  # and no chat model is ever called
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as c:
