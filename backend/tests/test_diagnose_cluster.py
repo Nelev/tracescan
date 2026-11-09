@@ -119,4 +119,5 @@ async def test_the_real_model_diagnoses_every_fixture_cluster():
         context = TraceContext(traces, HashingEmbedder(), build_diagnoser_model())
         for cluster in clusters:
             result = await diagnose_cluster(ClusterTask(cluster=cluster), Runtime(context=context))
+            assert "diagnoses" in result, f"diagnosis failed, see the log: {result}"
             Diagnosis.model_validate(result["diagnoses"][0])
