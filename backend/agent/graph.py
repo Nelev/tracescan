@@ -1,6 +1,6 @@
 """
-TraceScan graph. collect_traces, cluster_failures and diagnose_cluster are real; the other
-nodes are placeholders.
+TraceScan graph. collect_traces, cluster_failures, diagnose_cluster and draft_proposals are real;
+the other nodes are placeholders.
 
 Flow (diagnose_cluster runs once per cluster, in parallel, through Send):
   collect_traces -> cluster_failures -> diagnose_cluster x N -> join_diagnoses
@@ -29,6 +29,7 @@ from agent.model import build_diagnoser_model
 from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
 from agent.nodes.diagnose_cluster import diagnose_cluster
+from agent.nodes.draft_proposals import draft_proposals
 from agent.progress import ProgressTransformer
 from agent.schemas import ClusterTask
 from agent.state import TriageState
@@ -47,11 +48,6 @@ def reproduce_failure(state: TriageState) -> dict:
 def match_known_issues(state: TriageState) -> dict:
     """Compare clusters with issues seen in earlier runs."""
     return {"known_matches": {}}
-
-
-def draft_proposals(state: TriageState) -> dict:
-    """Draft a GitHub issue and regression test per cluster."""
-    return {"proposals": [{"cluster_id": "c0", "title": "placeholder issue"}]}
 
 
 def human_review(state: TriageState) -> dict:
