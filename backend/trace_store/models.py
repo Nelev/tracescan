@@ -1,12 +1,15 @@
 """Contracts for the trace-reading MCP tools (search_failed_traces, get_trace_tree, get_span)."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, Field
 
-from trace_store.const import MAX_LIMIT
+from trace_store.const import ID_PATTERN, MAX_LIMIT
 
 SpanStatus = Literal["unset", "ok", "error"]
+# A trace or span id taken as a tool argument. Pydantic rejects other shapes before the tool
+# runs, and the pattern is part of the tool's JSON schema.
+TraceId = Annotated[str, Field(pattern=ID_PATTERN)]
 
 
 class FailedTraceQuery(BaseModel):
