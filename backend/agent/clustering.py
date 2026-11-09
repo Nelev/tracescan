@@ -79,6 +79,17 @@ def _cluster(cluster_id: str, members: list[TraceSummary], method: ClusterMethod
     )
 
 
+def isolated_clusters(
+    summaries: list[TraceSummary], trace_ids: list[str], first_index: int
+) -> list[Cluster]:
+    """One-trace clusters for isolated failures, numbered on from the real clusters."""
+    by_id = {s.trace_id: s for s in summaries}
+    return [
+        _cluster(f"c{first_index + i}", [by_id[trace_id]], "isolated")
+        for i, trace_id in enumerate(trace_ids)
+    ]
+
+
 def cluster_summaries(
     summaries: list[TraceSummary], embedder: Embedder
 ) -> tuple[list[Cluster], list[str]]:

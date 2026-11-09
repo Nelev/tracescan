@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 from trace_store.models import TraceId
 
 # hdbscan: a dense group found on embeddings. step_error: failures sharing a failing step and error.
-ClusterMethod = Literal["hdbscan", "step_error"]
+# isolated: one isolated failure that fit no group, diagnosed on its own.
+ClusterMethod = Literal["hdbscan", "step_error", "isolated"]
 
 
 class Cluster(TypedDict):

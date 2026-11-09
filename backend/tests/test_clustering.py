@@ -13,11 +13,19 @@ from pathlib import Path
 
 import pytest
 
-from agent.clustering import cluster_summaries, failure_text, normalise_error
+from agent.clustering import cluster_summaries, failure_text, isolated_clusters, normalise_error
 from agent.const import MAX_EXEMPLARS
 from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
-from tests.fakes import FakeTraces, HashingEmbedder, fake_context, summary
+from tests.fakes import (
+    DIAGNOSIS,
+    FakeTraces,
+    HashingEmbedder,
+    fake_context,
+    fake_diagnoser,
+    span_tree,
+    summary,
+)
 from trace_store.models import TraceSummary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "failure_summaries.json"
@@ -182,10 +190,35 @@ def test_exemplars_are_the_newest_traces_of_the_cluster():
         assert cluster["exemplar_trace_ids"] == newest[:MAX_EXEMPLARS]
 
 
+async def run_fixture_graph() -> dict:
+    """The whole graph over the fixture failures, with a fake diagnoser answering every cluster."""
+    trees = {s.trace_id: span_tree(s.trace_id) for s in load()}
+    context = fake_context(FakeTraces(load(), trees), fake_diagnoser(DIAGNOSIS))
+    return await build_graph().ainvoke({"target_app": "medas"}, context=context)
+
+
 @pytest.mark.anyio
 async def test_node_puts_plain_json_clusters_and_unclustered_into_state():
-    fake = FakeTraces(load())
-    result = await build_graph().ainvoke({"target_app": "medas"}, context=fake_context(fake))
+    result = await run_fixture_graph()
     json.dumps(result["clusters"])  # plain dicts: nothing for the checkpoint serializer to warn on
-    assert len(result["clusters"]) == len(GROUPS)
+    assert len(result["clusters"]) == len(GROUPS) + len(OUTLIERS)
     assert set(result["unclustered"]) == OUTLIERS
+
+
+def test_isolated_clusters_are_one_trace_clusters_numbered_after_the_real_ones():
+    clusters, unclustered = clustered()
+    isolated = isolated_clusters(load(), unclustered, first_index=len(clusters))
+    assert [c["cluster_id"] for c in isolated] == ["c4", "c5"]
+    assert {c["method"] for c in isolated} == {"isolated"}
+    assert [c["trace_ids"] for c in isolated] == [[t] for t in unclustered]
+    assert all(c["exemplar_trace_ids"] == c["trace_ids"] for c in isolated)
+
+
+@pytest.mark.anyio
+async def test_the_graph_diagnoses_each_isolated_failure_on_its_own():
+    result = await run_fixture_graph()
+    isolated = [c for c in result["clusters"] if c["method"] == "isolated"]
+    assert {t for c in isolated for t in c["trace_ids"]} == OUTLIERS
+    diagnosed = {d["cluster_id"] for d in result["diagnoses"]}
+    assert {c["cluster_id"] for c in isolated} <= diagnosed
+    assert result.get("diagnosis_failures", []) == []
