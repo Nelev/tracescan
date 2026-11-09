@@ -10,31 +10,15 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from langchain_core.runnables import RunnableConfig
-from pydantic import AwareDatetime, BaseModel
 
 from agent.context import TraceContext
 from agent.mcp_client import TraceClient
 from agent.state import TriageState
+from api.schemas import RunRequest, RunResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1")
-
-
-class RunRequest(BaseModel):
-    target_app: str
-    since: AwareDatetime | None = None  # inclusive
-    until: AwareDatetime | None = None  # exclusive
-
-
-class RunResponse(BaseModel):
-    run_id: str  # the graph's thread_id
-    failed_traces: int
-    clusters: int
-    unclustered: int  # failures that fit no cluster; kept, not diagnosed
-    diagnoses: int
-    proposals: int
-    actions_log: list[str]
 
 
 @router.post("/runs")

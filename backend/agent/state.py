@@ -1,18 +1,6 @@
-from typing import Literal, Required, TypedDict
+from typing import Required, TypedDict
 
-# hdbscan: a dense group found on embeddings. step_error: failures sharing a failing step and error.
-ClusterMethod = Literal["hdbscan", "step_error"]
-
-
-class Cluster(TypedDict):
-    """One group of failed traces, as stored in state (a plain dict) and read by later nodes."""
-
-    cluster_id: str  # c0, c1, ... ordered by size, stable for the same input
-    trace_ids: list[str]
-    # The most common "failing step: normalised error" among the cluster's traces.
-    signature: str
-    exemplar_trace_ids: list[str]  # the newest few traces, to look at first; a subset of trace_ids
-    method: ClusterMethod
+from agent.schemas import Cluster
 
 
 class TriageState(TypedDict, total=False):
