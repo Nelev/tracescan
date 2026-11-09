@@ -42,8 +42,8 @@ TraceScan is a single LangGraph graph of eight nodes, with two stages that fan o
 
 ```text
 TraceScan MCP (read-only) --read--> collect_traces
-                                    cluster_failures      (embeddings + HDBSCAN in code; ends if no failures)
-                                    diagnose_cluster  x N (create_agent per cluster, in parallel; read-only trace tools)
+                                    cluster_failures      (embeddings + HDBSCAN in code; isolated failures kept as `unclustered`; ends if there are none at all)
+                                    diagnose_cluster  x N (create_agent per cluster and per unclustered failure, in parallel; read-only trace tools)
                                     [join]                (waits for all diagnoses)
 Medas sandbox  <--replay--          reproduce_failure x N (stretch: replays inputs; MVP marks every diagnosis "unverified")
 Known-issues store --lookup-->      match_known_issues    (links clusters to issues from earlier runs)
@@ -53,7 +53,7 @@ GitHub + eval dataset <--write--    apply_actions         (approved items only; 
                                     END
 ```
 
-Stacked boxes run once per item in parallel: one diagnosis per cluster, one replay per diagnosis. A no-op join node (not drawn) waits for every diagnosis before reproduction starts. The run ends early if there are no failures to cluster or if the reviewer approves nothing. In the MVP the reproduce step only marks each diagnosis as unverified; replay against Medas is a stretch goal.
+Stacked boxes run once per item in parallel: one diagnosis per cluster and one per unclustered failure (capped, see Clustering), one replay per diagnosis. A no-op join node (not drawn) waits for every diagnosis before reproduction starts. The run ends early if there are no failures at all (no clusters and nothing unclustered) or if the reviewer approves nothing. In the MVP the reproduce step only marks each diagnosis as unverified; replay against Medas is a stretch goal.
 
 Inside the graph, `diagnose_cluster` is a small agent of its own, built with LangChain's `create_agent`. It can call the read-only trace tools to inspect a failing trace's full span tree, single spans or similar traces before it answers, and returns a `Diagnosis` through `response_format`. A low recursion limit caps its steps. The outer pipeline stays a plain `StateGraph`, so order, parallelism, batch approval and evaluation remain fixed.
 
@@ -66,6 +66,7 @@ One shared state object flows through the graph; the two fields filled by parall
 | `target_app`, `since` | str | input | Which app and time window to triage |
 | `failed_traces` | list\[TraceSummary\] | collect\_traces | Compact view of each failed or low-score trace |
 | `clusters` | list\[Cluster\] | cluster\_failures | Groups with a signature and a few exemplar traces |
+| `unclustered` | list\[str\] | cluster\_failures | Ids of isolated failures; each is diagnosed on its own as a one-trace cluster, up to a cap |
 | `diagnoses` | list\[Diagnosis\], append reducer | diagnose\_cluster (parallel) | Category, root cause, fix, confidence, evidence spans |
 | `reproductions` | list\[Reproduction\], append reducer | reproduce\_failure (parallel) | Unverified in the MVP; with replay, confirmed, flaky or unconfirmed |
 | `known_matches` | dict cluster → issue id | match\_known\_issues | Links to issues from earlier runs |
@@ -76,6 +77,16 @@ One shared state object flows through the graph; the two fields filled by parall
 Parallel branches do not receive the whole state. Each diagnose branch gets a small `ClusterTask` (target app plus one cluster) and each reproduce branch a `ReproTask` (cluster plus its diagnosis), which keeps prompts short.
 
 The diagnoser returns a Pydantic `Diagnosis` through structured output, so its category must be one of the allowed values and it carries a list of the trace spans it is based on.
+
+## Clustering
+
+Clustering is code, not LLM calls: local embeddings (FastEmbed, which runs on ONNX Runtime and needs no GPU) feed HDBSCAN, and a second stage regroups the noise by failing step and error type. Three rules keep it honest.
+
+- **Embed a clean failure summary, not the raw trace.** The text is the failing operation, the error message and the relevant span context. IDs, timestamps, numbers and quoted values are masked so they do not pull unrelated failures together or push identical ones apart, while the error wording itself is kept. Scores and timings stay out. Nothing in it may carry clinical content.
+- **Similar wording is not the same cause.** Two different faults can fail with near-identical messages, and one fault can surface in different words. The fault-injection eval checks both directions: traces from one injected fault should share a cluster, and traces from different faults should not.
+- **Nothing isolated is lost.** Failures that fall in no cluster stay in `unclustered` and each gets its own diagnosis, so a rare issue reaches the reviewer. This is the one exception to "LLM calls per cluster, not per trace", so it is capped per run (a constant); anything over the cap is listed by id in the run summary, not silently dropped.
+
+The approach stays as it is until the eval shows a need. Only then add complexity (a different model, a reranking step, an LLM pass over borderline clusters).
 
 ## Tools and safety
 
@@ -156,7 +167,10 @@ Each diagnosis is graded on whether it names the actual cause (for example, the 
 
 | Metric | Definition | Source |
 | --- | --- | --- |
-| Detection rate | Injected faults that appear as a cluster | Fault injection |
+| Detection rate | Injected faults that appear as a cluster or are diagnosed from `unclustered` | Fault injection |
+| Cluster purity | Clusters whose traces all come from one injected fault | Fault injection |
+| Cause separation | Injected faults whose traces stay in separate clusters from other faults, including look-alike ones | Fault injection |
+| Rare-failure recall | Low-volume faults that reach a diagnosis through `unclustered` | Fault injection |
 | Root-cause accuracy | Clusters given the correct category and cause | Fault injection |
 | False positives | Proposals not linked to any injected fault | Fault injection |
 | Duplicate rate | Repeat failures filed as new issues | Fault injection, second run |
@@ -177,7 +191,7 @@ The stack is Python with LangGraph 1.x for orchestration and its own OpenTelemet
 | Observability | OpenTelemetry SDK, own FastAPI collector, Postgres trace store | Traces of the target app and of TraceScan itself |
 | Trace access | Own MCP server (FastMCP), read-only role | Tool layer for the collector |
 | Data models | Pydantic | Structured LLM output and validated state |
-| Clustering | Embeddings + HDBSCAN | Grouping failures without LLM calls |
+| Clustering | Local embeddings (FastEmbed, ONNX) + HDBSCAN | Grouping failures without LLM calls; isolated failures kept for individual diagnosis |
 | Persistence | Postgres checkpointer and store | Paused runs and known issues in deployment |
 | Issue tracker | GitHub API | Draft and update issues |
 | Dev UI | LangGraph Studio (`langgraph dev`) | Step through nodes, inspect state, approve at the pause |
@@ -196,7 +210,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 
 - [ ] Medas traced with OpenTelemetry into the own trace store, plus a script that generates realistic and adversarial traffic
 - [ ] Minimal trace collector, Postgres store, heuristic scoring and read-only MCP server
-- [ ] Clustering of failures with embeddings and HDBSCAN
+- [ ] Clustering of failures with embeddings and HDBSCAN, isolated failures kept for individual diagnosis
 - [ ] Diagnoser with structured output and the failure taxonomy
 - [ ] Human review gate with approve or reject per proposal
 - [ ] Draft issues written to markdown files (dry run)
@@ -243,8 +257,10 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 
 - [x] **Summarise each failure as text.** Failed step, error type, query and score in one short string. Done when summaries for the fixture traces look distinct.
 - [x] **Cluster the failures.** Embed the summaries and run HDBSCAN; fall back to grouping by step and error type when there are too few traces. Done when the fixture's known groups come out as separate clusters.
+- [ ] **Clean the failure text before embedding.** The embedded string (`failure_text`) currently uses the raw error message, so IDs, timestamps and numbers in it can split or merge clusters. Mask them with the same rule as `normalise_error`, keep the error wording and the span context, and check the text carries no clinical content. Done when two traces that differ only in ids, timestamps or numbers produce the same text, and the fixture clusters are unchanged.
 - [ ] **Write the taxonomy file.** `taxonomy.md` with a definition and one example per category, loaded into the diagnoser prompt. Done when every category has both.
 - [ ] **Build the diagnoser.** A create\_agent with the taxonomy as system prompt, the read-only trace tools, the cluster's exemplar spans as input, response\_format=Diagnosis and a recursion limit of about 12, instead of a single call through `with_structured_output(Diagnosis)`. Done when it returns a valid `Diagnosis` for each fixture cluster.
+- [ ] **Diagnose unclustered failures individually.** Turn each id in `unclustered` into a one-trace `ClusterTask` (`method` `singleton`) and fan it out with the cluster tasks, up to a cap constant; list the ids over the cap in the run summary. The graph ends early only when there are no clusters and nothing unclustered. Done when a fixture run with one isolated failure returns a diagnosis for it, and a run over the cap reports the skipped ids.
 - [ ] **Validate evidence.** Check that every cited trace id and span exists in the cluster; retry once if not, otherwise lower confidence. Done when a test with a fake citation is caught.
 - [ ] **Trace TraceScan itself.** Send its own runs to the same collector under a separate service name. Done when one triage run shows cost and latency per node.
 - [ ] **Build the scoring job.** Heuristic checks on every trace (empty retrieval, schema errors, timeouts), written to the scores table; the LLM judge is a stretch goal. Done when every fixture trace has a score.
@@ -256,9 +272,10 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 - [ ] **Set up LangGraph Studio.** Add the `local` flag to `build_graph`, a `langgraph.json`, and run `langgraph dev`. Done when you can approve proposals from the Studio UI.
 - [ ] **Implement dry-run actions.** `apply_actions` writes each approved issue to `out/issues/<cluster>.md` and appends regression cases to a local JSONL file. Done when a dry run produces those files and nothing else.
 - [ ] **Add fault switches to Medas.** One environment variable per fault: empty retrieval for one category, broken tool schema, truncated system prompt, small context window, weaker model, upstream timeouts. Done when each switch reliably causes its failure.
-- [ ] **Write the ground-truth file.** For each fault, the expected category, the actual cause and the visible symptom, plus several input sets that trigger it. Done when all six faults are listed with at least two input sets each.
+- [ ] **Write the ground-truth file.** For each fault, the expected category, the actual cause and the visible symptom, plus several input sets that trigger it. Done when all six faults are listed with at least two input sets each, including at least one pair of faults whose error messages look alike (for example the upstream timeout and the retrieval failure) and one low-volume fault that should land in `unclustered`.
 - [ ] **Build the eval runner.** For each fault and input set: switch it on, run traffic, run triage, save the proposals, switch it off; plus healthy control runs with no fault. Done when one command runs all faults and controls.
-- [ ] **Compute the metrics.** Detection rate, root-cause accuracy (cause, not symptom), false alarms on healthy runs, cost and time per run, written to a results table. Done when the table is in the README.
+- [ ] **Compute the metrics.** Detection rate, root-cause accuracy (cause, not symptom), cluster purity and cause separation, rare-failure recall, false alarms on healthy runs, cost and time per run, written to a results table. Done when the table is in the README.
+- [ ] **Check the clustering against the faults.** On the fault-injection runs, count faults split across clusters and clusters that mix faults, and check which cluster or `unclustered` entry each injected fault ends up in. Done when the result is in the README; change the model, thresholds or text only if it shows a problem, and re-run to confirm.
 - [ ] **MVP gate check.** Every MVP task above is ticked and the metrics table is filled. If not, cut stretch tasks before moving on.
 
 ### Phase 4 · Stretch (days 11–14)
@@ -300,7 +317,9 @@ The biggest risk is not the agent logic but producing enough realistic failing t
 | Building the tracing stack takes time | About 3–4 days less for stretch goals | Keep the store to three tables and the MCP server to three tools; real GitHub issues and MAST-Data stay stretch only |
 | Diagnoser overconfident on vague clusters | False positives filed | Require cited evidence; show verification status and confidence on every proposal; grade root cause, not symptom, in the eval |
 | Pydantic objects in checkpoints | LangGraph warns now and will block later | Register the models module with the serializer, or store plain dicts |
-| LLM cost of triage runs | Budget overrun during eval | Clustering in code; LLM calls only per cluster, not per trace |
+| LLM cost of triage runs | Budget overrun during eval | Clustering in code; LLM calls only per cluster, not per trace; the one exception, unclustered failures, is capped per run |
+| Look-alike failures merge, or one cause splits | Wrong or duplicate diagnoses | Embed a cleaned summary; check purity and cause separation against the injected faults before adding any complexity |
+| Rare failures lost as noise | A real issue never reaches the reviewer | Keep `unclustered` and diagnose each one, within the cap |
 
 Decided: no third-party observability platform. Medas is instrumented with OpenTelemetry and sends its traces to TraceScan's own collector and Postgres store, so the project owns the full path from trace to fix. A local Jaeger container may be used in the first days to inspect traces before the own viewer exists.
 

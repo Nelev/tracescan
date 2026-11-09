@@ -143,12 +143,13 @@ add('ui','frontend','f7',1,'Failure and low-score badges on the list and the det
 // Triage analysis nodes
 add('tri','backend','a1',2,'Stub MCP client that serves the fixture traces',['c2','c4']);
 add('tri','backend','b23',2,'collect_traces node: fetch failed traces through the MCP client interface',['b22','a1']);
-add('tri','backend','b24',2,'Turn each failed trace into text and an embedding',['b23']);
-add('tri','backend','b25',2,'cluster_failures: HDBSCAN grouping, with noise kept apart',['b24']);
-add('tri','backend','b26',2,'End the run cleanly when no clusters are found',['b25']);
+add('tri','backend','b24',2,'Turn each failed trace into a cleaned text and an embedding',['b23']);
+add('tri','backend','b25',2,'cluster_failures: HDBSCAN grouping, with isolated failures kept as unclustered',['b24']);
+add('tri','backend','b26',2,'End the run cleanly when there are no failures at all',['b25']);
 add('tri','backend','b27',2,'diagnose_cluster: prompt and structured output for one cluster',['b21','b25']);
 add('tri','backend','b28',2,'Run diagnose_cluster in parallel, one branch per cluster',['b27']);
 add('tri','backend','b29',2,'Check that every span a diagnosis cites exists in its cluster',['b28']);
+add('tri','backend','b79',2,'Diagnose each unclustered failure on its own, up to a cap',['b28']);
 add('tri','backend','b30',2,'draft_proposals: issue title and body from a diagnosis',['b29']);
 add('tri','backend','b31',2,'draft_proposals: regression test case from the failing input',['b30']);
 add('tri','backend','b32',2,'Track token cost and wall-clock time for each run',['b22']);
@@ -170,7 +171,9 @@ add('met','backend','b51',4,'Metric: root-cause accuracy',['b50']);
 add('met','backend','b52',4,'Metric: false positives',['b50']);
 add('met','backend','b53',4,'Metric: duplicate issues on a second run',['c3','c4']);
 add('met','backend','b54',4,'Metric: cost and time per run',['c3','c4']);
-add('met','backend','b55',4,'Write the eval results table to a file',['b51','b52','b53','b54']);
+add('met','backend','b80',4,'Metric: cluster purity and cause separation',['b48','c3','c4']);
+add('met','backend','b81',4,'Metric: rare-failure recall from unclustered failures',['b48','c3','c4']);
+add('met','backend','b55',4,'Write the eval results table to a file',['b51','b52','b53','b54','b80','b81']);
 
 // MVP integration and eval run
 add('int','backend','i1',1,'Send Medas spans to the real collector and confirm they are stored',['b10','b4']);
@@ -179,6 +182,7 @@ add('int','backend','i4',3,'Wire the analysis and review nodes into one graph an
 add('int','backend','i3',3,'Run the full graph against the real MCP server and real Medas traces',['i4','b18','b19','i1']);
 add('int','backend','b49',4,'Eval runner: for each fault, generate traffic and run TraceScan',['b14','b42','b43','b44','b45','b46','b47','b32','i3']);
 add('int','backend','e1',4,'Run the full eval and save the results table',['b49','b55']);
+add('int','backend','b82',4,'Check the clustering against the injected faults',['e1']);
 
 // Baseline, thresholds and gate
 add('gate','shared','s1',4,'Time one manual triage of a faulty run as the baseline',['b41','b14'],'Gives the PRD its missing evidence that the problem is real.');

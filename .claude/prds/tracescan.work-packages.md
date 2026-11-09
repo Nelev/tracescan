@@ -609,12 +609,13 @@ Makes failed and low-score runs easy to spot.
 |---|---|---|---|
 | a1 | backend | Stub MCP client that serves the fixture traces | c2*, c4* |
 | b23 | backend | collect_traces node: fetch failed traces through the MCP client interface | b22*, a1 |
-| b24 | backend | Turn each failed trace into text and an embedding | b23 |
-| b25 | backend | cluster_failures: HDBSCAN grouping, with noise kept apart | b24 |
-| b26 | backend | End the run cleanly when no clusters are found | b25 |
+| b24 | backend | Turn each failed trace into a cleaned text and an embedding | b23 |
+| b25 | backend | cluster_failures: HDBSCAN grouping, with isolated failures kept as unclustered | b24 |
+| b26 | backend | End the run cleanly when there are no failures at all | b25 |
 | b27 | backend | diagnose_cluster: prompt and structured output for one cluster | b21*, b25 |
 | b28 | backend | Run diagnose_cluster in parallel, one branch per cluster | b27 |
 | b29 | backend | Check that every span a diagnosis cites exists in its cluster | b28 |
+| b79 | backend | Diagnose each unclustered failure on its own, up to a cap | b28 |
 | b30 | backend | draft_proposals: issue title and body from a diagnosis | b29 |
 | b31 | backend | draft_proposals: regression test case from the failing input | b30 |
 | b32 | backend | Track token cost and wall-clock time for each run | b22* |
@@ -639,30 +640,32 @@ First node of the graph: gathers the failed traces for the run's window.
 - Put the full traces into graph state
 - **Done when:** With the stub client, state holds every failed fixture trace.
 
-**b24. Turn each failed trace into text and an embedding**
+**b24. Turn each failed trace into a cleaned text and an embedding**
 
 Prepares traces for clustering by turning each into a short text and a vector.
 
-- Build a short text per trace: failing span name, error message and key attributes, trimmed to a size limit
-- Embed with an embedding model (the choice is TBD; record its cost)
+- Build a short text per trace: failing operation, error message and relevant span context, trimmed to a size limit
+- Mask ids, timestamps, numbers and quoted values, but keep the error wording; leave scores and timings out; no clinical content
+- Embed with a local model (FastEmbed, ONNX, no GPU); keep the model choice open until the eval checks it, and record its cost
 - Cache embeddings by trace id
-- **Done when:** Each failed trace has a text and a vector of the same size.
+- **Done when:** Each failed trace has a text and a vector of the same size, and two traces that differ only in ids, timestamps or numbers give the same text.
 
-**b25. cluster_failures: HDBSCAN grouping, with noise kept apart**
+**b25. cluster_failures: HDBSCAN grouping, with isolated failures kept as unclustered**
 
 Groups similar failures so one issue can be drafted per cause rather than per trace.
 
 - Run HDBSCAN on the vectors; label -1 is noise and is kept apart, not forced into a cluster
 - min_cluster_size is a parameter. With 3 to 5 traces per fault in the fixtures, expect a small value (starting value TBD; tune on the fixtures)
+- Regroup the noise by failing step and error type; what is still isolated goes to `unclustered` with its trace ids, so rare failures are not lost
 - Output clusters with their trace ids
-- **Done when:** On the fixtures, traces for the same fault land in the same cluster.
+- **Done when:** On the fixtures, traces for the same fault land in the same cluster, and an isolated failure appears in `unclustered`.
 
-**b26. End the run cleanly when no clusters are found**
+**b26. End the run cleanly when there are no failures at all**
 
 Handles the case where there is nothing to diagnose.
 
-- Conditional edge: zero clusters goes to the end of the graph
-- The run summary states that no clusters were found and how many traces were noise
+- Conditional edge: no clusters and nothing unclustered goes to the end of the graph; unclustered failures alone still go on to diagnosis (b79)
+- The run summary states that no failures were found
 - No review step starts
 - **Done when:** A run over healthy fixtures ends cleanly with that message.
 
@@ -692,6 +695,15 @@ A guard against made-up evidence: every span a diagnosis cites must really be in
 - Deterministic check, no model call
 - On failure, retry the diagnosis once, then drop it and note this in the run summary (proposed)
 - **Done when:** A diagnosis that cites an unknown span is rejected.
+
+**b79. Diagnose each unclustered failure on its own, up to a cap**
+
+Makes sure a rare failure that fits no cluster still gets a diagnosis and reaches the reviewer.
+
+- Turn each id in `unclustered` into a one-trace cluster task and start it through the same Send fan-out as b28
+- Cap how many run per triage (a constant): this is the one exception to one model call per cluster, not per trace
+- List the ids over the cap in the run summary instead of dropping them silently
+- **Done when:** A fixture run with one isolated failure returns a diagnosis for it, and a run over the cap reports the skipped ids.
 
 **b30. draft_proposals: issue title and body from a diagnosis**
 
@@ -829,7 +841,9 @@ What dry run does for a regression test: write it to a local eval dataset.
 | b52 | backend | Metric: false positives | b50 |
 | b53 | backend | Metric: duplicate issues on a second run | c3*, c4* |
 | b54 | backend | Metric: cost and time per run | c3*, c4* |
-| b55 | backend | Write the eval results table to a file | b51, b52, b53, b54 |
+| b80 | backend | Metric: cluster purity and cause separation | b48, c3*, c4* |
+| b81 | backend | Metric: rare-failure recall from unclustered failures | b48, c3*, c4* |
+| b55 | backend | Write the eval results table to a file | b51, b52, b53, b54, b80, b81 |
 
 #### Card details: Eval ground truth and metrics
 
@@ -838,14 +852,15 @@ What dry run does for a regression test: write it to a local eval dataset.
 The answer key for the evaluation: what each injected fault should be diagnosed as.
 
 - Six rows: fault name, expected category (from b20) and the span signal that should appear
+- Include a pair of faults with look-alike error messages, and one low-volume fault that should land in `unclustered`
 - Stored in eval/ and kept where the agent cannot read it
-- **Done when:** Every fault has one expected category.
+- **Done when:** Every fault has one expected category, and the look-alike pair and the low-volume fault are marked.
 
 **b50. Metric: detection rate**
 
 Metric 1: how many of the injected faults TraceScan found.
 
-- Proposed definition: a fault is detected when at least one proposal matches its expected category. Rate = detected faults divided by 6
+- Proposed definition: a fault is detected when at least one proposal, from a cluster or from an unclustered failure, matches its expected category. Rate = detected faults divided by 6
 - Test on fixture results with known outcomes
 - **Done when:** Returns the expected value on a hand-made result set.
 
@@ -881,6 +896,23 @@ Metrics 5 and 6: spend and wall-clock time per run.
 - Report per fault, mean and total
 - **Done when:** Returns the expected values on fixture run summaries.
 
+**b80. Metric: cluster purity and cause separation**
+
+Metrics 7 and 8: whether clustering groups failures by cause, not by wording.
+
+- Purity: the share of clusters whose traces all come from one injected fault
+- Cause separation: the share of faults whose traces stay out of clusters that hold another fault, counted separately for the look-alike pair in b48
+- Test on a hand-made result set with one mixed cluster and one split fault
+- **Done when:** Returns the expected values on a hand-made result set.
+
+**b81. Metric: rare-failure recall from unclustered failures**
+
+Metric 9: whether low-volume faults are still found.
+
+- Proposed definition: among faults marked low-volume in b48, the share that reach a diagnosis with the right category through `unclustered`
+- Test on a hand-made result set with one found and one missed rare fault
+- **Done when:** Returns the expected value on a hand-made result set.
+
 **b55. Write the eval results table to a file**
 
 The evaluation output: one table with all metrics.
@@ -906,6 +938,7 @@ The evaluation output: one table with all metrics.
 | i3 | backend | Run the full graph against the real MCP server and real Medas traces | i4, b18*, b19*, i1 |
 | b49 | backend | Eval runner: for each fault, generate traffic and run TraceScan | b14*, b42*, b43*, b44*, b45*, b46*, b47*, b32*, i3 |
 | e1 | backend | Run the full eval and save the results table | b49, b55* |
+| b82 | backend | Check the clustering against the injected faults | e1 |
 
 #### Card details: MVP integration and eval run
 
@@ -959,10 +992,19 @@ Automates the evaluation, so every fault is tested the same way.
 
 The evaluation itself: the numbers the MVP gate is judged on.
 
-- Run b49 over all faults, compute b50 to b54 and write the b55 table
+- Run b49 over all faults, compute b50 to b54, b80 and b81, and write the b55 table
 - Keep the raw run summaries next to the table
 - Note any run that failed and why
 - **Done when:** A results table exists for all six faults.
+
+**b82. Check the clustering against the injected faults**
+
+Reads the eval runs to see whether the clustering needs to change, instead of guessing.
+
+- For each fault, record which cluster or `unclustered` entry its traces ended up in, using b80 and b81
+- Change the embedding model, thresholds or text only if this shows faults split or mixed, then re-run to confirm
+- Write the result in the README
+- **Done when:** The result is written down, and any change is backed by a re-run showing it helped.
 
 ### Baseline, thresholds and MVP gate
 
