@@ -48,6 +48,7 @@ async def create_run(body: RunRequest, request: Request) -> RunResponse:
         clusters=len(result.get("clusters", [])),
         unclustered=len(result.get("unclustered", [])),
         diagnoses=len(result.get("diagnoses", [])),
+        diagnosis_failures=len(result.get("diagnosis_failures", [])),
         proposals=len(result.get("proposals", [])),
         actions_log=result.get("actions_log", []),
     )

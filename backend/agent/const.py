@@ -5,6 +5,10 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # fastembed ONNX model, runs locally
 # An OpenRouter slug ("vendor/model"); the DIAGNOSER_MODEL environment variable overrides it.
 DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"
 
+# Parallel branches within one run (the graph's max_concurrency): N clusters would otherwise
+# mean N model calls at once. It does not limit several runs at the same time.
+MAX_PARALLEL_BRANCHES = 4
+
 # Below this many failed traces HDBSCAN has too little to work with: group by step and error.
 MIN_TRACES_FOR_HDBSCAN = 6
 # Tuned on the synthetic fixture with the real model and digit-masked failure texts:

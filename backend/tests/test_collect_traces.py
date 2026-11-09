@@ -73,6 +73,10 @@ def test_routes():
     assert route_after_collect(state(failed_traces=[])) == "__end__"
     assert route_after_collect(state(failed_traces=[{"trace_id": "t"}])) == "cluster_failures"
     assert route_after_cluster(state()) == "__end__"
-    assert route_after_cluster(state(clusters=[{"cluster_id": "c0"}])) == "diagnose_cluster"
+    clusters = [{"cluster_id": "c0"}, {"cluster_id": "c1"}]
+    sends = route_after_cluster(state(clusters=clusters))
+    assert [(s.node, s.arg) for s in sends] == [
+        ("diagnose_cluster", {"cluster": c}) for c in clusters
+    ]
     assert route_after_review(state(decisions={"c0": "reject"})) == "__end__"
     assert route_after_review(state(decisions={"c0": "approve"})) == "apply_actions"

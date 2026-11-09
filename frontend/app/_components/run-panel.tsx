@@ -395,6 +395,12 @@ function Result({ result }: { result: RunResponse }) {
           diagnosed.
         </p>
       )}
+      {result.diagnosis_failures > 0 && (
+        <p className="type-body text-destructive">
+          {result.diagnosis_failures} cluster(s) failed diagnosis. Check the
+          server log for the error type.
+        </p>
+      )}
       {empty && (
         <div>
           <h3>No failures in this window</h3>

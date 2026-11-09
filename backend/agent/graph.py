@@ -1,14 +1,14 @@
 """
-TraceScan: simplest LangGraph structure, every node a placeholder.
+TraceScan graph. collect_traces, cluster_failures and diagnose_cluster are real; the other
+nodes are placeholders.
 
-Flow (linear):
-  collect_traces -> cluster_failures -> diagnose_cluster -> join_diagnoses
+Flow (diagnose_cluster runs once per cluster, in parallel, through Send):
+  collect_traces -> cluster_failures -> diagnose_cluster x N -> join_diagnoses
     -> reproduce_failure -> match_known_issues -> draft_proposals
     -> human_review -> apply_actions -> END
 
 Conditional edges end the run early when no traces failed, when no clusters were
-found, or when no proposal was approved. collect_traces and cluster_failures are real; the
-other nodes are placeholders. Fan-out (Send) and interrupt() come later.
+found, or when no proposal was approved. interrupt() comes later.
 """
 
 import asyncio
@@ -16,19 +16,18 @@ import asyncio
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.store.base import BaseStore
+from langgraph.types import Send
 
+from agent.const import MAX_PARALLEL_BRANCHES
 from agent.context import TraceContext
 from agent.embeddings import FastEmbedEmbedder
 from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model
 from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
+from agent.nodes.diagnose_cluster import diagnose_cluster
+from agent.schemas import ClusterTask
 from agent.state import TriageState
-
-
-def diagnose_cluster(state: TriageState) -> dict:
-    """Diagnose each cluster, citing trace ids and spans as evidence."""
-    return {"diagnoses": [{"cluster_id": "c0", "category": "unknown"}]}
 
 
 def join_diagnoses(state: TriageState) -> dict:
@@ -66,9 +65,12 @@ def route_after_collect(state: TriageState) -> str:
     return "cluster_failures" if state.get("failed_traces") else END
 
 
-def route_after_cluster(state: TriageState) -> str:
-    """No clusters (e.g. all noise): end the run."""
-    return "diagnose_cluster" if state.get("clusters") else END
+def route_after_cluster(state: TriageState) -> list[Send] | str:
+    """One parallel diagnose branch per cluster; no clusters (e.g. all noise): end the run."""
+    clusters = state.get("clusters")
+    if not clusters:
+        return END
+    return [Send("diagnose_cluster", ClusterTask(cluster=c)) for c in clusters]
 
 
 def route_after_review(state: TriageState) -> str:
@@ -104,7 +106,10 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)
 
-    return g.compile(checkpointer=checkpointer, store=store)
+    # The cap lives on the graph, so every caller (API, demo, Studio, resume) gets it.
+    return g.compile(checkpointer=checkpointer, store=store).with_config(
+        {"max_concurrency": MAX_PARALLEL_BRANCHES}
+    )
 
 
 async def main() -> None:

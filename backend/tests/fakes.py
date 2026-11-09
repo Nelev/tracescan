@@ -1,5 +1,7 @@
 """Test doubles shared by the graph and API tests."""
 
+from itertools import cycle
+
 import numpy as np
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel
@@ -59,13 +61,43 @@ class FakeDiagnoserModel(GenericFakeChatModel):
 
 
 def fake_diagnoser(diagnosis: Diagnosis) -> FakeDiagnoserModel:
+    """A model that gives the same answer however many clusters ask."""
     call = {"name": "Diagnosis", "args": diagnosis.model_dump(mode="json"), "id": "call_1"}
-    return FakeDiagnoserModel(messages=iter([AIMessage(content="", tool_calls=[call])]))
+    return FakeDiagnoserModel(messages=cycle([AIMessage(content="", tool_calls=[call])]))
 
 
 def fake_context(traces: TraceAccess, model: BaseChatModel | None = None) -> TraceContext:
     """A run context whose embedder is an offline stand-in and whose chat model is a fake."""
     return TraceContext(traces, HashingEmbedder(), model or fake_model())
+
+
+def span_tree(trace_id: str, **overrides) -> SpanNode:
+    """A one-span trace: a failing retrieve step."""
+    return SpanNode.model_validate(
+        {
+            "span_id": f"{trace_id}_root",
+            "trace_id": trace_id,
+            "name": "retrieve",
+            "start_time": "2026-11-05T10:00:00Z",
+            "end_time": "2026-11-05T10:00:01Z",
+            "status": "error",
+            "status_message": "empty result",
+            **overrides,
+        }
+    )
+
+
+# What a model might answer, with a cluster id of its own invention.
+DIAGNOSIS = Diagnosis.model_validate(
+    {
+        "cluster_id": "made-up",
+        "category": "retrieval_miss",
+        "root_cause": "The retriever's filter excludes the drug-interaction category.",
+        "suggested_fix": "Include the category in the filter.",
+        "confidence": 0.7,
+        "evidence": [{"trace_id": "t1", "span_id": "s1", "note": "retrieve returned nothing"}],
+    }
+)
 
 
 def summary(trace_id: str, **overrides) -> TraceSummary:

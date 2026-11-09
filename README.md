@@ -123,7 +123,7 @@ Checkpoints hold graph state in Postgres, so state stays at trace ids and signat
 
 `backend/tracedoctor_graph.py` is the starting point and runs end to end with fake data. It differs from the target design in a few places:
 
-- Nodes are stubs; `diagnose_cluster` is a plain function, not yet an agent.
+- `collect_traces`, `cluster_failures` and `diagnose_cluster` are real; the other nodes are stubs.
 - It still mentions Langfuse in comments (stale: the project builds its own tracing stack).
 - `draft_proposals` skips clusters that did not reproduce. The MVP rule is the opposite: keep every cluster and mark it `unverified`.
 

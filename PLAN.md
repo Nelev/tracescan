@@ -68,6 +68,7 @@ One shared state object flows through the graph; the two fields filled by parall
 | `clusters` | list\[Cluster\] | cluster\_failures | Groups with a signature and a few exemplar traces |
 | `unclustered` | list\[str\] | cluster\_failures | Ids of isolated failures; each is diagnosed on its own as a one-trace cluster, up to a cap |
 | `diagnoses` | list\[Diagnosis\], append reducer | diagnose\_cluster (parallel) | Category, root cause, fix, confidence, evidence spans |
+| `diagnosis_failures` | list\[str\], append reducer | diagnose\_cluster (parallel) | Ids of clusters whose diagnosis failed; reported, not dropped |
 | `reproductions` | list\[Reproduction\], append reducer | reproduce\_failure (parallel) | Unverified in the MVP; with replay, confirmed, flaky or unconfirmed |
 | `known_matches` | dict cluster → issue id | match\_known\_issues | Links to issues from earlier runs |
 | `proposals` | list\[IssueProposal\] | draft\_proposals | Create or update issue, body, regression case |
@@ -257,7 +258,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 
 - [x] **Summarise each failure as text.** Failed step, error type, query and score in one short string. Done when summaries for the fixture traces look distinct.
 - [x] **Cluster the failures.** Embed the summaries and run HDBSCAN; fall back to grouping by step and error type when there are too few traces. Done when the fixture's known groups come out as separate clusters.
-- [ ] **Clean the failure text before embedding.** The embedded string (`failure_text`) currently uses the raw error message, so IDs, timestamps and numbers in it can split or merge clusters. Mask them with the same rule as `normalise_error`, keep the error wording and the span context, and check the text carries no clinical content. Done when two traces that differ only in ids, timestamps or numbers produce the same text, and the fixture clusters are unchanged.
+- [x] **Clean the failure text before embedding.** The embedded string (`failure_text`) currently uses the raw error message, so IDs, timestamps and numbers in it can split or merge clusters. Mask them with the same rule as `normalise_error`, keep the error wording and the span context, and check the text carries no clinical content. Done when two traces that differ only in ids, timestamps or numbers produce the same text, and the fixture clusters are unchanged.
 - [x] **Write the taxonomy file.** `taxonomy.md` with a definition and one example per category, loaded into the diagnoser prompt. Done when every category has both.
 - [ ] **Build the diagnoser.** A create\_agent with the taxonomy as system prompt, the read-only trace tools, the cluster's exemplar spans as input, response\_format=Diagnosis and a recursion limit of about 12, instead of a single call through `with_structured_output(Diagnosis)`. Done when it returns a valid `Diagnosis` for each fixture cluster.
 - [ ] **Diagnose unclustered failures individually.** Turn each id in `unclustered` into a one-trace `ClusterTask` (`method` `singleton`) and fan it out with the cluster tasks, up to a cap constant; list the ids over the cap in the run summary. The graph ends early only when there are no clusters and nothing unclustered. Done when a fixture run with one isolated failure returns a diagnosis for it, and a run over the cap reports the skipped ids.
