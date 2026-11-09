@@ -16,6 +16,7 @@ import asyncio
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.store.base import BaseStore
+from langgraph.types import Send
 
 from agent.context import TraceContext
 from agent.embeddings import FastEmbedEmbedder
@@ -23,12 +24,9 @@ from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model
 from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
+from agent.nodes.diagnose_cluster import diagnose_cluster
+from agent.schemas import ClusterTask
 from agent.state import TriageState
-
-
-def diagnose_cluster(state: TriageState) -> dict:
-    """Diagnose each cluster, citing trace ids and spans as evidence."""
-    return {"diagnoses": [{"cluster_id": "c0", "category": "unknown"}]}
 
 
 def join_diagnoses(state: TriageState) -> dict:
@@ -66,9 +64,12 @@ def route_after_collect(state: TriageState) -> str:
     return "cluster_failures" if state.get("failed_traces") else END
 
 
-def route_after_cluster(state: TriageState) -> str:
-    """No clusters (e.g. all noise): end the run."""
-    return "diagnose_cluster" if state.get("clusters") else END
+def route_after_cluster(state: TriageState) -> list[Send] | str:
+    """One parallel diagnose branch per cluster; no clusters (e.g. all noise): end the run."""
+    clusters = state.get("clusters")
+    if not clusters:
+        return END
+    return [Send("diagnose_cluster", ClusterTask(cluster=c)) for c in clusters]
 
 
 def route_after_review(state: TriageState) -> str:

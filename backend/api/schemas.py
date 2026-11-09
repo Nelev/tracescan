@@ -15,5 +15,6 @@ class RunResponse(BaseModel):
     clusters: int
     unclustered: int  # failures that fit no cluster; kept, not diagnosed
     diagnoses: int
+    diagnosis_failures: int  # clusters whose diagnosis failed; reported, not dropped
     proposals: int
     actions_log: list[str]

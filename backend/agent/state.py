@@ -1,4 +1,5 @@
-from typing import Required, TypedDict
+import operator
+from typing import Annotated, Required, TypedDict
 
 from agent.schemas import Cluster
 
@@ -11,7 +12,10 @@ class TriageState(TypedDict, total=False):
     clusters: list[Cluster]
     # Trace ids that fit no cluster, even after regrouping the noise. Kept, but not diagnosed.
     unclustered: list[str]
-    diagnoses: list[dict]
+    # Appended to by the parallel diagnose branches, one entry per diagnosed cluster.
+    diagnoses: Annotated[list[dict], operator.add]
+    # Ids of clusters whose diagnosis failed. Kept, never dropped, so the run can report them.
+    diagnosis_failures: Annotated[list[str], operator.add]
     reproductions: list[dict]
     known_matches: dict[str, str]
     proposals: list[dict]

@@ -11,7 +11,15 @@ from langgraph.store.memory import InMemoryStore
 from agent.graph import build_graph
 from api import runs
 from main import app
-from tests.fakes import FakeTraces, HashingEmbedder, fake_model, summary
+from tests.fakes import (
+    DIAGNOSIS,
+    FakeTraces,
+    HashingEmbedder,
+    fake_diagnoser,
+    fake_model,
+    span_tree,
+    summary,
+)
 
 
 def use_traces(monkeypatch, fake: FakeTraces) -> None:
@@ -36,7 +44,9 @@ async def client():
 
 @pytest.mark.anyio
 async def test_run_returns_counts_not_raw_traces(client, monkeypatch):
-    use_traces(monkeypatch, FakeTraces([summary("tr_1"), summary("tr_2")]))
+    trees = {t: span_tree(t) for t in ("tr_1", "tr_2")}
+    use_traces(monkeypatch, FakeTraces([summary("tr_1"), summary("tr_2")], trees))
+    app.state.model = fake_diagnoser(DIAGNOSIS)
     response = await client.post("/v1/runs", json={"target_app": "medas"})
     assert response.status_code == 200
     body = response.json()
@@ -46,6 +56,7 @@ async def test_run_returns_counts_not_raw_traces(client, monkeypatch):
         "clusters": 1,
         "unclustered": 0,
         "diagnoses": 1,
+        "diagnosis_failures": 0,
         "proposals": 1,
         "actions_log": ["[dry-run] create_issue c0"],
     }

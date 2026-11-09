@@ -5,20 +5,34 @@ tools of its own: the node fetches the trees, the model answers with a Diagnosis
 """
 
 import asyncio
+import logging
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
 from agent.context import TraceContext
-from agent.schemas import ClusterTask, Diagnosis
+from agent.schemas import Cluster, ClusterTask, Diagnosis
+
+logger = logging.getLogger(__name__)
 
 TAXONOMY = (Path(__file__).parent.parent / "taxonomy.md").read_text()
 
 
 async def diagnose_cluster(task: ClusterTask, runtime: Runtime[TraceContext]) -> dict:
+    """Diagnose one cluster. A failure is recorded, not raised, so it cannot drop the others."""
+    cluster = task["cluster"]
+    try:
+        diagnosis = await _diagnose(cluster, runtime.context)
+    except Exception as exc:
+        # Type name only: the message could carry span contents.
+        logger.error("diagnosis of %s failed: %s", cluster["cluster_id"], type(exc).__name__)
+        return {"diagnosis_failures": [cluster["cluster_id"]]}
+    return {"diagnoses": [diagnosis]}
+
+
+async def _diagnose(cluster: Cluster, context: TraceContext) -> dict:
     """Diagnose one cluster from its exemplar traces, citing their spans as evidence."""
-    cluster, context = task["cluster"], runtime.context
     trees = await asyncio.gather(
         *(context.traces.get_trace_tree(trace_id) for trace_id in cluster["exemplar_trace_ids"])
     )
@@ -33,4 +47,4 @@ async def diagnose_cluster(task: ClusterTask, runtime: Runtime[TraceContext]) ->
     )
     diagnosis = Diagnosis.model_validate(answer).model_dump(mode="json")
     # The cluster id is known, so the model does not get to name it.
-    return {"diagnoses": [{**diagnosis, "cluster_id": cluster["cluster_id"]}]}
+    return {**diagnosis, "cluster_id": cluster["cluster_id"]}
