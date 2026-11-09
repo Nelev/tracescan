@@ -1,6 +1,9 @@
-"""Tuning constants for failure clustering. Revisit once Medas produces real traffic."""
+"""Tuning constants for failure clustering and the diagnoser. Revisit once Medas produces real traffic."""
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # fastembed ONNX model, runs locally
+
+# An OpenRouter slug ("vendor/model"); the DIAGNOSER_MODEL environment variable overrides it.
+DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"
 
 # Below this many failed traces HDBSCAN has too little to work with: group by step and error.
 MIN_TRACES_FOR_HDBSCAN = 6
