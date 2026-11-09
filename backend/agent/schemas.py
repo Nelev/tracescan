@@ -1,6 +1,10 @@
-"""Data contracts of the graph: what nodes put into state and the failure categories."""
+"""Data contracts of the graph: what nodes put into state, the failure categories and the diagnosis."""
 
 from typing import Literal, TypedDict, get_args
+
+from pydantic import BaseModel, Field
+
+from trace_store.models import TraceId
 
 # hdbscan: a dense group found on embeddings. step_error: failures sharing a failing step and error.
 ClusterMethod = Literal["hdbscan", "step_error"]
@@ -34,3 +38,24 @@ FailureCategory = Literal[
 
 # Every category has a section in taxonomy.md; tests/test_taxonomy.py keeps the two in step.
 FAILURE_CATEGORIES: tuple[str, ...] = get_args(FailureCategory)
+
+
+class Evidence(BaseModel):
+    """One piece of evidence for a diagnosis: a span of a trace in the cluster."""
+
+    trace_id: TraceId
+    span_id: TraceId  # the same id shape as a trace id
+    note: str = Field(min_length=1, description="What this span shows that supports the cause.")
+
+
+class Diagnosis(BaseModel):
+    """The diagnoser's answer for one cluster. Nodes keep it in state as a plain dict."""
+
+    cluster_id: str
+    category: FailureCategory
+    root_cause: str = Field(
+        min_length=1, description="The cause, not the symptom, in one or two sentences."
+    )
+    suggested_fix: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+    evidence: list[Evidence] = Field(min_length=1)

@@ -20,14 +20,16 @@ from contextlib import AsyncExitStack
 from datetime import timedelta
 from pathlib import Path
 
+from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import StdioConnection
+from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
 
 from trace_store.models import FailedTraceQuery, TraceSummary
 
 SERVER_NAME = "traces"
-CALL_TIMEOUT = timedelta(seconds=30)  # so a hung server cannot hang the graph
+REQUEST_TIMEOUT = timedelta(seconds=30)  # so a hung server cannot hang the graph
 # The stdio client passes the subprocess only a minimal environment; anything the
 # server needs later (e.g. the read-only DB URL) must be added under "env".
 TRACE_SERVER: StdioConnection = {
@@ -35,6 +37,8 @@ TRACE_SERVER: StdioConnection = {
     "command": sys.executable,
     "args": ["-m", "trace_store.mcp_server"],
     "cwd": Path(__file__).parent.parent,  # backend/, so trace_store is importable
+    # Default for every request, including the tools() calls, which the adapters make unbounded.
+    "session_kwargs": {"read_timeout_seconds": REQUEST_TIMEOUT},
 }
 
 
@@ -54,14 +58,22 @@ class TraceClient:
         await self._stack.aclose()
         self._session = None
 
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
-        """Failed traces matching the query, newest first."""
+    def _open_session(self) -> ClientSession:
         if self._session is None:
             raise RuntimeError("TraceClient must be used as an async context manager")
-        result = await self._session.call_tool(
-            "search_failed_traces",
-            {"query": query.model_dump(mode="json", exclude_none=True)},
-            read_timeout_seconds=CALL_TIMEOUT,
+        return self._session
+
+    async def tools(self) -> list[BaseTool]:
+        """The server's read-only tools as LangChain tools, for the diagnoser agent.
+
+        They share this session, so use them inside the `async with`.
+        """
+        return await load_mcp_tools(self._open_session())
+
+    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
+        """Failed traces matching the query, newest first."""
+        result = await self._open_session().call_tool(
+            "search_failed_traces", {"query": query.model_dump(mode="json", exclude_none=True)}
         )
         if result.isError:
             raise RuntimeError(f"search_failed_traces failed: {result.content}")
