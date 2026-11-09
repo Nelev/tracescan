@@ -73,7 +73,8 @@ function Field({
 
 export function RunPanel() {
   const [targetApp, setTargetApp] = useState("medas");
-  const [win, setWin] = useState<WindowId>("24h");
+  // All, not a recent window: the trace store is still the fixture, dated 2026-11-05.
+  const [win, setWin] = useState<WindowId>("all");
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
