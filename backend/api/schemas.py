@@ -13,7 +13,7 @@ class RunResponse(BaseModel):
     run_id: str  # the graph's thread_id
     failed_traces: int
     clusters: int
-    unclustered: int  # failures that fit no cluster; kept, not diagnosed
+    unclustered: int  # failures that fit no cluster; each is diagnosed on its own
     diagnoses: int
     diagnosis_failures: int  # clusters whose diagnosis failed; reported, not dropped
     proposals: int
