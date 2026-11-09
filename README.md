@@ -74,11 +74,31 @@ flowchart TD
 | `human_review` | `interrupt()` with the proposals; resumes with approve or reject per cluster | No |
 | `apply_actions` | Writes approved proposals only: GitHub, eval dataset, known-issues store. `dry_run` defaults to `True` | Write |
 
+### Clustering and the local embedding pipeline
+
+`cluster_failures` is plain code: no LLM calls, and no failure text leaves the machine.
+
+```text
+failed traces (TraceSummary)
+  -> text per failure:  "<failing step>: <error message> | <signature>"
+  -> local embedding model (fastembed, ONNX, CPU): one 384-number vector per failure
+  -> HDBSCAN: dense groups, plus noise (min_cluster_size=3, min_samples=3)
+  -> noise regrouped by failing step and normalised error; a group of 3 or more becomes a cluster
+  -> clusters + unclustered
+```
+
+- **Text.** Built only from fields already on `TraceSummary`: failing step, error message and signature. No raw span attributes, and scores and timings are left out so they do not pull unrelated failures together.
+- **Embedding.** `BAAI/bge-small-en-v1.5` run through [fastembed](https://github.com/qdrant/fastembed) (ONNX Runtime on the CPU, about 65MB). Similar failures get nearby vectors. The model loads on first use, and the API process shares one instance. Embedding is synchronous and CPU-bound, so the node runs it with `asyncio.to_thread`.
+- **HDBSCAN.** Finds dense groups without being told how many there are, and labels failures that fit no group as noise. The thresholds were tuned on the synthetic fixture with the real model: `min_cluster_size=2` split one group and absorbed an outlier into another. They live in `backend/agent/const.py`.
+- **Second stage.** HDBSCAN cannot see a single dense group (it labels the whole group noise), and one fault often causes most of a run's failures. So the noise is regrouped by failing step and error type (digits and quoted values masked), and a group of 3 or more becomes a cluster.
+- **Small runs.** With fewer than 6 failed traces, embedding is skipped: failures are grouped by step and error type and every group is a cluster, since nothing can be called noise from so little data. The model is not even loaded.
+- **Output.** `clusters` is a list of `Cluster` dicts: `cluster_id` (`c0`, `c1`, … by size, stable for the same input), `trace_ids`, `signature`, `exemplar_trace_ids` (the 3 newest traces) and `method` (`hdbscan` or `step_error`). `unclustered` holds the trace ids that fit no cluster. They are kept and counted in the API response, but not diagnosed in the MVP.
+
 ### State
 
 One shared `TriageState` flows through the graph. Fields filled by parallel branches (`diagnoses`, `reproductions`, `actions_log`) use an append reducer (`Annotated[list[...], operator.add]`), so results merge instead of overwriting. Parallel branches get small private inputs (`ClusterTask`, `ReproTask`), not the whole state, which keeps prompts short.
 
-Key models, all Pydantic: `TraceSummary`, `Cluster`, `Diagnosis` (category, root cause, suggested fix, confidence, cited `Evidence`), `Reproduction`, `IssueProposal`.
+Key models: `TraceSummary`, `Diagnosis` (category, root cause, suggested fix, confidence, cited `Evidence`), `Reproduction` and `IssueProposal` are Pydantic. `Cluster` is a `TypedDict` in `backend/agent/state.py`, because state holds plain dicts.
 
 ### Memory
 
@@ -151,7 +171,7 @@ Run the API (docs at `/docs`). It fails at startup without `DATABASE_URL` and cr
 cd backend && DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres uv run uvicorn main:app --reload
 ```
 
-`POST /v1/runs` with `{"target_app": "medas"}` runs the graph once and returns counts, the actions log and a `run_id`, which is the run's `thread_id`.
+`POST /v1/runs` with `{"target_app": "medas"}` runs the graph once and returns counts (failed traces, clusters, unclustered failures, diagnoses, proposals), the actions log and a `run_id`, which is the run's `thread_id`.
 
 Run the backend tests. Set `TEST_DATABASE_URL` to a Postgres as well to run the persistence test (see the top of `backend/tests/test_persistence.py`):
 
@@ -172,3 +192,41 @@ Run the frontend:
 ```bash
 cd frontend && npm install && npm run dev
 ```
+
+### Running the local embedding model
+
+There is no server to start and no API key. `uv sync` installs the runtime (`fastembed`, ONNX Runtime and scikit-learn; no PyTorch, no GPU). The model weights are not in the repo: the first time the model is needed, fastembed downloads `BAAI/bge-small-en-v1.5` (ONNX, about 65MB) from Hugging Face and caches it. After that it runs inside the Python process, on the CPU.
+
+Small runs never load it (see above), and neither does any normal test: tests use `HashingEmbedder` from `backend/tests/fakes.py`, an offline stand-in, so CI never downloads anything. Only the opt-in test below needs it.
+
+Check that it works. This prints `(1, 384)`, one vector of 384 numbers:
+
+```bash
+cd backend && uv run python -c "from agent.embeddings import FastEmbedEmbedder; print(FastEmbedEmbedder().embed(['retrieve returned 0 chunks']).shape)"
+```
+
+Run the clustering check with the real model against the synthetic fixture (four known groups plus two outliers). It is skipped unless `RUN_SLOW` is set:
+
+```bash
+cd backend && RUN_SLOW=1 uv run pytest -k fastembed
+```
+
+**Where the model is cached.** In `FASTEMBED_CACHE_PATH` if set, otherwise in a `fastembed_cache` folder in the system temp dir (usually `/tmp/fastembed_cache`). Temp dirs are normally cleared on reboot, which means a new download, so point it somewhere persistent:
+
+```bash
+export FASTEMBED_CACHE_PATH=$HOME/.cache/fastembed
+```
+
+**Offline use.** Once the model is cached it loads with the network switched off; set `HF_HUB_OFFLINE=1` to stop any contact with Hugging Face. With an empty cache and no network it fails with `Could not load model ... from any source`. For a container, download the model once and bake the cache folder into the image, or mount it.
+
+**How the model is downloaded and run.** Our code never downloads or runs the model itself. It makes one call, and fastembed (0.9.1) does the rest. This is all of it, in `backend/agent/embeddings.py`:
+
+```python
+self._model = TextEmbedding(EMBEDDING_MODEL)  # first use: download if not cached, then load
+np.asarray(list(self._model.embed(texts)), dtype=np.float32)  # inference
+```
+
+1. **Startup.** The API lifespan in `main.py` creates one `FastEmbedEmbedder()`. That only builds a wrapper, so nothing is downloaded at startup.
+2. **First use.** `cluster_failures` calls `cluster_summaries` through `asyncio.to_thread`. With 6 or more failures, `embed()` calls `_load()`, which creates the `TextEmbedding` under a lock, so concurrent runs load it once.
+3. **Download.** fastembed maps `BAAI/bge-small-en-v1.5` to the Hugging Face repo `Qdrant/bge-small-en-v1.5-onnx-Q` (an ONNX build of the model, `model_optimized.onnx`, plus its tokenizer, about 67MB) and fetches it with Hugging Face's `snapshot_download` into the cache folder. Files that are already cached are checked and reused without the network.
+4. **Inference.** The `tokenizers` library splits each text into tokens, and an ONNX Runtime session on the CPU runs the network. fastembed keeps only the first token's vector (the `[CLS]` token) and scales it to length 1, giving one 384-number vector per text. HDBSCAN then uses cosine distance on those vectors.

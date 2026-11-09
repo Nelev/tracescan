@@ -13,7 +13,7 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.context import TraceContext
 from main import app
-from tests.fakes import FakeTraces, summary
+from tests.fakes import FakeTraces, HashingEmbedder, summary
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
 
@@ -23,7 +23,7 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
 async def test_run_state_survives_restarting_the_app(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
-    context = TraceContext(FakeTraces([summary("t1")]))
+    context = TraceContext(FakeTraces([summary("t1")]), HashingEmbedder())
     async with app.router.lifespan_context(app):
         await app.state.graph.ainvoke({"target_app": "medas"}, config, context=context)
 

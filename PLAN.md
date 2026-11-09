@@ -241,8 +241,8 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 
 ### Phase 2 · Core agents (days 3–5)
 
-- [ ] **Summarise each failure as text.** Failed step, error type, query and score in one short string. Done when summaries for the fixture traces look distinct.
-- [ ] **Cluster the failures.** Embed the summaries and run HDBSCAN; fall back to grouping by step and error type when there are too few traces. Done when the fixture's known groups come out as separate clusters.
+- [x] **Summarise each failure as text.** Failed step, error type, query and score in one short string. Done when summaries for the fixture traces look distinct.
+- [x] **Cluster the failures.** Embed the summaries and run HDBSCAN; fall back to grouping by step and error type when there are too few traces. Done when the fixture's known groups come out as separate clusters.
 - [ ] **Write the taxonomy file.** `taxonomy.md` with a definition and one example per category, loaded into the diagnoser prompt. Done when every category has both.
 - [ ] **Build the diagnoser.** A create\_agent with the taxonomy as system prompt, the read-only trace tools, the cluster's exemplar spans as input, response\_format=Diagnosis and a recursion limit of about 12, instead of a single call through `with_structured_output(Diagnosis)`. Done when it returns a valid `Diagnosis` for each fixture cluster.
 - [ ] **Validate evidence.** Check that every cited trace id and span exists in the cluster; retry once if not, otherwise lower confidence. Done when a test with a fake citation is caught.

@@ -10,6 +10,7 @@ export type RunResponse = {
   run_id: string;
   failed_traces: number;
   clusters: number;
+  unclustered: number; // failures that fit no cluster; kept, not diagnosed
   diagnoses: number;
   proposals: number;
   actions_log: string[];

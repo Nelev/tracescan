@@ -7,12 +7,12 @@ import pytest
 from agent.context import TraceContext
 from agent.graph import build_graph, route_after_cluster, route_after_collect, route_after_review
 from agent.state import TriageState
-from tests.fakes import FakeTraces, summary
+from tests.fakes import FakeTraces, HashingEmbedder, summary
 from trace_store.models import TraceSummary
 
 
 async def run(fake: FakeTraces, state: TriageState) -> dict:
-    return await build_graph().ainvoke(state, context=TraceContext(fake))
+    return await build_graph().ainvoke(state, context=TraceContext(fake, HashingEmbedder()))
 
 
 @pytest.mark.anyio
@@ -63,6 +63,8 @@ async def test_graph_collects_fixture_traces_through_the_real_server(traces):
         "tr_tool_schema",
         "tr_retrieval_miss",
     ]
+    # Two failures are too few for HDBSCAN: one step_error cluster each.
+    assert [c["method"] for c in result["clusters"]] == ["step_error", "step_error"]
 
 
 def test_routes():

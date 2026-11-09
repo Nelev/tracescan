@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
 
+from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
 from api.runs import router as runs_router
 
@@ -16,6 +17,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     async with AsyncPostgresSaver.from_conn_string(os.environ["DATABASE_URL"]) as checkpointer:
         await checkpointer.setup()  # creates the checkpoint tables when missing
         app.state.graph = build_graph(checkpointer, InMemoryStore())
+        app.state.embedder = FastEmbedEmbedder()  # one per process; loads its model on first use
         yield
 
 
