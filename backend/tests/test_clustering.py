@@ -64,10 +64,28 @@ def assert_known_groups(embedder) -> None:
     assert set(unclustered) == OUTLIERS
 
 
-def test_failure_texts_are_distinct():
-    texts = [failure_text(s) for s in load()]
-    assert len(set(texts)) == len(texts)
-    assert all(text.strip() for text in texts)
+def test_failure_texts_of_different_groups_never_coincide():
+    # Failures of one group may differ only in numbers, which are masked; different causes must not.
+    pairs = {(failure_text(s), group_of(s.trace_id)) for s in load()}
+    assert len({text for text, _ in pairs}) == len(pairs)
+
+
+def test_failure_text_masks_numbers_and_keeps_the_wording():
+    def text(ms: int, request: int) -> str:
+        return failure_text(
+            summary(
+                "t1",
+                failing_span_name="generate",
+                error_message=f"missing field 'dose_unit' after {ms} ms",
+                signature=f"request {request} failed at 2026-11-09T09:09:01Z",
+            )
+        )
+
+    assert text(30, 4021) == text(45, 77)
+    assert (
+        text(30, 4021)
+        == "generate: missing field 'dose_unit' after # ms | request # failed at #-#-#T#:#:#Z"
+    )
 
 
 def test_failure_text_names_the_failing_step_and_error():

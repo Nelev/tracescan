@@ -4,10 +4,12 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # fastembed ONNX model, runs locally
 
 # Below this many failed traces HDBSCAN has too little to work with: group by step and error.
 MIN_TRACES_FOR_HDBSCAN = 6
-# Tried on the synthetic fixture with the real model: min_cluster_size=2 / min_samples<=2 split a
-# group and absorbed an unrelated outlier into another; 3 / 3 recovered every group.
+# Tuned on the synthetic fixture with the real model and digit-masked failure texts:
+# min_cluster_size 3 to 5 with min_samples 4 or 5 recovers every group and leaves both outliers
+# out; min_samples <= 3 absorbs an outlier into a group (and min_cluster_size 2 splits a group).
+# min_samples stays above min_cluster_size on purpose.
 MIN_CLUSTER_SIZE = 3  # also the size a step-and-error group needs to rescue noise into a cluster
-MIN_SAMPLES = 3
+MIN_SAMPLES = 4
 MAX_EXEMPLARS = 3  # traces per cluster the diagnoser looks at first
 
 # HDBSCAN fails when it gets fewer traces than either of its size settings.

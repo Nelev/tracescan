@@ -82,14 +82,14 @@ flowchart TD
 failed traces (TraceSummary)
   -> text per failure:  "<failing step>: <error message> | <signature>"
   -> local embedding model (fastembed, ONNX, CPU): one 384-number vector per failure
-  -> HDBSCAN: dense groups, plus noise (min_cluster_size=3, min_samples=3)
+  -> HDBSCAN: dense groups, plus noise (min_cluster_size=3, min_samples=4)
   -> noise regrouped by failing step and normalised error; a group of 3 or more becomes a cluster
   -> clusters + unclustered
 ```
 
-- **Text.** Built only from fields already on `TraceSummary`: failing step, error message and signature. No raw span attributes, and scores and timings are left out so they do not pull unrelated failures together.
+- **Text.** Built only from fields already on `TraceSummary`: failing step, error message and signature. No raw span attributes, and scores and timings are left out so they do not pull unrelated failures together. Digits in the error and signature are masked as `#`, so values that differ between traces do not split one cause.
 - **Embedding.** `BAAI/bge-small-en-v1.5` run through [fastembed](https://github.com/qdrant/fastembed) (ONNX Runtime on the CPU, about 65MB). Similar failures get nearby vectors. The model loads on first use, and the API process shares one instance. Embedding is synchronous and CPU-bound, so the node runs it with `asyncio.to_thread`.
-- **HDBSCAN.** Finds dense groups without being told how many there are, and labels failures that fit no group as noise. The thresholds were tuned on the synthetic fixture with the real model: `min_cluster_size=2` split one group and absorbed an outlier into another. They live in `backend/agent/const.py`.
+- **HDBSCAN.** Finds dense groups without being told how many there are, and labels failures that fit no group as noise. The thresholds were tuned on the synthetic fixture with the real model; what was tried and why is in `backend/agent/const.py`.
 - **Second stage.** HDBSCAN cannot see a single dense group (it labels the whole group noise), and one fault often causes most of a run's failures. So the noise is regrouped by failing step and error type (digits and quoted values masked), and a group of 3 or more becomes a cluster.
 - **Small runs.** With fewer than 6 failed traces, embedding is skipped: failures are grouped by step and error type and every group is a cluster, since nothing can be called noise from so little data. The model is not even loaded.
 - **Output.** `clusters` is a list of `Cluster` dicts: `cluster_id` (`c0`, `c1`, … by size, stable for the same input), `trace_ids`, `signature`, `exemplar_trace_ids` (the 3 newest traces) and `method` (`hdbscan` or `step_error`). `unclustered` holds the trace ids that fit no cluster. They are kept and counted in the API response, but not diagnosed in the MVP.
