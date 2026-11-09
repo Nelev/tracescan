@@ -2,11 +2,14 @@
 
 import numpy as np
 from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from pydantic import Field
 from sklearn.feature_extraction.text import HashingVectorizer
 
-from agent.context import TraceContext, TraceSearch
-from trace_store.models import FailedTraceQuery, TraceSummary
+from agent.context import TraceAccess, TraceContext
+from agent.schemas import Diagnosis
+from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
 
 class HashingEmbedder:
@@ -22,23 +25,47 @@ class HashingEmbedder:
 
 
 class FakeTraces:
-    def __init__(self, found: list[TraceSummary] | None = None) -> None:
+    def __init__(
+        self, found: list[TraceSummary] | None = None, trees: dict[str, SpanNode] | None = None
+    ) -> None:
         self.found = found or []
+        self.trees = trees or {}
         self.queries: list[FailedTraceQuery] = []
 
     async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
         self.queries.append(query)
         return self.found
 
+    async def get_trace_tree(self, trace_id: str) -> SpanNode:
+        return self.trees[trace_id]
+
 
 def fake_model() -> BaseChatModel:
-    """Offline stand-in for the diagnoser's chat model."""
+    """Offline stand-in for the diagnoser's chat model; it is never called."""
     return FakeListChatModel(responses=[])
 
 
-def fake_context(traces: TraceSearch) -> TraceContext:
-    """A run context whose embedder and chat model are offline stand-ins."""
-    return TraceContext(traces, HashingEmbedder(), fake_model())
+class FakeDiagnoserModel(GenericFakeChatModel):
+    """Answers `with_structured_output(Diagnosis)` with a fixed diagnosis, recording what it saw."""
+
+    seen: list[list[BaseMessage]] = Field(default_factory=list)
+
+    def bind_tools(self, tools, **kwargs):
+        return self  # the reply below already is the tool call that structured output parses
+
+    def _generate(self, messages, *args, **kwargs):
+        self.seen.append(messages)
+        return super()._generate(messages, *args, **kwargs)
+
+
+def fake_diagnoser(diagnosis: Diagnosis) -> FakeDiagnoserModel:
+    call = {"name": "Diagnosis", "args": diagnosis.model_dump(mode="json"), "id": "call_1"}
+    return FakeDiagnoserModel(messages=iter([AIMessage(content="", tool_calls=[call])]))
+
+
+def fake_context(traces: TraceAccess, model: BaseChatModel | None = None) -> TraceContext:
+    """A run context whose embedder is an offline stand-in and whose chat model is a fake."""
+    return TraceContext(traces, HashingEmbedder(), model or fake_model())
 
 
 def summary(trace_id: str, **overrides) -> TraceSummary:

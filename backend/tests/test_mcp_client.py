@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from agent.mcp_client import TraceClient
-from trace_store.models import FailedTraceQuery, TraceSummary
+from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
 
 @pytest.mark.anyio
@@ -31,25 +31,16 @@ async def test_one_session_serves_several_calls(traces):
 
 
 @pytest.mark.anyio
+async def test_get_trace_tree_returns_a_typed_span_tree(traces):
+    tree = await traces.get_trace_tree("tr_retrieval_miss")
+    assert isinstance(tree, SpanNode)
+    assert tree.trace_id == "tr_retrieval_miss"
+    assert tree.children
+    with pytest.raises(RuntimeError, match="unknown trace_id"):
+        await traces.get_trace_tree("no_such_trace")
+
+
+@pytest.mark.anyio
 async def test_using_the_client_outside_its_context_raises():
     with pytest.raises(RuntimeError, match="async context manager"):
         await TraceClient().search_failed_traces(FailedTraceQuery(app="medas"))
-    with pytest.raises(RuntimeError, match="async context manager"):
-        await TraceClient().tools()
-
-
-@pytest.mark.anyio
-async def test_tools_are_the_three_read_only_trace_tools(traces):
-    names = {tool.name for tool in await traces.tools()}
-    assert names == {"search_failed_traces", "get_trace_tree", "get_span"}
-
-
-@pytest.mark.anyio
-async def test_a_tool_call_reaches_the_server(traces):
-    tools = {tool.name: tool for tool in await traces.tools()}
-    result = await tools["get_trace_tree"].ainvoke({"trace_id": "tr_retrieval_miss"})
-    assert "tr_retrieval_miss" in str(result)
-    # A call the server rejects comes back as a message, so the agent can adjust instead of the
-    # run crashing.
-    result = await tools["get_trace_tree"].ainvoke({"trace_id": "no_such_trace"})
-    assert "unknown trace_id" in str(result)

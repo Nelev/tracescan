@@ -21,6 +21,12 @@ class Cluster(TypedDict):
     method: ClusterMethod
 
 
+class ClusterTask(TypedDict):
+    """Private input of one diagnose branch: just its cluster, not the whole state."""
+
+    cluster: Cluster
+
+
 FailureCategory = Literal[
     # single-agent causes
     "retrieval_miss",
