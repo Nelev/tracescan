@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from agent.diagnosis import FAILURE_CATEGORIES
+from agent.schemas import FAILURE_CATEGORIES
 
 TAXONOMY = Path(__file__).parent.parent / "agent" / "taxonomy.md"
 

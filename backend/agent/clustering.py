@@ -17,7 +17,7 @@ import numpy as np
 
 from agent.const import MAX_EXEMPLARS, MIN_CLUSTER_SIZE, MIN_SAMPLES, MIN_TRACES_FOR_HDBSCAN
 from agent.embeddings import Embedder
-from agent.state import Cluster, ClusterMethod
+from agent.schemas import Cluster, ClusterMethod
 from trace_store.models import TraceSummary
 
 # Not `from sklearn.cluster import HDBSCAN`: scikit-learn ships no type information, and Pylance's

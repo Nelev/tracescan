@@ -98,7 +98,7 @@ failed traces (TraceSummary)
 
 One shared `TriageState` flows through the graph. Fields filled by parallel branches (`diagnoses`, `reproductions`, `actions_log`) use an append reducer (`Annotated[list[...], operator.add]`), so results merge instead of overwriting. Parallel branches get small private inputs (`ClusterTask`, `ReproTask`), not the whole state, which keeps prompts short.
 
-Key models: `TraceSummary`, `Diagnosis` (category, root cause, suggested fix, confidence, cited `Evidence`), `Reproduction` and `IssueProposal` are Pydantic. `Cluster` is a `TypedDict` in `backend/agent/state.py`, because state holds plain dicts.
+Key models: `TraceSummary`, `Diagnosis` (category, root cause, suggested fix, confidence, cited `Evidence`), `Reproduction` and `IssueProposal` are Pydantic. `Cluster` is a `TypedDict` in `backend/agent/schemas.py`, because state holds plain dicts.
 
 ### Memory
 
@@ -146,7 +146,7 @@ Diagnoses are graded on the injected cause, not just the visible symptom. Metric
 | --- | --- |
 | `PLAN.md` | Scope, architecture, task order and "Done when" checks |
 | `.claude/prds/` | PRD and the generated work-packages brief |
-| `backend/` | Python (FastAPI + LangGraph); `main.py` opens the Postgres checkpointer and is the future trace collector, `api/runs.py` is `POST /v1/runs`, `tracedoctor_graph.py` the graph sketch |
+| `backend/` | Python (FastAPI + LangGraph); `main.py` opens the Postgres checkpointer and is the future trace collector, `api/runs.py` is `POST /v1/runs` (bodies in `api/schemas.py`), `tracedoctor_graph.py` the graph sketch |
 | `frontend/` | Next.js 16 app: a run console today, the trace viewer and review UI later |
 | `tools/board/`, `tracescan-board.html` | Kanban board generator and its output |
 | `CLAUDE.md` | Working rules and commands for Claude Code |

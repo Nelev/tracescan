@@ -1,4 +1,4 @@
-// Mirrors RunRequest / RunResponse in backend/api/runs.py.
+// Mirrors RunRequest / RunResponse in backend/api/schemas.py.
 
 export type RunRequest = {
   target_app: string;
