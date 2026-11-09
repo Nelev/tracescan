@@ -19,8 +19,8 @@ export default function Home() {
           <div className="flex flex-col gap-1 lg:col-span-9">
             <h1>Triage console</h1>
             <p className="type-body text-muted-foreground">
-              Starts a triage run and prints each event as the server streams
-              it.
+              Starts a triage run and shows its progress as the server streams
+              it. Every event is also listed as received under Raw events.
             </p>
           </div>
         </div>

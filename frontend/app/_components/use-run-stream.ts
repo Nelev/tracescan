@@ -2,21 +2,23 @@
 
 import { useEffect, useReducer, useRef } from "react";
 import { openRunStream, RUN_STREAM_PATH, RunError } from "@/lib/api";
-import type { SseMessage } from "@/lib/sse";
 import {
   isFailure,
-  RUN_EVENTS,
-  type RunRequest,
-  runOutcome,
-} from "@/lib/types";
+  outcomeOf,
+  parseRunEvent,
+  type RunEvent,
+} from "@/lib/events";
+import {
+  type Ending,
+  foldEvent,
+  freezeView,
+  INITIAL_VIEW,
+  type RunView,
+} from "@/lib/run-view";
+import type { SseMessage } from "@/lib/sse";
+import type { RunRequest } from "@/lib/types";
 
-export type Phase =
-  | "idle"
-  | "running"
-  | "done"
-  | "failed"
-  | "lost"
-  | "cancelled";
+export type Phase = "idle" | "running" | Ending;
 export type Tone = "muted" | "run" | "ok" | "bad";
 
 export type ConsoleLine = {
@@ -41,12 +43,18 @@ type State = {
   /** `performance.now()` at the start and at the end of the run. */
   startedAt: number | null;
   endedAt: number | null;
+  /** The progress view: a fold over the typed events (lib/run-view.ts). */
+  view: RunView;
 };
 
 type Action =
   | { type: "start"; at: number }
-  | { type: "line"; line: Omit<ConsoleLine, "id">; fromServer?: boolean }
-  | { type: "end"; phase: Phase; at: number }
+  /** A note the console prints on its own. */
+  | { type: "line"; line: Omit<ConsoleLine, "id"> }
+  /** A message from the server: a console line, and its parsed event folded into the view. */
+  | { type: "event"; message: SseMessage; event: RunEvent; at: number }
+  | { type: "batch"; actions: Action[] }
+  | { type: "end"; phase: Ending; at: number }
   | { type: "clear" };
 
 const IDLE: State = {
@@ -56,32 +64,76 @@ const IDLE: State = {
   nextId: 0,
   startedAt: null,
   endedAt: null,
+  view: INITIAL_VIEW,
 };
+
+function eventTone(event: RunEvent): Tone {
+  if (isFailure(event)) return "bad";
+  if (event.kind === "started") return "run";
+  return event.kind === "completed" ? "ok" : "muted";
+}
+
+function appendLine(state: State, line: Omit<ConsoleLine, "id">): State {
+  return {
+    ...state,
+    lines: [...state.lines, { ...line, id: state.nextId }].slice(-MAX_LINES),
+    nextId: state.nextId + 1,
+  };
+}
 
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "start":
       return { ...IDLE, phase: "running", startedAt: action.at };
     case "line":
+      return appendLine(state, action.line);
+    case "event":
+      return {
+        ...appendLine(state, {
+          at: action.at,
+          label: action.message.event,
+          tone: eventTone(action.event),
+          text: action.message.data,
+        }),
+        events: state.events + 1,
+        view: foldEvent(state.view, action.event, action.at),
+      };
+    case "batch":
+      return action.actions.reduce(reduce, state);
+    case "end":
       return {
         ...state,
-        lines: [...state.lines, { ...action.line, id: state.nextId }].slice(
-          -MAX_LINES,
-        ),
-        events: state.events + (action.fromServer ? 1 : 0),
-        nextId: state.nextId + 1,
+        phase: action.phase,
+        endedAt: action.at,
+        view: freezeView(state.view, action.phase),
       };
-    case "end":
-      return { ...state, phase: action.phase, endedAt: action.at };
     case "clear":
       return IDLE;
   }
 }
 
-function eventTone(message: SseMessage): Tone {
-  if (isFailure(message)) return "bad";
-  if (message.event === RUN_EVENTS.started) return "run";
-  return message.event === RUN_EVENTS.completed ? "ok" : "muted";
+/**
+ * Collects actions and applies them together once per animation frame, so a burst of parallel
+ * cluster events is one render, not one per event. `flush` applies what is queued at once; the
+ * run's last actions use it so the end never overtakes the events before it.
+ */
+function createBatcher(dispatch: (action: Action) => void) {
+  const queue: Action[] = [];
+  let frame: number | null = null;
+
+  function flush() {
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
+    if (queue.length > 0) dispatch({ type: "batch", actions: queue.splice(0) });
+  }
+
+  return {
+    push(action: Action) {
+      queue.push(action);
+      frame ??= requestAnimationFrame(flush);
+    },
+    flush,
+  };
 }
 
 /** Runs a triage over the event stream and records everything that comes back as console lines. */
@@ -89,17 +141,21 @@ export function useRunStream() {
   const [state, dispatch] = useReducer(reduce, IDLE);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Aborting ends the run through the catch below, which flushes the batch.
   useEffect(() => () => abortRef.current?.abort(), []);
 
   async function start(body: RunRequest) {
     const controller = new AbortController();
     abortRef.current = controller;
+    const batch = createBatcher(dispatch);
     const t0 = performance.now();
-    const note = (text: string) => dispatch({ type: "line", line: { text } });
-    const end = (phase: Phase) =>
-      dispatch({ type: "end", phase, at: performance.now() });
+    const note = (text: string) => batch.push({ type: "line", line: { text } });
+    const end = (phase: Ending) => {
+      batch.push({ type: "end", phase, at: performance.now() });
+      batch.flush();
+    };
     const lost = (text: string) => {
-      dispatch({
+      batch.push({
         type: "line",
         line: {
           at: performance.now() - t0,
@@ -120,17 +176,14 @@ export function useRunStream() {
 
       let outcome: "done" | "failed" | null = null;
       for await (const message of stream.messages) {
-        dispatch({
-          type: "line",
-          fromServer: true,
-          line: {
-            at: performance.now() - t0,
-            label: message.event,
-            tone: eventTone(message),
-            text: message.data,
-          },
+        const event = parseRunEvent(message);
+        batch.push({
+          type: "event",
+          message,
+          event,
+          at: performance.now() - t0,
         });
-        outcome = runOutcome(message.event) ?? outcome;
+        outcome = outcomeOf(event) ?? outcome;
       }
       if (outcome === null) {
         lost("the stream ended before run_completed or run_failed");
@@ -144,7 +197,7 @@ export function useRunStream() {
         end("cancelled");
       } else if (err instanceof RunError) {
         // Only openRunStream throws RunError, so the run never started.
-        dispatch({
+        batch.push({
           type: "line",
           line: {
             label: "error",
@@ -168,6 +221,7 @@ export function useRunStream() {
     events: state.events,
     startedAt: state.startedAt,
     endedAt: state.endedAt,
+    view: state.view,
     start,
     cancel: () => abortRef.current?.abort(),
     clear: () => dispatch({ type: "clear" }),
