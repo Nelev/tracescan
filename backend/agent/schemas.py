@@ -52,11 +52,16 @@ FailureCategory = Literal[
 FAILURE_CATEGORIES: tuple[str, ...] = get_args(FailureCategory)
 
 
-class Evidence(BaseModel):
-    """One piece of evidence for a diagnosis: a span of a trace in the cluster."""
+class SpanRef(BaseModel):
+    """A span of a trace, by id only: it cannot carry text."""
 
     trace_id: TraceId
     span_id: TraceId  # the same id shape as a trace id
+
+
+class Evidence(SpanRef):
+    """One piece of evidence for a diagnosis: a span of a trace in the cluster."""
+
     note: str = Field(min_length=1, description="What this span shows that supports the cause.")
 
 
@@ -78,3 +83,34 @@ class Diagnosis(BaseModel):
     suggested_fix: str = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
     evidence: list[Evidence] = Field(min_length=1)
+
+
+class RegressionCase(BaseModel):
+    """What the eval dataset keeps of a cluster: ids only, so no span text or input is copied.
+
+    A later replay resolves the inputs from the trace store by id. The same shape is one JSONL
+    line in a dry run and one row of a future regression-cases table.
+    """
+
+    cluster_id: str
+    signature: str
+    category: FailureCategory
+    exemplar_trace_ids: list[str]
+    failing_spans: list[SpanRef]  # the spans the diagnosis cites
+
+
+class Proposal(BaseModel):
+    """One draft for the reviewer: an issue and, when the cluster was diagnosed, a regression case.
+
+    Nodes keep it in state as a plain dict. A cluster without a diagnosis still gets a proposal
+    (`diagnosed` False, no regression case), so a failed cluster is never silently dropped.
+    """
+
+    cluster_id: str
+    title: str
+    body: str  # the issue, as markdown
+    # How far the cause was checked. The MVP never replays a failure, so it is always
+    # "unverified"; the reproducer will set confirmed, flaky or unconfirmed.
+    verification: str = "unverified"
+    diagnosed: bool
+    regression_case: RegressionCase | None = None

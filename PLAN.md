@@ -71,7 +71,7 @@ One shared state object flows through the graph; the two fields filled by parall
 | `diagnosis_failures` | list\[str\], append reducer | diagnose\_cluster (parallel) | Ids of clusters whose diagnosis failed; reported, not dropped |
 | `reproductions` | list\[Reproduction\], append reducer | reproduce\_failure (parallel) | Unverified in the MVP; with replay, confirmed, flaky or unconfirmed |
 | `known_matches` | dict cluster → issue id | match\_known\_issues | Links to issues from earlier runs |
-| `proposals` | list\[IssueProposal\] | draft\_proposals | Create or update issue, body, regression case |
+| `proposals` | list\[Proposal\] | draft\_proposals | Create or update issue, body, regression case |
 | `decisions` | dict cluster → approve/reject | human\_review | Supplied by the reviewer on resume |
 | `actions_log` | list\[str\], append reducer | apply\_actions | What was written, or would be in dry run |
 
@@ -268,7 +268,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 
 ### Phase 3 · Loop and eval (days 6–10)
 
-- [ ] **Template the proposals.** A markdown issue template (summary, evidence, suspected cause, fix, verification status) and a regression-case format that fits a regression-cases table in Postgres. Done when `draft_proposals` fills both for each cluster.
+- [x] **Template the proposals.** A markdown issue template (the `_issue` function in `agent/proposals.py`: summary, evidence, suspected cause, fix, verification status) and a regression-case format that fits a regression-cases table in Postgres (`RegressionCase`: ids only, no span text). `draft_proposals` is code, no model call (`agent/proposals.py`), and a cluster without a diagnosis still gets a stub proposal. Done when `draft_proposals` fills both for each cluster.
 - [ ] **Wire the human review.** A small CLI that shows each proposal and asks approve or reject, then resumes with `Command(resume=...)`. Done when a run pauses, takes your input and continues.
 - [ ] **Set up LangGraph Studio.** Add the `local` flag to `build_graph`, a `langgraph.json`, and run `langgraph dev`. Done when you can approve proposals from the Studio UI.
 - [ ] **Implement dry-run actions.** `apply_actions` writes each approved issue to `out/issues/<cluster>.md` and appends regression cases to a local JSONL file. Done when a dry run produces those files and nothing else.
@@ -318,9 +318,10 @@ The biggest risk is not the agent logic but producing enough realistic failing t
 | Building the tracing stack takes time | About 3–4 days less for stretch goals | Keep the store to three tables and the MCP server to three tools; real GitHub issues and MAST-Data stay stretch only |
 | Diagnoser overconfident on vague clusters | False positives filed | Require cited evidence; show verification status and confidence on every proposal; grade root cause, not symptom, in the eval |
 | Pydantic objects in checkpoints | LangGraph warns now and will block later | Register the models module with the serializer, or store plain dicts |
+| Proposal text echoes clinical content | The diagnoser sees span attributes, and its prose (cause, fix, evidence notes) goes into the issue body | Regression cases and evidence carry ids only; dry run by default and the human review gate come before any write; add a PII scan of proposal text before real GitHub issues |
 | LLM cost of triage runs | Budget overrun during eval | Clustering in code; LLM calls only per cluster, not per trace; the one exception, unclustered failures, is capped per run |
 | Look-alike failures merge, or one cause splits | Wrong or duplicate diagnoses | Embed a cleaned summary; check purity and cause separation against the injected faults before adding any complexity |
-| Rare failures lost as noise | A real issue never reaches the reviewer | Keep `unclustered` and diagnose each one, within the cap |
+| Rare failures lost as noise | A real issue never reaches the reviewer | Keep `unclustered` and diagnose each one |
 
 Decided: no third-party observability platform. Medas is instrumented with OpenTelemetry and sends its traces to TraceScan's own collector and Postgres store, so the project owns the full path from trace to fix. A local Jaeger container may be used in the first days to inspect traces before the own viewer exists.
 

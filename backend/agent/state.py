@@ -21,6 +21,7 @@ class TriageState(TypedDict, total=False):
     model_usage: Annotated[list[dict], operator.add]
     reproductions: list[dict]
     known_matches: dict[str, str]
+    # One Proposal (agent.schemas) per cluster, in cluster order, written by draft_proposals.
     proposals: list[dict]
     decisions: dict[str, str]
     actions_log: list[str]

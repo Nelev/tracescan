@@ -70,7 +70,7 @@ flowchart TD
 | `join_diagnoses` | No-op barrier that waits for every diagnosis | No |
 | `reproduce_failure` ×N | Stretch: replays exemplar inputs in a sandbox. In the MVP it only marks the diagnosis `unverified` | Execute (stretch) |
 | `match_known_issues` | Links clusters to issues from earlier runs via the long-term store | Read |
-| `draft_proposals` | Builds a create-or-update issue proposal and a regression case per cluster | No |
+| `draft_proposals` | Drafts a markdown issue and a regression case per cluster, in code with no model call (create-or-update comes with `match_known_issues`) | No |
 | `human_review` | `interrupt()` with the proposals; resumes with approve or reject per cluster | No |
 | `apply_actions` | Writes approved proposals only: GitHub, eval dataset, known-issues store. `dry_run` defaults to `True` | Write |
 
@@ -98,7 +98,7 @@ failed traces (TraceSummary)
 
 One shared `TriageState` flows through the graph. Fields filled by parallel branches (`diagnoses`, `reproductions`, `actions_log`) use an append reducer (`Annotated[list[...], operator.add]`), so results merge instead of overwriting. Parallel branches get small private inputs (`ClusterTask`, `ReproTask`), not the whole state, which keeps prompts short.
 
-Key models: `TraceSummary`, `Diagnosis` (category, root cause, suggested fix, confidence, cited `Evidence`), `Reproduction` and `IssueProposal` are Pydantic. `Cluster` is a `TypedDict` in `backend/agent/schemas.py`, because state holds plain dicts.
+Key models: `TraceSummary`, `Diagnosis` (category, root cause, suggested fix, confidence, cited `Evidence`), `Reproduction` and `Proposal` are Pydantic. `Cluster` is a `TypedDict` in `backend/agent/schemas.py`, because state holds plain dicts.
 
 ### Memory
 
@@ -123,7 +123,7 @@ Checkpoints hold graph state in Postgres, so state stays at trace ids and signat
 
 `backend/tracedoctor_graph.py` is the starting point and runs end to end with fake data. It differs from the target design in a few places:
 
-- `collect_traces`, `cluster_failures` and `diagnose_cluster` are real; the other nodes are stubs.
+- `collect_traces`, `cluster_failures`, `diagnose_cluster` and `draft_proposals` are real; the other nodes are stubs.
 - It still mentions Langfuse in comments (stale: the project builds its own tracing stack).
 - `draft_proposals` skips clusters that did not reproduce. The MVP rule is the opposite: keep every cluster and mark it `unverified`.
 
