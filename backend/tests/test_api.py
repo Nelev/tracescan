@@ -12,6 +12,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
 from agent.graph import build_graph
+from agent.schemas import Proposal
 from api import runs
 from main import app
 from tests.fakes import (
@@ -150,14 +151,35 @@ async def test_stream_reports_progress_then_the_same_summary_as_the_sync_run(cli
 
     names = [name for name, _ in events]
     assert names[0] == "run_started" and names[-1] == "run_completed"
-    assert set(names[1:-1]) == {"progress"}
+    assert set(names[1:-1]) == {"progress", "proposal"}
     assert events[1][1]["node"] == "collect_traces"
-    assert "tr_1" not in response.text and "tr_2" not in response.text  # no trace content
+    progress = json.dumps([data for name, data in events if name == "progress"])
+    assert "tr_1" not in progress and "tr_2" not in progress  # no trace content in progress
 
     started, completed = events[0][1], events[-1][1]
     sync = (await client.post("/v1/runs", json=body)).json()
     assert UUID(completed["run_id"]) and started == {"run_id": completed["run_id"]}
     assert {**completed, "run_id": None} == {**sync, "run_id": None}
+
+
+@pytest.mark.anyio
+async def test_stream_sends_each_drafted_proposal_between_the_progress_and_the_end(
+    client, monkeypatch
+):
+    trees = {t: span_tree(t, attributes={"patient": PHI}) for t in ("tr_1", "tr_2")}
+    use_traces(monkeypatch, FakeTraces([summary("tr_1"), summary("tr_2")], trees))
+    app.state.model = fake_diagnoser(DIAGNOSIS)
+    response = await client.post("/v1/runs/stream", json={"target_app": "medas"})
+    events = parse_sse(response.text)
+
+    names = [name for name, _ in events]
+    first = names.index("proposal")
+    assert "progress" not in names[first:]
+    assert names[first:] == ["proposal"] * (len(names) - first - 1) + ["run_completed"]
+    proposals = [Proposal.model_validate(data) for name, data in events if name == "proposal"]
+    assert len(proposals) == events[-1][1]["proposals"] > 0
+    assert all(p.diagnosed and "## Suspected cause" in p.body for p in proposals)
+    assert PHI not in response.text  # span attributes never reach the stream
 
 
 @pytest.mark.anyio
