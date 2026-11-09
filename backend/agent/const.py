@@ -19,5 +19,9 @@ MIN_CLUSTER_SIZE = 3  # also the size a step-and-error group needs to rescue noi
 MIN_SAMPLES = 4
 MAX_EXEMPLARS = 3  # traces per cluster the diagnoser looks at first
 
+# A diagnosis still citing spans it was not shown after one retry is capped at this confidence.
+# A starting value; tune it with the fault-injection eval.
+UNSUPPORTED_CONFIDENCE_CAP = 0.3
+
 # HDBSCAN fails when it gets fewer traces than either of its size settings.
 assert max(MIN_CLUSTER_SIZE, MIN_SAMPLES) <= MIN_TRACES_FOR_HDBSCAN

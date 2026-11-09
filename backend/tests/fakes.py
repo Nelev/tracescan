@@ -1,16 +1,18 @@
 """Test doubles shared by the graph and API tests."""
 
-from itertools import cycle
+import re
+from collections.abc import Callable
 
 import numpy as np
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import Field
 from sklearn.feature_extraction.text import HashingVectorizer
 
 from agent.context import TraceAccess, TraceContext
-from agent.schemas import Diagnosis
+from agent.schemas import Diagnosis, Evidence
 from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
 
@@ -48,9 +50,10 @@ def fake_model() -> BaseChatModel:
 
 
 class FakeDiagnoserModel(GenericFakeChatModel):
-    """Answers `with_structured_output(Diagnosis)` with a fixed diagnosis, recording what it saw."""
+    """Answers `with_structured_output(Diagnosis)` with `answer(messages)`, recording the calls."""
 
     seen: list[list[BaseMessage]] = Field(default_factory=list)
+    answer: Callable[[list[BaseMessage]], Diagnosis]
 
     def with_structured_output(self, schema, *, method=None, **kwargs):
         # Accepts `method` like ChatOpenRouter does, but the fake only ever answers with a tool call.
@@ -61,13 +64,38 @@ class FakeDiagnoserModel(GenericFakeChatModel):
 
     def _generate(self, messages, *args, **kwargs):
         self.seen.append(messages)
-        return super()._generate(messages, *args, **kwargs)
+        args = self.answer(messages).model_dump(mode="json")
+        call = {"name": "Diagnosis", "args": args, "id": "call_1"}
+        return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+
+
+# The first span of a tree in the prompt, as the prompt prints it (span_id comes first).
+_SPAN_IN_PROMPT = re.compile(r'"span_id":"([^"]+)","trace_id":"([^"]+)"')
+
+
+def first_span_shown(messages: list[BaseMessage]) -> Evidence:
+    """What a careful diagnoser cites: the first span of the first trace in the prompt."""
+    span_id, trace_id = _SPAN_IN_PROMPT.search(str(messages[1].content)).groups()  # type: ignore[union-attr]
+    return Evidence(trace_id=trace_id, span_id=span_id, note="retrieve returned nothing")
 
 
 def fake_diagnoser(diagnosis: Diagnosis) -> FakeDiagnoserModel:
-    """A model that gives the same answer however many clusters ask."""
-    call = {"name": "Diagnosis", "args": diagnosis.model_dump(mode="json"), "id": "call_1"}
-    return FakeDiagnoserModel(messages=cycle([AIMessage(content="", tool_calls=[call])]))
+    """A well-behaved model: every cluster gets `diagnosis`, citing a span it was really shown."""
+    return FakeDiagnoserModel(
+        messages=iter(()),
+        answer=lambda messages: diagnosis.model_copy(
+            update={"evidence": [first_span_shown(messages)]}
+        ),
+    )
+
+
+def scripted_diagnoser(*answers: Diagnosis) -> FakeDiagnoserModel:
+    """Gives each call the next answer, verbatim (citations included), then repeats the last."""
+    remaining = list(answers)
+    return FakeDiagnoserModel(
+        messages=iter(()),
+        answer=lambda _: remaining.pop(0) if len(remaining) > 1 else remaining[0],
+    )
 
 
 def fake_context(traces: TraceAccess, model: BaseChatModel | None = None) -> TraceContext:
