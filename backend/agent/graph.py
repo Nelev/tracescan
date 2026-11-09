@@ -7,6 +7,9 @@ Flow (diagnose_cluster runs once per cluster, in parallel, through Send):
     -> reproduce_failure -> match_known_issues -> draft_proposals
     -> human_review -> apply_actions -> END
 
+A transient model error leaves a cluster unfinished: join_diagnoses then sends it back to
+diagnose_cluster, which checks the cluster's budget in `model_usage` before and after each run.
+
 Conditional edges end the run early when no traces failed, when no clusters were
 found, or when no proposal was approved. interrupt() comes later.
 """
@@ -32,7 +35,7 @@ from agent.state import TriageState
 
 
 def join_diagnoses(state: TriageState) -> dict:
-    """Barrier after the diagnose branches."""
+    """Barrier after each round of diagnose branches; the router after it may start another."""
     return {}
 
 
@@ -66,12 +69,40 @@ def route_after_collect(state: TriageState) -> str:
     return "cluster_failures" if state.get("failed_traces") else END
 
 
+def diagnose_sends(state: TriageState) -> list[Send]:
+    """One diagnose branch per cluster that has neither a diagnosis nor a recorded failure.
+
+    A branch sees only its payload, so each carries the cluster's `model_usage` entries: the
+    budget the node checks before and after its run.
+    """
+    done = {d["cluster_id"] for d in state.get("diagnoses", [])}
+    done |= set(state.get("diagnosis_failures", []))
+    usage = state.get("model_usage", [])
+    return [
+        Send(
+            "diagnose_cluster",
+            ClusterTask(
+                cluster=c,
+                model_usage=[u for u in usage if u["cluster_id"] == c["cluster_id"]],
+            ),
+        )
+        for c in state.get("clusters", [])
+        if c["cluster_id"] not in done
+    ]
+
+
 def route_after_cluster(state: TriageState) -> list[Send] | str:
     """One parallel diagnose branch per cluster; no clusters (e.g. all noise): end the run."""
-    clusters = state.get("clusters")
-    if not clusters:
-        return END
-    return [Send("diagnose_cluster", ClusterTask(cluster=c)) for c in clusters]
+    return diagnose_sends(state) or END
+
+
+def route_after_join(state: TriageState) -> list[Send] | str:
+    """Run the diagnose branch again for each cluster a transient error left unfinished.
+
+    The node leaves a cluster unfinished only while it has budget, and every run uses up at
+    least one attempt, so the loop ends. Nothing left to diagnose: carry on.
+    """
+    return diagnose_sends(state) or "reproduce_failure"
 
 
 def route_after_review(state: TriageState) -> str:
@@ -100,7 +131,9 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_conditional_edges("collect_traces", route_after_collect, ["cluster_failures", END])
     g.add_conditional_edges("cluster_failures", route_after_cluster, ["diagnose_cluster", END])
     g.add_edge("diagnose_cluster", "join_diagnoses")
-    g.add_edge("join_diagnoses", "reproduce_failure")
+    g.add_conditional_edges(
+        "join_diagnoses", route_after_join, ["diagnose_cluster", "reproduce_failure"]
+    )
     g.add_edge("reproduce_failure", "match_known_issues")
     g.add_edge("match_known_issues", "draft_proposals")
     g.add_edge("draft_proposals", "human_review")

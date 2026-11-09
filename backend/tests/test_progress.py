@@ -10,10 +10,13 @@ from agent.progress import COUNTED_KEYS, ProgressEvent, progress_events
 from agent.state import TriageState
 from tests.fakes import (
     DIAGNOSIS,
+    FakeApiError,
+    FakeDiagnoserModel,
     FakeTraces,
     fake_context,
     fake_diagnoser,
     fake_model,
+    first_span_shown,
     span_tree,
     summary,
 )
@@ -76,6 +79,27 @@ async def test_a_cluster_whose_diagnosis_failed_is_flagged_not_dropped():
     assert len(finishes) == 2
     assert all(e["ok"] is False and e["counts"] == {"diagnosis_failures": 1} for e in finishes)
     assert sorted(final["diagnosis_failures"]) == ["c0", "c1"]
+
+
+@pytest.mark.anyio
+async def test_a_cluster_run_again_is_another_branch_and_the_next_stage_starts_once():
+    failed_once = []
+
+    def answer(messages):
+        if not failed_once:
+            failed_once.append(1)
+            raise FakeApiError(503)  # whichever cluster calls first, once
+        return DIAGNOSIS.model_copy(update={"evidence": [first_span_shown(messages)]})
+
+    events, final = await stream_progress(FakeDiagnoserModel(messages=iter(()), answer=answer))
+
+    starts = of(events, "node_started", "diagnose_cluster")
+    assert sorted(e["cluster_id"] for e in starts) in (["c0", "c0", "c1"], ["c0", "c1", "c1"])
+    # The run that left its cluster unfinished reports no result and is not flagged as failed.
+    unfinished = [e for e in of(events, "node_finished", "diagnose_cluster") if not e["counts"]]
+    assert len(unfinished) == 1 and "ok" not in unfinished[0]
+    assert len(of(events, "node_started", "reproduce_failure")) == 1  # the join is a barrier
+    assert len(final["diagnoses"]) == 2
 
 
 @pytest.mark.anyio
