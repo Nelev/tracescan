@@ -218,3 +218,15 @@ export FASTEMBED_CACHE_PATH=$HOME/.cache/fastembed
 ```
 
 **Offline use.** Once the model is cached it loads with the network switched off; set `HF_HUB_OFFLINE=1` to stop any contact with Hugging Face. With an empty cache and no network it fails with `Could not load model ... from any source`. For a container, download the model once and bake the cache folder into the image, or mount it.
+
+**How the model is downloaded and run.** Our code never downloads or runs the model itself. It makes one call, and fastembed (0.9.1) does the rest. This is all of it, in `backend/agent/embeddings.py`:
+
+```python
+self._model = TextEmbedding(EMBEDDING_MODEL)  # first use: download if not cached, then load
+np.asarray(list(self._model.embed(texts)), dtype=np.float32)  # inference
+```
+
+1. **Startup.** The API lifespan in `main.py` creates one `FastEmbedEmbedder()`. That only builds a wrapper, so nothing is downloaded at startup.
+2. **First use.** `cluster_failures` calls `cluster_summaries` through `asyncio.to_thread`. With 6 or more failures, `embed()` calls `_load()`, which creates the `TextEmbedding` under a lock, so concurrent runs load it once.
+3. **Download.** fastembed maps `BAAI/bge-small-en-v1.5` to the Hugging Face repo `Qdrant/bge-small-en-v1.5-onnx-Q` (an ONNX build of the model, `model_optimized.onnx`, plus its tokenizer, about 67MB) and fetches it with Hugging Face's `snapshot_download` into the cache folder. Files that are already cached are checked and reused without the network.
+4. **Inference.** The `tokenizers` library splits each text into tokens, and an ONNX Runtime session on the CPU runs the network. fastembed keeps only the first token's vector (the `[CLS]` token) and scales it to length 1, giving one 384-number vector per text. HDBSCAN then uses cosine distance on those vectors.
