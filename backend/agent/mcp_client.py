@@ -20,13 +20,11 @@ from contextlib import AsyncExitStack
 from datetime import timedelta
 from pathlib import Path
 
-from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import StdioConnection
-from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
 
-from trace_store.models import FailedTraceQuery, TraceSummary
+from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
 SERVER_NAME = "traces"
 REQUEST_TIMEOUT = timedelta(seconds=30)  # so a hung server cannot hang the graph
@@ -37,7 +35,6 @@ TRACE_SERVER: StdioConnection = {
     "command": sys.executable,
     "args": ["-m", "trace_store.mcp_server"],
     "cwd": Path(__file__).parent.parent,  # backend/, so trace_store is importable
-    # Default for every request, including the tools() calls, which the adapters make unbounded.
     "session_kwargs": {"read_timeout_seconds": REQUEST_TIMEOUT},
 }
 
@@ -63,22 +60,21 @@ class TraceClient:
             raise RuntimeError("TraceClient must be used as an async context manager")
         return self._session
 
-    async def tools(self) -> list[BaseTool]:
-        """The server's read-only tools as LangChain tools, for the diagnoser agent.
-
-        They share this session, so use them inside the `async with`.
-        """
-        return await load_mcp_tools(self._open_session())
+    async def _call(self, tool: str, arguments: dict) -> dict:
+        """Call a server tool and return its structured result."""
+        result = await self._open_session().call_tool(tool, arguments)
+        if result.isError:
+            raise RuntimeError(f"{tool} failed: {result.content}")
+        if result.structuredContent is None:
+            raise RuntimeError(f"{tool} returned no structured content: {result.content}")
+        return result.structuredContent
 
     async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
         """Failed traces matching the query, newest first."""
-        result = await self._open_session().call_tool(
-            "search_failed_traces", {"query": query.model_dump(mode="json", exclude_none=True)}
-        )
-        if result.isError:
-            raise RuntimeError(f"search_failed_traces failed: {result.content}")
-        if result.structuredContent is None:
-            raise RuntimeError(
-                f"search_failed_traces returned no structured content: {result.content}"
-            )
-        return [TraceSummary.model_validate(row) for row in result.structuredContent["result"]]
+        args = {"query": query.model_dump(mode="json", exclude_none=True)}
+        rows = (await self._call("search_failed_traces", args))["result"]
+        return [TraceSummary.model_validate(row) for row in rows]
+
+    async def get_trace_tree(self, trace_id: str) -> SpanNode:
+        """One trace's span tree, redacted and truncated by the server."""
+        return SpanNode.model_validate(await self._call("get_trace_tree", {"trace_id": trace_id}))
