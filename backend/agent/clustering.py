@@ -32,12 +32,13 @@ _DIGITS = re.compile(r"\d+")
 def failure_text(summary: TraceSummary) -> str:
     """One short string per failure: failing step, error and signature.
 
-    Uses only fields already on TraceSummary. Scores and timings are left out so they do not pull
-    unrelated failures together.
+    Uses only fields already on TraceSummary. Scores and timings are left out and digits in the
+    error and signature are masked, so values that differ between traces do not split one cause.
     """
     step = summary.failing_span_name or UNKNOWN_STEP
     error = summary.error_message or "no error message"
-    return f"{step}: {error} | {summary.signature}"
+    tail = _DIGITS.sub("#", f"{error} | {summary.signature}")
+    return f"{step}: {tail}"
 
 
 def normalise_error(message: str | None) -> str:
