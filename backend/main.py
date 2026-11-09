@@ -8,6 +8,7 @@ from langgraph.store.memory import InMemoryStore
 
 from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
+from agent.model import build_diagnoser_model
 from api.runs import router as runs_router
 
 
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await checkpointer.setup()  # creates the checkpoint tables when missing
         app.state.graph = build_graph(checkpointer, InMemoryStore())
         app.state.embedder = FastEmbedEmbedder()  # one per process; loads its model on first use
+        app.state.model = build_diagnoser_model()  # needs OPENROUTER_API_KEY, like DATABASE_URL
         yield
 
 

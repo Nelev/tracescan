@@ -4,15 +4,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from agent.context import TraceContext
 from agent.graph import build_graph, route_after_cluster, route_after_collect, route_after_review
 from agent.state import TriageState
-from tests.fakes import FakeTraces, HashingEmbedder, summary
+from tests.fakes import FakeTraces, fake_context, summary
 from trace_store.models import TraceSummary
 
 
 async def run(fake: FakeTraces, state: TriageState) -> dict:
-    return await build_graph().ainvoke(state, context=TraceContext(fake, HashingEmbedder()))
+    return await build_graph().ainvoke(state, context=fake_context(fake))
 
 
 @pytest.mark.anyio

@@ -20,6 +20,7 @@ from langgraph.store.base import BaseStore
 from agent.context import TraceContext
 from agent.embeddings import FastEmbedEmbedder
 from agent.mcp_client import TraceClient
+from agent.model import build_diagnoser_model
 from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
 from agent.state import TriageState
@@ -76,7 +77,7 @@ def route_after_review(state: TriageState) -> str:
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStore | None = None):
-    """Compile the graph. Invoke it with ainvoke(..., context=TraceContext(traces, embedder)).
+    """Compile the graph. Invoke it with ainvoke(..., context=TraceContext(...)), see agent.context.
 
     With a checkpointer, every invoke needs a thread_id in its config.
     """
@@ -108,7 +109,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
 
 async def main() -> None:
     async with TraceClient() as traces:
-        context = TraceContext(traces, FastEmbedEmbedder())
+        context = TraceContext(traces, FastEmbedEmbedder(), build_diagnoser_model())
         result = await build_graph().ainvoke({"target_app": "medas"}, context=context)
     for key, value in result.items():
         print(f"{key}: {value}")

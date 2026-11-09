@@ -5,11 +5,13 @@ The trace session lives for one invocation (see agent.mcp_client), so the compil
 must not hold it. Pass it per call, which also works again after a human-review resume:
 
     async with TraceClient() as traces:
-        await build_graph().ainvoke(input, context=TraceContext(traces, embedder))
+        await build_graph().ainvoke(input, context=TraceContext(traces, embedder, model))
 """
 
 from dataclasses import dataclass
 from typing import Protocol
+
+from langchain_core.language_models import BaseChatModel
 
 from agent.embeddings import Embedder
 from trace_store.models import FailedTraceQuery, TraceSummary
@@ -25,3 +27,4 @@ class TraceSearch(Protocol):
 class TraceContext:
     traces: TraceSearch
     embedder: Embedder  # required: the API passes one shared model, tests pass a HashingEmbedder
+    model: BaseChatModel  # the diagnoser's chat model; tests pass a fake
