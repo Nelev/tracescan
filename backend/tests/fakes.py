@@ -49,8 +49,21 @@ def fake_model() -> BaseChatModel:
     return FakeListChatModel(responses=[])
 
 
+class FakeApiError(Exception):
+    """What the OpenRouter SDK raises for an HTTP error: a status code and a message."""
+
+    def __init__(self, status_code: int, message: str = "boom") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
 class FakeDiagnoserModel(GenericFakeChatModel):
-    """Answers `with_structured_output(Diagnosis)` with `answer(messages)`, recording the calls."""
+    """Answers `with_structured_output(Diagnosis)` with `answer(messages)`, recording the calls.
+
+    `answer` returns a Diagnosis, or raises to make a failing call. Every answer reports 150 tokens
+    and a cost of $0.001, as the real model does.
+    """
 
     seen: list[list[BaseMessage]] = Field(default_factory=list)
     answer: Callable[[list[BaseMessage]], Diagnosis]
@@ -66,7 +79,13 @@ class FakeDiagnoserModel(GenericFakeChatModel):
         self.seen.append(messages)
         args = self.answer(messages).model_dump(mode="json")
         call = {"name": "Diagnosis", "args": args, "id": "call_1"}
-        return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+        message = AIMessage(
+            "",
+            tool_calls=[call],
+            usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            response_metadata={"cost": 0.001},
+        )
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
 
 # The first span of a tree in the prompt, as the prompt prints it (span_id comes first).
@@ -89,13 +108,20 @@ def fake_diagnoser(diagnosis: Diagnosis) -> FakeDiagnoserModel:
     )
 
 
-def scripted_diagnoser(*answers: Diagnosis) -> FakeDiagnoserModel:
-    """Gives each call the next answer, verbatim (citations included), then repeats the last."""
+def scripted_diagnoser(*answers: Diagnosis | Exception) -> FakeDiagnoserModel:
+    """Gives each call the next answer, verbatim (citations included), then repeats the last.
+
+    An Exception in the script is raised instead of answered.
+    """
     remaining = list(answers)
-    return FakeDiagnoserModel(
-        messages=iter(()),
-        answer=lambda _: remaining.pop(0) if len(remaining) > 1 else remaining[0],
-    )
+
+    def answer(_: list[BaseMessage]) -> Diagnosis:
+        item = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    return FakeDiagnoserModel(messages=iter(()), answer=answer)
 
 
 def fake_context(traces: TraceAccess, model: BaseChatModel | None = None) -> TraceContext:

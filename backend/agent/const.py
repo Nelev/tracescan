@@ -23,5 +23,17 @@ MAX_EXEMPLARS = 3  # traces per cluster the diagnoser looks at first
 # A starting value; tune it with the fault-injection eval.
 UNSUPPORTED_CONFIDENCE_CAP = 0.3
 
+# Model calls for one cluster (agent.model_guard). Starting values; tune them with the eval.
+# Every call counts against MAX_MODEL_ATTEMPTS, a retry after an error as much as the evidence
+# re-ask. Past it the cluster is not asked again.
+MAX_MODEL_ATTEMPTS = 3
+RETRY_DELAY_S = 1.0  # before the first retry; doubles after each
+# A cluster that has spent this much is not asked again. The check runs before a re-ask, so a
+# cluster can overshoot by one call. The cost cap applies only when the provider reports a cost.
+MAX_CLUSTER_TOKENS = 100_000
+MAX_CLUSTER_COST_USD = 0.5
+# The SDK's own retry is off (agent.model); this bounds one call so a hung one is retried by us.
+REQUEST_TIMEOUT_MS = 120_000
+
 # HDBSCAN fails when it gets fewer traces than either of its size settings.
 assert max(MIN_CLUSTER_SIZE, MIN_SAMPLES) <= MIN_TRACES_FOR_HDBSCAN
