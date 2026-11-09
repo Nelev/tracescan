@@ -5,12 +5,13 @@ The trace session lives for one invocation (see agent.mcp_client), so the compil
 must not hold it. Pass it per call, which also works again after a human-review resume:
 
     async with TraceClient() as traces:
-        await build_graph().ainvoke(input, context=TraceContext(traces))
+        await build_graph().ainvoke(input, context=TraceContext(traces, embedder))
 """
 
 from dataclasses import dataclass
 from typing import Protocol
 
+from agent.embeddings import Embedder
 from trace_store.models import FailedTraceQuery, TraceSummary
 
 
@@ -23,3 +24,4 @@ class TraceSearch(Protocol):
 @dataclass
 class TraceContext:
     traces: TraceSearch
+    embedder: Embedder  # required: the API passes one shared model, tests pass a HashingEmbedder

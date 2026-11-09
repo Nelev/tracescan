@@ -31,6 +31,7 @@ class RunResponse(BaseModel):
     run_id: str  # the graph's thread_id
     failed_traces: int
     clusters: int
+    unclustered: int  # failures that fit no cluster; kept, not diagnosed
     diagnoses: int
     proposals: int
     actions_log: list[str]
@@ -51,7 +52,7 @@ async def create_run(body: RunRequest, request: Request) -> RunResponse:
     try:
         async with TraceClient() as traces:
             result = await request.app.state.graph.ainvoke(
-                state, config, context=TraceContext(traces)
+                state, config, context=TraceContext(traces, embedder=request.app.state.embedder)
             )
     except Exception as exc:
         # Type name only: the message or traceback could carry span contents.
@@ -62,6 +63,7 @@ async def create_run(body: RunRequest, request: Request) -> RunResponse:
         run_id=run_id,
         failed_traces=len(result.get("failed_traces", [])),
         clusters=len(result.get("clusters", [])),
+        unclustered=len(result.get("unclustered", [])),
         diagnoses=len(result.get("diagnoses", [])),
         proposals=len(result.get("proposals", [])),
         actions_log=result.get("actions_log", []),

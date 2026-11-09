@@ -11,7 +11,7 @@ from langgraph.store.memory import InMemoryStore
 from agent.graph import build_graph
 from api import runs
 from main import app
-from tests.fakes import FakeTraces, summary
+from tests.fakes import FakeTraces, HashingEmbedder, summary
 
 
 def use_traces(monkeypatch, fake: FakeTraces) -> None:
@@ -26,6 +26,7 @@ def use_traces(monkeypatch, fake: FakeTraces) -> None:
 async def client():
     # ASGITransport does not run the lifespan, so attach an in-memory graph to the app here.
     app.state.graph = build_graph(InMemorySaver(), InMemoryStore())
+    app.state.embedder = HashingEmbedder()  # offline: the real model is never downloaded in tests
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as c:
@@ -42,6 +43,7 @@ async def test_run_returns_counts_not_raw_traces(client, monkeypatch):
     assert body == {
         "failed_traces": 2,
         "clusters": 1,
+        "unclustered": 0,
         "diagnoses": 1,
         "proposals": 1,
         "actions_log": ["[dry-run] create_issue c0"],

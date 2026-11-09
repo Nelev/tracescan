@@ -389,6 +389,12 @@ function Result({ result }: { result: RunResponse }) {
         <Stat label="Diagnoses" value={result.diagnoses} />
         <Stat label="Proposals" value={result.proposals} last />
       </dl>
+      {result.unclustered > 0 && (
+        <p className="type-body text-muted-foreground">
+          {result.unclustered} failed trace(s) fit no cluster and were not
+          diagnosed.
+        </p>
+      )}
       {empty && (
         <div>
           <h3>No failures in this window</h3>

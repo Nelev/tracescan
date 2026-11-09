@@ -7,8 +7,8 @@ Flow (linear):
     -> human_review -> apply_actions -> END
 
 Conditional edges end the run early when no traces failed, when no clusters were
-found, or when no proposal was approved. collect_traces is real; the other nodes
-are placeholders. Fan-out (Send) and interrupt() come later.
+found, or when no proposal was approved. collect_traces and cluster_failures are real; the
+other nodes are placeholders. Fan-out (Send) and interrupt() come later.
 """
 
 import asyncio
@@ -18,14 +18,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.store.base import BaseStore
 
 from agent.context import TraceContext
+from agent.embeddings import FastEmbedEmbedder
 from agent.mcp_client import TraceClient
+from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
 from agent.state import TriageState
-
-
-def cluster_failures(state: TriageState) -> dict:
-    """Group failed traces (embeddings + HDBSCAN, no LLM)."""
-    return {"clusters": [{"cluster_id": "c0", "trace_ids": ["t0"]}]}
 
 
 def diagnose_cluster(state: TriageState) -> dict:
@@ -79,7 +76,7 @@ def route_after_review(state: TriageState) -> str:
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStore | None = None):
-    """Compile the graph. Invoke it with ainvoke(..., context=TraceContext(traces)).
+    """Compile the graph. Invoke it with ainvoke(..., context=TraceContext(traces, embedder)).
 
     With a checkpointer, every invoke needs a thread_id in its config.
     """
@@ -111,7 +108,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
 
 async def main() -> None:
     async with TraceClient() as traces:
-        result = await build_graph().ainvoke({"target_app": "medas"}, context=TraceContext(traces))
+        context = TraceContext(traces, FastEmbedEmbedder())
+        result = await build_graph().ainvoke({"target_app": "medas"}, context=context)
     for key, value in result.items():
         print(f"{key}: {value}")
 
