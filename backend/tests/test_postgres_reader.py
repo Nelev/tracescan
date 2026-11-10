@@ -1,34 +1,15 @@
 """The Postgres trace reader, over the spans the collector stores. Needs TEST_DATABASE_URL."""
 
 import pytest
-from sqlalchemy import insert, text
+from sqlalchemy import text
 
 from agent.mcp_client import TraceClient
 from api.traces import decode
-from db.models import Span
+from api.traces import store_spans as store
 from tests.test_traces_api import CHILD_ID, ROOT_ID, START, TRACE_ID, export, post
 from trace_store.models import FailedTraceQuery
-from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
 
 MEDAS = FailedTraceQuery(app="medas")
-
-
-@pytest.fixture
-async def read_only(postgres_url, spans_engine):
-    """The reader's own engine, on the emptied `spans` table."""
-    engine = read_only_engine(postgres_url)
-    yield engine
-    await engine.dispose()
-
-
-@pytest.fixture
-def reader(read_only):
-    return PostgresTraceReader(read_only)
-
-
-async def store(engine, rows):
-    async with engine.begin() as conn:
-        await conn.execute(insert(Span), rows)
 
 
 @pytest.mark.anyio

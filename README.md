@@ -431,6 +431,14 @@ Call the server through the agent's client and print what comes back:
 cd backend && uv run python scripts/demo_client.py
 ```
 
+Fill `spans` with a day of synthetic Medas traffic, most of it failed, so a run can read from Postgres before Medas is instrumented:
+
+```bash
+cd backend && uv run --env-file .env python -m scripts.seed_traces
+```
+
+The day ends now unless `--end` gives another time; the same `--end` twice adds nothing. Runs read them only when `TRACE_DATABASE_URL` is set.
+
 Run the graph once without the API. It stops at the review pause and cannot be resumed, because it has no checkpointer:
 
 ```bash

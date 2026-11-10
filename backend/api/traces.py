@@ -21,6 +21,7 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.trace.v1.trace_pb2 import Span as OtlpSpan
 from opentelemetry.proto.trace.v1.trace_pb2 import Status
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from db.models import Span
 from trace_store.const import ALLOWED_APPS
@@ -99,6 +100,18 @@ def decode(body: bytes) -> list[dict[str, Any]]:
     return rows
 
 
+async def store_spans(engine: AsyncEngine, rows: list[dict[str, Any]]) -> int:
+    """Insert the rows into `spans`; returns how many were new.
+
+    A span already stored is left alone, so an exporter's retry changes nothing.
+    """
+    async with engine.begin() as conn:
+        new = await conn.execute(
+            insert(Span).on_conflict_do_nothing().returning(Span.span_id), rows
+        )
+        return len(new.all())
+
+
 @router.post("/traces")
 async def receive_traces(request: Request) -> Response:
     if request.headers.get("content-type") != PROTOBUF:
@@ -109,9 +122,7 @@ async def receive_traces(request: Request) -> Response:
         raise HTTPException(400, "not an OTLP trace export") from None
     if rows:
         try:
-            async with request.app.state.engine.begin() as conn:
-                # A span already stored is left alone, so an exporter's retry changes nothing.
-                await conn.execute(insert(Span).on_conflict_do_nothing(), rows)
+            await store_spans(request.app.state.engine, rows)
         except Exception as exc:
             # By type only: a database error quotes the row, and so span content.
             logger.error("storing spans failed: %s", type(exc).__name__)
