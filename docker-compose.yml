@@ -1,12 +1,15 @@
 # A local Postgres for development: the graph checkpoints and the users, runs and reviews tables.
 #   docker compose up -d
 #   DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres
-# The password is a local default, and the port is bound to this machine only.
+# The port is bound to this machine only. The password defaults to `tracescan`; to use another,
+# set POSTGRES_PASSWORD in the shell or in a gitignored .env next to this file before the first
+# start (Postgres reads it only when it creates the volume) and use it in DATABASE_URL too.
 services:
   db:
-    image: pgvector/pgvector:pg17
+    # pgvector and the Postgres major are pinned: a moving tag could change either under the data.
+    image: pgvector/pgvector:0.8.7-pg17
     environment:
-      POSTGRES_PASSWORD: tracescan
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tracescan}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
@@ -14,6 +17,7 @@ services:
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
+      timeout: 3s
       retries: 10
 
 volumes:
