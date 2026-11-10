@@ -7,9 +7,9 @@ export type RunRequest = {
 };
 
 /**
- * Event names of POST /v1/runs/stream. `lib/events.ts` parses them into typed events: the
- * progress view reads the progress events, and the console draws the `ui_spec` ones, the UI spec
- * the server's model wrote for the message just before it.
+ * Event names of POST /v1/runs/stream. `lib/events.ts` parses them into typed events: the console
+ * draws the `ui_spec` ones, the UI spec the server's model wrote for the message just before it,
+ * and the raw log lists them all.
  */
 export const RUN_EVENTS = {
   started: "run_started",

@@ -2,18 +2,17 @@
 
 import { Check, X } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { RunView } from "@/lib/run-view";
+import type { UiMessage } from "@/lib/events";
 import { RUN_EVENTS } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { RunProgress } from "./run-progress";
-import type { Phase } from "./use-run-stream";
+import type { ConsoleLine, Phase, Tone } from "./use-run-stream";
 
-// The messages draw with json-render, zod and the package's components, which the progress tab
-// does not need: their own chunk. It starts loading when the reader reaches for the Console tab or
-// a run starts (its messages arrive right after), so it is usually ready by the time it is shown.
+// The messages draw with json-render, zod and the package's components, which the page does not
+// need until a run sends its first message: their own chunk. It starts loading when a run starts
+// (its messages arrive right after), so it is usually ready by the time it is shown.
 const loadUiMessages = () => import("./ui-view").then((m) => m.UiMessages);
 const preloadUiMessages = () => {
   void loadUiMessages();
@@ -23,6 +22,13 @@ const UiMessages = dynamic(loadUiMessages, {
     <p className="type-body p-4 text-muted-foreground">Loading…</p>
   ),
 });
+
+const TONE: Record<Tone, string> = {
+  muted: "text-muted-foreground",
+  run: "text-ring",
+  ok: "text-success",
+  bad: "text-destructive",
+};
 
 const SUCCESS = "border-success/30 bg-success/10 text-success";
 const DESTRUCTIVE = "border-destructive/40 bg-destructive/10 text-destructive";
@@ -67,10 +73,25 @@ const PHASE: Record<
   },
 };
 
+function formatAt(ms: number): string {
+  const s = ms / 1000;
+  return `+${s < 10 ? s.toFixed(2) : s.toFixed(1)}s`;
+}
+
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const mm = String(Math.floor(total / 60)).padStart(2, "0");
   return `${mm}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function toText(lines: ConsoleLine[]): string {
+  return lines
+    .map((l) =>
+      [l.at === undefined ? "" : formatAt(l.at), l.label ?? "", l.text]
+        .filter(Boolean)
+        .join("  "),
+    )
+    .join("\n");
 }
 
 /** The clock ticks here, in a leaf, so the log is not re-rendered every second. */
@@ -117,10 +138,86 @@ function StatusChip({ phase }: { phase: Phase }) {
   );
 }
 
-type Tab = "progress" | "console";
+// A line never changes once printed, so a new batch re-renders only the lines it adds.
+const Line = memo(function Line({ line }: { line: ConsoleLine }) {
+  const head = line.at !== undefined || line.label !== undefined;
+  return (
+    <li className="flex flex-col gap-0.5 sm:grid sm:grid-cols-[4rem_9rem_minmax(0,1fr)] sm:items-baseline sm:gap-x-4">
+      {head && (
+        <span className="flex gap-3 sm:contents">
+          <span className="text-muted-foreground">
+            {line.at === undefined ? "" : formatAt(line.at)}
+          </span>
+          <span className={TONE[line.tone ?? "muted"]}>{line.label}</span>
+        </span>
+      )}
+      <span
+        className={cn(
+          "whitespace-pre-wrap [overflow-wrap:anywhere]",
+          !head && "text-muted-foreground sm:col-start-3",
+        )}
+      >
+        {line.text}
+      </span>
+    </li>
+  );
+});
 
+function emptyText(phase: Phase): string {
+  if (phase === "idle") return "Run a triage to see its messages here.";
+  if (phase === "running") return "Waiting for the first message…";
+  return "The run sent no message that could be shown.";
+}
+
+/**
+ * A fixed-height pane that follows its newest entry, unless the reader scrolled up to look at an
+ * earlier one. `watch` changes whenever an entry is added and is 0 when the run is cleared, which
+ * follows again. Only the open tab's pane is mounted, so opening a tab scrolls it to its newest
+ * entry too.
+ */
+function ScrollPane({
+  watch,
+  children,
+}: {
+  watch: number;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+
+  useEffect(() => {
+    if (watch === 0) following.current = true;
+    const el = ref.current;
+    if (el && following.current) el.scrollTop = el.scrollHeight;
+  }, [watch]);
+
+  function onScroll() {
+    const el = ref.current;
+    if (el) {
+      following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    }
+  }
+
+  return (
+    <div
+      ref={ref}
+      onScroll={onScroll}
+      className="h-[36rem] overflow-y-auto sm:h-[28.75rem]"
+    >
+      {children}
+    </div>
+  );
+}
+
+type Tab = "console" | "raw";
+
+/**
+ * The page's whole output: the messages the server streams, drawn from the UI specs its model
+ * wrote (Console), and the same stream as received (Raw events).
+ */
 export function RunConsole({
-  view,
+  lines,
+  messages,
   phase,
   error,
   events,
@@ -128,7 +225,8 @@ export function RunConsole({
   endedAt,
   onClear,
 }: {
-  view: RunView;
+  lines: ConsoleLine[];
+  messages: UiMessage[];
   phase: Phase;
   /** Why the run did not start or was cut short; shown above the messages. */
   error: string | null;
@@ -138,35 +236,24 @@ export function RunConsole({
   onClear: () => void;
 }) {
   const running = phase === "running";
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
   const [copied, setCopied] = useState(false);
-  const [tab, setTab] = useState<Tab>("progress");
+  const [tab, setTab] = useState<Tab>("console");
 
   useEffect(() => {
     if (running) preloadUiMessages();
   }, [running]);
 
-  // Follow the newest message, unless the reader scrolled up to look at an earlier one. The console
-  // mounts only while its tab is open, so opening the tab scrolls it to the newest message too.
-  const messages = view.messages;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the count and the tab are the triggers
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [messages.length, tab]);
-
-  function onScroll() {
-    const el = scrollRef.current;
-    if (el) {
-      following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-    }
-  }
-
   async function copy() {
     try {
-      const specs = messages.map(({ event, spec }) => ({ event, spec }));
-      await navigator.clipboard.writeText(JSON.stringify(specs, null, 2));
+      await navigator.clipboard.writeText(
+        tab === "console"
+          ? JSON.stringify(
+              messages.map(({ event, spec }) => ({ event, spec })),
+              null,
+              2,
+            )
+          : toText(lines),
+      );
     } catch {
       return; // no clipboard in this context
     }
@@ -180,33 +267,22 @@ export function RunConsole({
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="sr-only">Run output</h2>
           <TabsList aria-label="Run output">
-            <TabsTrigger value="progress">Progress</TabsTrigger>
-            <TabsTrigger
-              value="console"
-              onMouseEnter={preloadUiMessages}
-              onFocus={preloadUiMessages}
-            >
-              Console
-            </TabsTrigger>
+            <TabsTrigger value="console">Console</TabsTrigger>
+            <TabsTrigger value="raw">Raw events</TabsTrigger>
           </TabsList>
           <StatusChip phase={phase} />
         </div>
         <div className="flex gap-2">
-          {tab === "console" && (
-            <Button
-              variant="outline"
-              onClick={copy}
-              disabled={messages.length === 0}
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
-          )}
           <Button
             variant="outline"
-            onClick={() => {
-              following.current = true;
-              onClear();
-            }}
+            onClick={copy}
+            disabled={(tab === "console" ? messages : lines).length === 0}
+          >
+            {copied ? "Copied" : "Copy"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={onClear}
             disabled={running || phase === "idle"}
           >
             Clear
@@ -216,22 +292,43 @@ export function RunConsole({
 
       {/* Both panels have the same fixed height, so switching tabs does not move the page. */}
       <div className="mx-6 rounded-xl border bg-muted shadow-[inset_0_2px_8px_0_oklch(0.05_0.05_265/0.6)]">
-        <TabsContent value="progress" className="h-[36rem] sm:h-[28.75rem]">
-          <RunProgress view={view} phase={phase} />
-        </TabsContent>
         <TabsContent value="console">
-          <div
-            ref={scrollRef}
-            onScroll={onScroll}
-            className="h-[36rem] overflow-y-auto sm:h-[28.75rem]"
-          >
+          <ScrollPane watch={messages.length}>
             {error && (
               <p role="alert" className="type-body px-4 pt-4 text-destructive">
                 {error}
               </p>
             )}
-            <UiMessages messages={messages} phase={phase} />
-          </div>
+            {messages.length === 0 ? (
+              <p className="type-body p-4 text-muted-foreground">
+                {emptyText(phase)}
+              </p>
+            ) : (
+              <UiMessages messages={messages} />
+            )}
+          </ScrollPane>
+        </TabsContent>
+        <TabsContent value="raw">
+          <ScrollPane watch={lines.at(-1)?.id ?? 0}>
+            <ol
+              role="log"
+              aria-label="Events as they arrive"
+              className="type-body flex min-h-full flex-col justify-end gap-2 p-4 font-mono"
+            >
+              {lines.length === 0 ? (
+                <li className="text-muted-foreground">
+                  Run a triage to see its events here.
+                </li>
+              ) : (
+                lines.map((line) => <Line key={line.id} line={line} />)
+              )}
+              {running && (
+                <li aria-hidden="true">
+                  <span className="inline-block h-4 w-2 bg-primary align-[-3px] motion-safe:animate-pulse" />
+                </li>
+              )}
+            </ol>
+          </ScrollPane>
         </TabsContent>
       </div>
 

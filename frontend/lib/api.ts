@@ -8,7 +8,7 @@ export class RunError extends Error {
   }
 }
 
-const RUN_STREAM_PATH = "/api/runs/stream";
+export const RUN_STREAM_PATH = "/api/runs/stream";
 
 export type RunStream = {
   status: number;
