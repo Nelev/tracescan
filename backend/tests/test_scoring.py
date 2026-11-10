@@ -1,5 +1,7 @@
 """The scoring job: what each check says about a trace, and that stored traces get scored once."""
 
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import text
 
@@ -55,6 +57,32 @@ def test_every_bad_score_blames_the_span_the_failure_is_in():
     assert blamed[("model_unavailable", "request_failed")] == "chat openai/gpt-4.1-mini"
     assert blamed[("store_down", "request_failed")] == "retrieval record_chunks"
     assert blamed[("unexplained", "request_failed")] == "invoke_agent medas"  # nothing below it
+
+
+def test_a_failure_recorded_only_as_an_error_type_attribute_is_scored_too():
+    # A tool that reports a failure without raising leaves no exception event (Medas).
+    at = datetime(2026, 11, 10, tzinfo=UTC)
+
+    def span(span_id, parent, operation, status="unset", error_type=None):
+        attributes = {"gen_ai.operation.name": operation}
+        if error_type:
+            attributes["error.type"] = error_type
+        return {
+            "span_id": span_id,
+            "parent_span_id": parent,
+            "name": f"{operation} {span_id}",
+            "start_time": at,
+            "status": status,
+            "attributes": attributes,
+            "events": [],
+        }
+
+    root = span("root", None, "invoke_agent")
+    reported = span("tool", "root", "execute_tool", "error", "ToolReportedError")
+    timed_out = span("tool", "root", "execute_tool", "error", "httpx.ReadTimeout")
+
+    assert score_trace([root, reported])["tool_error"] == (BAD, "tool")
+    assert score_trace([root, timed_out])["timeout"] == (BAD, "tool")
 
 
 @pytest.mark.anyio

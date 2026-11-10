@@ -19,6 +19,7 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
 | Eval on seeded traces (`backend/eval/`) | Working: ground truth, runner, coded scores and a judge for the root cause, on plain faults and hard cases (look-alikes, false positives, a failure with no error). It shows the diagnoses hold up and the clustering mixes look-alike failures |
+| Medas instrumentation | Built in the Medas repo (`medas-api/tracing/`, branch `feat/otel-tracing`, not merged): one trace per agent run, exported to the collector, with no patient text on any span. Checked with Medas's real agent and a scripted model; not yet with a real signed-in request |
 | Fault-injection eval in Medas | Not built |
 
 `PLAN.md` holds the scope and the task order.

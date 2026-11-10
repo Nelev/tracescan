@@ -24,10 +24,14 @@ SAFE_ATTRIBUTE_KEYS = frozenset(
         "gen_ai.provider.name",
         "gen_ai.operation.name",
         "gen_ai.tool.name",
+        "gen_ai.tool.type",
+        "gen_ai.agent.name",
+        "gen_ai.data_source.id",
         "retrieval.top_k",
         "retrieval.hits",
         "retrieval.min_similarity",
         "exception.type",
+        "error.type",
     }
 )
 SAFE_ATTRIBUTE_PREFIXES = ("gen_ai.request.", "gen_ai.response.", "gen_ai.usage.")

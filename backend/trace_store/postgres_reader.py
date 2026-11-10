@@ -21,9 +21,11 @@ from trace_store.reader import build_tree
 
 # The columns of a SpanNode (everything but `app`).
 _NODE_COLUMNS = [c for c in Span.__table__.columns if c.name != "app"]
-# The exception type a span recorded, on itself or on its first exception event. Read in SQL,
-# so a search fetches no attributes or events (they can be large, and are span content).
+# What kind of error a span recorded: its `error.type` attribute, else the type of its first
+# exception event. Read in SQL, so a search fetches no attributes or events (they can be large,
+# and are span content).
 _EXCEPTION_TYPE = func.coalesce(
+    Span.attributes["error.type"].astext,
     Span.attributes["exception.type"].astext,
     func.jsonb_path_query_first(
         Span.events, literal_column("""'$[*].attributes."exception.type"'"""), type_=JSONB
