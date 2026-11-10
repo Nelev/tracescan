@@ -45,9 +45,11 @@ def build_tree(spans: list[SpanNode]) -> SpanNode:
 
 
 def _is_failed(summary: TraceSummary, max_score: float) -> bool:
-    return summary.status == "error" or (
-        summary.min_score is not None and summary.min_score <= max_score
-    )
+    """Its lowest score is low. A summary with no score counts a status of error as 0."""
+    score = summary.min_score
+    if score is None:
+        score = 0.0 if summary.status == "error" else 1.0
+    return score <= max_score
 
 
 class _FixtureTrace(BaseModel):

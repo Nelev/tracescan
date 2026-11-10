@@ -97,7 +97,7 @@ def retrieval(rng: Random, error: Error | None = None, hits: int = 5) -> Step:
         "gen_ai.data_source.id": "record_chunks",
     }
     if error is None:
-        attributes["medas.retrieval.hits"] = hits
+        attributes["retrieval.hits"] = hits
     return Step("retrieval record_chunks", SpanKind.CLIENT, attributes, rng.randint(80, 300), error)
 
 

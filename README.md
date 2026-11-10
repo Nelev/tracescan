@@ -14,7 +14,8 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | Graph: `reproduce_failure`, `match_known_issues` | Placeholders that return fixed values |
 | Trace MCP server (read-only, sanitized, budgeted) | Working, over the fixture reader or the Postgres reader |
 | OTLP collector (`POST /v1/traces` into the `spans` table) | Working, minimal: localhost and synthetic traffic only |
-| Postgres trace reader | Simplest version: used when `TRACE_DATABASE_URL` is set, the fixture otherwise. No scores, no read-only role yet |
+| Postgres trace reader | Used when `TRACE_DATABASE_URL` is set, the fixture otherwise. A trace is failed when its lowest score is low. No read-only role yet |
+| Scoring job (`trace_store/scoring.py`) | Working: five heuristic checks score each trace when its root span is stored. No model judge |
 | Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
 | Eval on seeded traces (`backend/eval/`) | Working: ground truth, runner, coded scores and a judge for the root cause, on plain faults and hard cases (look-alikes, false positives, a failure with no error). It shows the diagnoses hold up and the clustering mixes look-alike failures |
@@ -98,7 +99,7 @@ One row per failed trace, small enough to cluster without fetching the tree:
 }
 ```
 
-A trace counts as **failed** when its status is `error`, or when its lowest evaluator score is at or below `max_score` (default 0.5). `signature` is a short text written by the producer, with no clinical content, and is what the clustering embeds.
+A trace counts as **failed** when its lowest score is at or below `max_score` (default 0.5). An error span alone does not make it failed, since an error can be harmless (see the scoring job below); a fixture summary with no score counts a status of `error` as a score of 0. `signature` is a short text written by the producer, with no clinical content, and is what the clustering embeds.
 
 ### SpanNode
 
@@ -130,7 +131,8 @@ medas.request            [error]  answer not grounded in retrieved context
 ### Where traces are stored
 
 - **The fixture**, `backend/trace_store/fixtures/medas_traces.json`: three synthetic traces (two failed, one healthy), each with a summary, flat spans and scores. This is what every run reads today.
-- **The `spans` table**, written by the collector: one row per span, keyed by `trace_id` and `span_id`, with `app`, `name`, `kind`, timing, status, and `attributes` and `events` as JSONB. There is no `traces` table: a trace is the spans that share a `trace_id`. There is no `scores` table yet either.
+- **The `spans` table**, written by the collector: one row per span, keyed by `trace_id` and `span_id`, with `app`, `name`, `kind`, timing, status, and `attributes` and `events` as JSONB. There is no `traces` table: a trace is the spans that share a `trace_id`.
+- **The `scores` table**, written by the scoring job: one row per trace and check, with a value (0.0 bad, 1.0 fine) and the span the check blames, if any. Ids and numbers only.
 
 ## How traces get in: the collector
 
@@ -204,7 +206,21 @@ The graph uses the first two. `get_span` is served but `TraceClient` does not ca
 
 ### The reader
 
-The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. `FixtureTraceReader` is the default. With `TRACE_DATABASE_URL` set, the server uses `PostgresTraceReader` over `spans` instead. It derives the summary fields the fixture stores ready-made: a failed trace is one with an error span, the failing span is the deepest error span, and the signature is that span's name and exception type. It is the simplest version: there are no scores, and its session is read-only but a dedicated read-only role does not exist yet.
+The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. `FixtureTraceReader` is the default. With `TRACE_DATABASE_URL` set, the server uses `PostgresTraceReader` over `spans` instead. It derives the summary fields the fixture stores ready-made: a failed trace is one whose lowest score is low, the failing span is the one that score blames, and the signature is that span's name and its exception type or, without one, the name of the check. Its session is read-only, but a dedicated read-only role does not exist yet.
+
+### The scoring job
+
+A request can fail without an error (a retrieval that finds nothing) and an error can be harmless (a call that was retried and worked), so "has an error span" is the wrong test for failed. `trace_store/scoring.py` scores each trace with plain code, no model: 0.0 is bad, 1.0 is fine, and a check that does not apply gives no score.
+
+| Check | Scores 0.0 when |
+| --- | --- |
+| `request_failed` | The root span has status `error`. Every trace gets this score. It blames the deepest error span, the earliest of several |
+| `timeout` | A tool call failed with a timeout and was not recovered |
+| `tool_schema_error` | A tool call failed with a validation error and was not recovered |
+| `tool_error` | A tool call failed with anything else that is not an expected error, and was not recovered |
+| `empty_retrieval` | A retrieval ran without an error and reports 0 hits |
+
+Recovered means a later call of the same tool in the trace succeeded. Expected errors are a short list in the code (`EXPECTED_ERRORS`, starting with a record that does not exist). Every bad score names the span it blames. A trace is scored once, right after its root span is stored, by the collector and by the seed script; spans that arrive later do not change its scores, and a trace with no scores is not served. Scoring is a step of its own: if it fails, the spans stay stored and the failure is logged. `uv run --env-file .env python -m trace_store.scoring` scores every trace that has no scores.
 
 ### What the server enforces
 
@@ -468,23 +484,22 @@ A seeded day is 48 traces of twelve kinds (`COUNTS` in `scripts/seed_traces.py`,
 | `silent_no_hits` | 4 | A false negative: the retrieval finds nothing and no span fails |
 | `retried_ok`, `not_found` | 3, 3 | False positives: an error span in a request that worked as it should |
 
-The scores of one run on `anthropic/claude-sonnet-5-5`, judged by `openai/gpt-6.1-sol`:
+The scores of one run on `anthropic/claude-sonnet-5-5`, judged by `openai/gpt-6.1-sol`, before and after the scoring job (different seeded days, so read the comparison per row with the notes):
 
-| Score | Meaning | Result |
-| --- | --- | --- |
-| Detection | Seeded faults that are the majority of a diagnosed cluster | 6/9 |
-| Purity | Traces that belong to their cluster's majority fault | 24/36 |
-| Separation | Faults whose traces sit in one cluster that holds nothing else | 3/9 |
-| Rare-failure recall | Faults seeded once that still got a diagnosis | 1/1 |
-| Trace recall | Traces of a fault that reached a cluster at all | 30/34 |
-| False alarms | Clusters that hold a trace with no fault | 1 |
-| Category accuracy | Diagnoses of a fault with its expected category | 6/6 |
-| Evidence valid | Diagnoses whose citations are all real spans | 6/6 |
-| Evidence relevant | Diagnoses that cite the span the trace failed in | 6/6 |
-| Cause accuracy | Diagnoses of a fault the judge scored 2: they name the injected cause | 6/6 |
-| Cost and time | One run | 6 calls, about 34,000 tokens, $0.10, 11 s |
+| Score | Meaning | Before | With scores |
+| --- | --- | --- | --- |
+| Trace recall | Traces of a fault that reached a cluster at all | 30/34 | 34/34 |
+| False alarms | Clusters that hold a trace with no fault | 1 | 0 |
+| Detection | Seeded faults that are the majority of a diagnosed cluster | 6/9 | 5/9 |
+| Purity | Traces that belong to their cluster's majority fault | 24/36 | 23/34 |
+| Separation | Faults whose traces sit in one cluster that holds nothing else | 3/9 | 2/9 |
+| Rare-failure recall | Faults seeded once that still got a diagnosis | 1/1 | 0/1 |
+| Category accuracy | Diagnoses of a fault with its expected category | 6/6 | 4/5 |
+| Evidence valid, relevant | Citations are real spans; they include the failing span | 6/6, 6/6 | 5/5, 5/5 |
+| Cause accuracy | Diagnoses of a fault the judge scored 2: they name the injected cause | 6/6 | 5/5 |
+| Cost and time | One run | 6 calls, $0.10, 11 s | 5 calls, $0.10, 16 s |
 
-What it shows: the diagnoser is right about every cluster it is given, and says `unknown` at low confidence for the failure with no visible cause. The clustering is where the faults are lost. One cluster of 17 traces holds the plain PubMed timeout together with its look-alike, the request with two errors and both kinds of error that are not faults, so three faults get no diagnosis of their own and six harmless requests are filed under a real one. One provider timeout landed with the context overflows. The four silent failures are never collected, since the reader only looks for error spans. A diagnosis is judged against its cluster's majority fault, so cause accuracy says nothing about the faults buried in a mixed cluster: detection, purity and separation do. The judge's agreement with a person's grades (`python -m eval.judge --human c0=2 c1=1 ...`) is not measured yet.
+What it shows: the scoring job did what it was built for. The four failures with no error are now collected, and the six harmless requests with an error span are left out. What remains is the clustering, which now has every fault in front of it and still groups by failing step: the three kinds of PubMed timeout share a cluster, every chat failure shares another, and the silent retrieval misses share one with the single store outage, so the rare fault lost its own diagnosis. The diagnoser noticed that last cluster was mixed and answered `unknown` at 0.4 confidence instead of naming one cause. A diagnosis is judged against its cluster's majority fault, so cause accuracy says nothing about the faults buried in a mixed cluster: detection, purity and separation do. The judge's agreement with a person's grades (`python -m eval.judge --human c0=2 c1=1 ...`) is not measured yet.
 
 [docs/eval-notes.md](docs/eval-notes.md) is the log of the eval experiments: the setup, both runs of the first one (plain faults, then the hard cases), the clusters it produced, the findings, the limits and what to do next.
 

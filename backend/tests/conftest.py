@@ -58,10 +58,10 @@ async def collector():
 
 @pytest.fixture
 async def spans_engine(postgres_url):
-    """The application's engine on an empty `spans` table, also set as the app's engine."""
+    """The application's engine on empty `spans` and `scores`, also set as the app's engine."""
     engine = create_engine(postgres_url)
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE spans"))
+        await conn.execute(text("TRUNCATE spans, scores"))
     app.state.engine = engine
     yield engine
     del app.state.engine

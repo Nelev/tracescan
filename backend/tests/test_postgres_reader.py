@@ -24,7 +24,9 @@ async def test_a_posted_trace_comes_back_through_the_trace_server(
         tree = await traces.get_trace_tree(summary.trace_id)
 
     assert summary.trace_id == TRACE_ID.hex()
-    assert (summary.status, summary.start_time, summary.duration_ms) == ("error", START, 2000.0)
+    # The request went on after the failed tool call: the root is not an error, the score is low.
+    assert (summary.status, summary.start_time, summary.duration_ms) == ("unset", START, 2000.0)
+    assert summary.min_score == 0.0
     assert (summary.failing_span_id, summary.failing_span_name) == (CHILD_ID.hex(), "retrieval")
     assert summary.error_message == "no documents"
     assert summary.signature == "retrieval EmptyRetrieval"
