@@ -8,7 +8,7 @@ from langgraph.store.memory import InMemoryStore
 
 from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
-from agent.model import build_diagnoser_model
+from agent.model import build_diagnoser_model, build_ui_spec_model
 from api.runs import router as runs_router
 
 
@@ -20,6 +20,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.graph = build_graph(checkpointer, InMemoryStore())
         app.state.embedder = FastEmbedEmbedder()  # one per process; loads its model on first use
         app.state.model = build_diagnoser_model()  # needs OPENROUTER_API_KEY, like DATABASE_URL
+        # The small model that writes the UI spec of each streamed message (api.ui_spec).
+        app.state.ui_spec_model = build_ui_spec_model()
         yield
 
 

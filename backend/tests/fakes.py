@@ -44,6 +44,25 @@ class FakeTraces:
         return self.trees[trace_id]
 
 
+class ScriptedModel(FakeListChatModel):
+    """A chat model that replies with the next of `responses` (they repeat), recording in `seen`
+    what it was asked."""
+
+    seen: list = []
+
+    def _call(self, messages, *args, **kwargs):
+        self.seen.append(messages)
+        return super()._call(messages, *args, **kwargs)
+
+
+def scripted(*replies: str) -> ScriptedModel:
+    return ScriptedModel(responses=list(replies), seen=[])
+
+
+# A UI spec as the small model would write it, for the stream and the UI spec tests.
+SPEC = {"root": "page", "elements": {"page": {"type": "Stack", "props": {}, "children": []}}}
+
+
 def fake_model() -> BaseChatModel:
     """Offline stand-in for the diagnoser's chat model; it is never called."""
     return FakeListChatModel(responses=[])

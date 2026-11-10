@@ -1,21 +1,28 @@
 "use client";
 
 import { Check, X } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { RunView } from "@/lib/run-view";
 import { RUN_EVENTS } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RunProgress } from "./run-progress";
-import type { ConsoleLine, Phase, Tone } from "./use-run-stream";
+import type { Phase } from "./use-run-stream";
 
-const TONE: Record<Tone, string> = {
-  muted: "text-muted-foreground",
-  run: "text-ring",
-  ok: "text-success",
-  bad: "text-destructive",
+// The messages draw with json-render, zod and the package's components, which the progress tab
+// does not need: their own chunk. It starts loading when the reader reaches for the Console tab or
+// a run starts (its messages arrive right after), so it is usually ready by the time it is shown.
+const loadUiMessages = () => import("./ui-view").then((m) => m.UiMessages);
+const preloadUiMessages = () => {
+  void loadUiMessages();
 };
+const UiMessages = dynamic(loadUiMessages, {
+  loading: () => (
+    <p className="type-body p-4 text-muted-foreground">Loading…</p>
+  ),
+});
 
 const SUCCESS = "border-success/30 bg-success/10 text-success";
 const DESTRUCTIVE = "border-destructive/40 bg-destructive/10 text-destructive";
@@ -60,25 +67,10 @@ const PHASE: Record<
   },
 };
 
-function formatAt(ms: number): string {
-  const s = ms / 1000;
-  return `+${s < 10 ? s.toFixed(2) : s.toFixed(1)}s`;
-}
-
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const mm = String(Math.floor(total / 60)).padStart(2, "0");
   return `${mm}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function toText(lines: ConsoleLine[]): string {
-  return lines
-    .map((l) =>
-      [l.at === undefined ? "" : formatAt(l.at), l.label ?? "", l.text]
-        .filter(Boolean)
-        .join("  "),
-    )
-    .join("\n");
 }
 
 /** The clock ticks here, in a leaf, so the log is not re-rendered every second. */
@@ -125,45 +117,21 @@ function StatusChip({ phase }: { phase: Phase }) {
   );
 }
 
-// A line never changes once printed, so a new batch re-renders only the lines it adds.
-const Line = memo(function Line({ line }: { line: ConsoleLine }) {
-  const head = line.at !== undefined || line.label !== undefined;
-  return (
-    <li className="flex flex-col gap-0.5 sm:grid sm:grid-cols-[4rem_9rem_minmax(0,1fr)] sm:items-baseline sm:gap-x-4">
-      {head && (
-        <span className="flex gap-3 sm:contents">
-          <span className="text-muted-foreground">
-            {line.at === undefined ? "" : formatAt(line.at)}
-          </span>
-          <span className={TONE[line.tone ?? "muted"]}>{line.label}</span>
-        </span>
-      )}
-      <span
-        className={cn(
-          "whitespace-pre-wrap [overflow-wrap:anywhere]",
-          !head && "text-muted-foreground sm:col-start-3",
-        )}
-      >
-        {line.text}
-      </span>
-    </li>
-  );
-});
-
-type Tab = "progress" | "raw";
+type Tab = "progress" | "console";
 
 export function RunConsole({
-  lines,
   view,
   phase,
+  error,
   events,
   startedAt,
   endedAt,
   onClear,
 }: {
-  lines: ConsoleLine[];
   view: RunView;
   phase: Phase;
+  /** Why the run did not start or was cut short; shown above the messages. */
+  error: string | null;
   events: number;
   startedAt: number | null;
   endedAt: number | null;
@@ -175,13 +143,18 @@ export function RunConsole({
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("progress");
 
-  // Follow the newest line, unless the reader scrolled up to look at an earlier one. The raw log
-  // mounts only while its tab is open, so opening the tab scrolls it to the newest line too.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: lines.length and tab are the triggers
+  useEffect(() => {
+    if (running) preloadUiMessages();
+  }, [running]);
+
+  // Follow the newest message, unless the reader scrolled up to look at an earlier one. The console
+  // mounts only while its tab is open, so opening the tab scrolls it to the newest message too.
+  const messages = view.messages;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the count and the tab are the triggers
   useEffect(() => {
     const el = scrollRef.current;
     if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [lines.length, tab]);
+  }, [messages.length, tab]);
 
   function onScroll() {
     const el = scrollRef.current;
@@ -192,7 +165,8 @@ export function RunConsole({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(toText(lines));
+      const specs = messages.map(({ event, spec }) => ({ event, spec }));
+      await navigator.clipboard.writeText(JSON.stringify(specs, null, 2));
     } catch {
       return; // no clipboard in this context
     }
@@ -207,16 +181,22 @@ export function RunConsole({
           <h2 className="sr-only">Run output</h2>
           <TabsList aria-label="Run output">
             <TabsTrigger value="progress">Progress</TabsTrigger>
-            <TabsTrigger value="raw">Raw events</TabsTrigger>
+            <TabsTrigger
+              value="console"
+              onMouseEnter={preloadUiMessages}
+              onFocus={preloadUiMessages}
+            >
+              Console
+            </TabsTrigger>
           </TabsList>
           <StatusChip phase={phase} />
         </div>
         <div className="flex gap-2">
-          {tab === "raw" && (
+          {tab === "console" && (
             <Button
               variant="outline"
               onClick={copy}
-              disabled={lines.length === 0}
+              disabled={messages.length === 0}
             >
               {copied ? "Copied" : "Copy"}
             </Button>
@@ -227,7 +207,7 @@ export function RunConsole({
               following.current = true;
               onClear();
             }}
-            disabled={running || lines.length === 0}
+            disabled={running || phase === "idle"}
           >
             Clear
           </Button>
@@ -239,30 +219,18 @@ export function RunConsole({
         <TabsContent value="progress" className="h-[36rem] sm:h-[28.75rem]">
           <RunProgress view={view} phase={phase} />
         </TabsContent>
-        <TabsContent value="raw">
+        <TabsContent value="console">
           <div
             ref={scrollRef}
             onScroll={onScroll}
             className="h-[36rem] overflow-y-auto sm:h-[28.75rem]"
           >
-            <ol
-              role="log"
-              aria-label="Events as they arrive"
-              className="type-body flex min-h-full flex-col justify-end gap-2 p-4 font-mono"
-            >
-              {lines.length === 0 ? (
-                <li className="text-muted-foreground">
-                  Run a triage to see its events here.
-                </li>
-              ) : (
-                lines.map((line) => <Line key={line.id} line={line} />)
-              )}
-              {running && (
-                <li aria-hidden="true">
-                  <span className="inline-block h-4 w-2 bg-primary align-[-3px] motion-safe:animate-pulse" />
-                </li>
-              )}
-            </ol>
+            {error && (
+              <p role="alert" className="type-body px-4 pt-4 text-destructive">
+                {error}
+              </p>
+            )}
+            <UiMessages messages={messages} phase={phase} />
           </div>
         </TabsContent>
       </div>

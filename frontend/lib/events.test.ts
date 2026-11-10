@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFailure, outcomeOf, parseRunEvent } from "./events.ts";
+import { outcomeOf, parseRunEvent } from "./events.ts";
 
 const progress = (data: unknown) =>
   parseRunEvent({ event: "progress", data: JSON.stringify(data) });
@@ -58,19 +58,6 @@ test("anything off-contract is unknown, never a throw", () => {
   assert.deepEqual(parseRunEvent({ event: "something_new", data: "{}" }), {
     kind: "unknown",
   });
-});
-
-test("isFailure is run_failed or a failed node", () => {
-  assert.equal(isFailure({ kind: "failed" }), true);
-  assert.equal(
-    isFailure(progress({ event: "node_failed", node: "a", task_id: "b" })),
-    true,
-  );
-  assert.equal(
-    isFailure(progress({ event: "node_started", node: "a", task_id: "b" })),
-    false,
-  );
-  assert.equal(isFailure({ kind: "unknown" }), false);
 });
 
 test("only run_completed and run_failed end the run", () => {

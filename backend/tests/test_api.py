@@ -17,10 +17,12 @@ from api import runs
 from main import app
 from tests.fakes import (
     DIAGNOSIS,
+    SPEC,
     FakeTraces,
     HashingEmbedder,
     fake_diagnoser,
     fake_model,
+    scripted,
     span_tree,
     summary,
 )
@@ -58,6 +60,7 @@ async def client():
     app.state.graph = build_graph(InMemorySaver(), InMemoryStore())
     app.state.embedder = HashingEmbedder()  # offline: the real model is never downloaded in tests
     app.state.model = fake_model()  # never called; tests that diagnose set their own
+    app.state.ui_spec_model = fake_model()  # its call fails, so no message gets a UI spec
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as c:
@@ -206,19 +209,8 @@ async def test_stream_that_cannot_open_the_trace_session_returns_502(client, mon
     assert response.json() == {"detail": "triage run failed"}
 
 
-@pytest.mark.anyio
-async def test_disconnect_from_a_stalled_client_releases_the_trace_session(client, monkeypatch):
-    released = []
-
-    @asynccontextmanager
-    async def session():
-        try:
-            yield two_failures()
-        finally:
-            released.append(True)
-
-    monkeypatch.setattr(runs, "TraceClient", session)
-    app.state.model = fake_diagnoser(DIAGNOSIS)
+async def run_with_a_stalled_client() -> None:
+    """POST a run to the app as a client that reads nothing and then goes away."""
     payload = json.dumps({"target_app": "medas"}).encode()
     pending = [{"type": "http.request", "body": payload}]
 
@@ -248,8 +240,80 @@ async def test_disconnect_from_a_stalled_client_releases_the_trace_session(clien
         "root_path": "",
     }
     # FastAPI's SSE keepalive task raises BrokenResourceError while tearing down on a stalled
-    # client; that is the framework's, so it is ignored here. What matters is the release.
+    # client; that is the framework's, so it is ignored here. What matters is what is released.
     with contextlib.suppress(BaseExceptionGroup):
         await app(scope, receive, send)
+
+
+@pytest.mark.anyio
+async def test_disconnect_from_a_stalled_client_releases_the_trace_session(client, monkeypatch):
+    released = []
+
+    @asynccontextmanager
+    async def session():
+        try:
+            yield two_failures()
+        finally:
+            released.append(True)
+
+    monkeypatch.setattr(runs, "TraceClient", session)
+    app.state.model = fake_diagnoser(DIAGNOSIS)
+    await run_with_a_stalled_client()
     # No gc.collect() here on purpose: FastAPI's exit stack has to release it, not finalization.
     assert released == [True]
+
+
+LAYOUT = json.dumps(SPEC)
+
+
+@pytest.mark.anyio
+async def test_stream_sends_the_models_ui_spec_right_behind_every_message(client, monkeypatch):
+    trees = {t: span_tree(t, attributes={"patient": PHI}) for t in ("tr_1", "tr_2")}
+    use_traces(monkeypatch, FakeTraces([summary("tr_1"), summary("tr_2")], trees))
+    app.state.model = fake_diagnoser(DIAGNOSIS)
+    app.state.ui_spec_model = model = scripted(LAYOUT)
+    response = await client.post("/v1/runs/stream", json={"target_app": "medas"})
+    events = parse_sse(response.text)
+
+    # Message, its spec, message, its spec, ...: a spec describes the event just before it.
+    assert [name for name, _ in events[0::2]] == [n for n, _ in events if n != "ui_spec"]
+    assert all(name == "ui_spec" for name, _ in events[1::2])
+    for (name, _), (_, spec) in zip(events[0::2], events[1::2], strict=True):
+        assert spec == {"event": name, "spec": SPEC}
+    assert events[-2][0] == "run_completed"
+    assert len(model.seen) == len(events) // 2
+    assert PHI not in response.text and PHI not in str(model.seen)  # no span attributes, ever
+
+
+@pytest.mark.anyio
+async def test_stream_still_sends_every_message_when_the_model_fails(client, monkeypatch):
+    trees = {t: span_tree(t) for t in ("tr_1", "tr_2")}
+    use_traces(monkeypatch, FakeTraces([summary("tr_1"), summary("tr_2")], trees))
+    app.state.model = fake_diagnoser(DIAGNOSIS)  # the UI spec model is the fixture's: it fails
+    events = parse_sse((await client.post("/v1/runs/stream", json={"target_app": "medas"})).text)
+
+    names = [name for name, _ in events]
+    assert names[-1] == "run_completed" and "proposal" in names
+    assert "ui_spec" not in names  # no spec, and nothing in its place
+
+
+@pytest.mark.anyio
+async def test_a_run_past_its_call_limit_gets_no_more_calls_and_no_more_specs(client, monkeypatch):
+    use_traces(monkeypatch, two_failures())
+    monkeypatch.setattr(runs, "MAX_UI_CALLS_PER_RUN", 2)
+    app.state.model = fake_diagnoser(DIAGNOSIS)
+    app.state.ui_spec_model = model = scripted(LAYOUT)
+    events = parse_sse((await client.post("/v1/runs/stream", json={"target_app": "medas"})).text)
+
+    names = [name for name, _ in events]
+    assert len(names) - names.count("ui_spec") > 2
+    assert len(model.seen) == 2 and names.count("ui_spec") == 2
+
+
+@pytest.mark.anyio
+async def test_a_failed_run_sends_no_ui_spec_for_run_failed(client, monkeypatch):
+    use_traces(monkeypatch, ExplodingTraces())
+    app.state.ui_spec_model = scripted(LAYOUT)
+    events = parse_sse((await client.post("/v1/runs/stream", json={"target_app": "medas"})).text)
+    assert events[-1] == ("run_failed", {})
+    assert events[-2][0] == "ui_spec" and events[-2][1]["event"] == "progress"
