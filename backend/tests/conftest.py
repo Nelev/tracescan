@@ -11,6 +11,7 @@ from agent import model_guard
 from agent.mcp_client import TraceClient
 from db.engine import create_engine
 from main import app
+from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
 
 BACKEND = Path(__file__).parent.parent
 
@@ -65,3 +66,16 @@ async def spans_engine(postgres_url):
     yield engine
     del app.state.engine
     await engine.dispose()
+
+
+@pytest.fixture
+async def read_only(postgres_url, spans_engine):
+    """The reader's own engine, on the emptied `spans` table."""
+    engine = read_only_engine(postgres_url)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+def reader(read_only):
+    return PostgresTraceReader(read_only)
