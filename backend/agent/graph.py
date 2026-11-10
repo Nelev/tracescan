@@ -19,8 +19,6 @@ Command(resume={cluster_id: "approve" | "reject"}); that needs a checkpointer. W
 first invoke still returns at the pause, with `__interrupt__` in its result.
 """
 
-import asyncio
-
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.store.base import BaseStore
@@ -28,9 +26,6 @@ from langgraph.types import Send, interrupt
 
 from agent.const import MAX_PARALLEL_BRANCHES
 from agent.context import TraceContext
-from agent.embeddings import FastEmbedEmbedder
-from agent.mcp_client import TraceClient
-from agent.model import build_diagnoser_model
 from agent.nodes.apply_actions import apply_actions
 from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
@@ -143,21 +138,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)
 
-    # The cap and the progress transformer live on the graph, so every caller (API, demo, Studio,
-    # resume) gets them. The transformer only matters to astream_events(version="v3") callers.
+    # The cap and the progress transformer live on the graph, so every caller (API, eval, resume)
+    # gets them. The transformer only matters to astream_events(version="v3") callers.
     return g.compile(
         checkpointer=checkpointer, store=store, transformers=[ProgressTransformer]
     ).with_config({"max_concurrency": MAX_PARALLEL_BRANCHES})
-
-
-async def main() -> None:
-    async with TraceClient() as traces:
-        context = TraceContext(traces, FastEmbedEmbedder(), build_diagnoser_model())
-        # No checkpointer here, so the run stops at the review pause and cannot be resumed.
-        result = await build_graph().ainvoke({"target_app": "medas"}, context=context)
-    for key, value in result.items():
-        print(f"{key}: {value}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

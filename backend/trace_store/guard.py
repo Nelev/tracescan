@@ -20,9 +20,8 @@ Known limit: FastMCP's own "Invalid arguments for tool" warning (logger fastmcp.
 repeats the rejected input of a malformed id or query, and this guard does not touch that
 logger. An agent that sends clinical text as an id would see it on stderr.
 
-Known limit: get_trace_tree and get_span take only ids, so they are not scoped to an app.
-The ids normally come from search_failed_traces; scoping them for real is the Postgres
-reader's job.
+get_trace_tree and get_span take only ids; scoping them to the allowed apps is the reader's
+job, and the Postgres reader does it.
 """
 
 import hashlib

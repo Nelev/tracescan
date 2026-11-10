@@ -4,7 +4,7 @@ MCP client for the agent: the graph's only way to reach traces.
 TraceClient starts trace_store.mcp_server as a stdio subprocess once and keeps
 the session open, so many calls cost one server start:
 
-    async with TraceClient() as traces:
+    async with TraceClient(trace_database_url) as traces:
         failed = await traces.search_failed_traces(FailedTraceQuery(app="medas"))
 
 Open and close it in the same async task. It cannot span the human-review pause
@@ -29,7 +29,7 @@ from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 SERVER_NAME = "traces"
 REQUEST_TIMEOUT = timedelta(seconds=30)  # so a hung server cannot hang the graph
 # The stdio client passes the subprocess only a minimal environment; anything else the
-# server needs must be added under "env".
+# server needs must be added under "env", as the database URL is in TraceClient.
 TRACE_SERVER: StdioConnection = {
     "transport": "stdio",
     "command": sys.executable,
@@ -42,13 +42,12 @@ TRACE_SERVER: StdioConnection = {
 class TraceClient:
     """One open session to the trace server. Use as an async context manager."""
 
-    def __init__(self, database_url: str | None = None) -> None:
-        # With a URL the server reads Postgres (trace_store/postgres_reader.py), else the fixture.
-        self._server: StdioConnection = (
-            {**TRACE_SERVER, "env": {"TRACE_DATABASE_URL": database_url}}
-            if database_url
-            else TRACE_SERVER
-        )
+    def __init__(self, database_url: str) -> None:
+        # The server reads the traces from this database (trace_store/postgres_reader.py).
+        self._server: StdioConnection = {
+            **TRACE_SERVER,
+            "env": {"TRACE_DATABASE_URL": database_url},
+        }
         self._stack = AsyncExitStack()
         self._session: ClientSession | None = None
 

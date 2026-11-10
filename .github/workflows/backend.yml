@@ -24,6 +24,22 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # The traces live in Postgres only, so the tests of the trace path need one. Same image as
+    # docker-compose.yml.
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg17
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:test@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
 

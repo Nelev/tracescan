@@ -1,4 +1,5 @@
-# A local Postgres for development: the graph checkpoints and the users, runs and reviews tables.
+# A local Postgres for development: the graph checkpoints, the users, runs and reviews tables,
+# and the trace store (spans and scores).
 #   docker compose up -d
 #   DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres
 # The port is bound to this machine only. The password defaults to `tracescan`; to use another,

@@ -5,7 +5,7 @@ Use it as the source of truth for scope and task order:
 - Keep the MVP tight. Do not start stretch tasks before the MVP gate check passes.
 - MVP proposals are "unverified"; never drop a cluster because it did not reproduce.
 - Trace access is read-only (MCP server on a read-only DB role). All writes happen only in apply_actions, after human approval, with dry_run on by default.
-- The code lives in backend/agent/ (the graph) and backend/trace_store/ (trace contracts, reader, MCP server); there is no tracescan/ package. The original sketch is backend/tracedoctor_graph.py.
+- The code lives in backend/agent/ (the graph) and backend/trace_store/ (trace contracts, reader, MCP server); there is no tracescan/ package.
 - Where this plan and the code disagree, the code and CLAUDE.md are right: correct the plan.
 -->
 
@@ -119,7 +119,7 @@ Instead of an observability platform, TraceScan comes with its own small tracing
 Medas (OTel SDK, gen_ai.* attributes) --OTLP/HTTP--> Trace collector (FastAPI, POST /v1/traces)
                                                             | spans
                                                             v
-Scoring job (heuristics; LLM judge = stretch) <--> Postgres trace store (traces, spans, scores tables)
+Scoring job (heuristics; LLM judge = stretch) <--> Postgres trace store (spans, scores tables)     
                                                      |                        |
                                           read-only role                    reads
                                                      v                        v
@@ -134,8 +134,8 @@ Medas sends spans over the standard OTLP protocol to a FastAPI collector, which 
 | Component | What it does | Built with |
 | --- | --- | --- |
 | Instrumentation in Medas | One trace per request; spans for retrieval, each tool call and generation, using the standard `gen_ai.*` attribute names plus prompt version, retrieval count and request id | OpenTelemetry Python SDK, LangChain/LangGraph auto-instrumentation where available |
-| Trace collector | Receives OTLP over HTTP, decodes it and writes traces and spans | FastAPI, `opentelemetry-proto` |
-| Trace store | Three tables: traces (id, timing, status), spans (ids, parent id, name, kind, timing, status, attributes and events as JSONB), scores (trace, evaluator, value, comment) | Postgres, the same instance as checkpoints and memory |
+| Trace collector | Receives OTLP over HTTP, decodes it and writes spans | FastAPI, `opentelemetry-proto` |
+| Trace store | Two tables: spans (ids, parent id, app, name, kind, timing, status, attributes and events as JSONB; a trace is the spans that share a trace id) and scores (trace, evaluator, value, blamed span) | Postgres, the same instance as checkpoints and memory |
 | Scoring job | Marks bad answers that raised no error: heuristic checks on every trace (MVP), and as a stretch an LLM judge for groundedness on every failure and a 10% sample of successes | Python worker, structured output |
 | MCP server | `search_failed_traces`, `get_trace_tree`, `get_span` for the agent | FastMCP, read-only database role |
 | UI | Trace list with a span-tree view, and an error feed of TraceScan's clusters | Next.js |
@@ -205,7 +205,7 @@ The stack is Python with LangGraph 1.x for orchestration and its own OpenTelemet
 | Review UI | Next.js (App Router, TypeScript) over the FastAPI backend | Runs list, run detail, approve or reject proposals, eval results |
 | Diagnoser | One structured-output call per cluster through OpenRouter (`langchain-openrouter`) | Diagnoses each cluster from its exemplar span trees |
 
-To run the sketch locally: install LangGraph in a virtual environment and run `python tracedoctor_graph.py` (the file can be renamed). The script runs until the review pause, prints the proposals, then resumes with decisions; the same `thread_id` links the two calls.
+
 
 To run it in LangGraph Studio: compile the graph without a local checkpointer and store (the server provides persistence), point `langgraph.json` at the module's `graph` variable, and start `langgraph dev`. Studio then shows the graph and offers the resume step at the human review node.
 
@@ -259,7 +259,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 - [x] **Build the trace collector and store.** A FastAPI endpoint that accepts OTLP over HTTP, decodes it with opentelemetry-proto and writes the traces and spans tables in Postgres; plus the Postgres `TraceReader`, on a read-only role, for the MCP server to use in place of the fixture reader. Done when a test span sent from a script appears in the spans table and comes back through `get_trace_tree`. Built in its simplest form: one `spans` table (no `traces` table), and the reader's session is read-only but the read-only role is not created yet (`tests/test_postgres_reader.py` is the check).
 - [ ] **Instrument Medas.** One trace per request, with spans for retrieval, each tool call and generation, using the gen\_ai.\* attribute names, exported over OTLP to the collector. Done when a request shows its full span tree in the database.
 - [ ] **Write the traffic generator.** A YAML file of normal, edge-case and adversarial queries and a script that sends them to Medas. Done when one run produces a mix of passing and failing traces.
-- [x] **Build the MCP server and collector node.** A FastMCP server with search\_failed\_traces, get\_trace\_tree and get\_span, read-only, behind a per-run call budget and an audit log, connected to the graph through `langchain-mcp-adapters`, filter by time window, error level and score threshold, map results to `TraceSummary`. It reads the synthetic fixture for now; the read-only database role comes with the Postgres reader in the collector task above. Done when a unit test on a saved fixture passes.
+- [x] **Build the MCP server and collector node.** A FastMCP server with search\_failed\_traces, get\_trace\_tree and get\_span, read-only, behind a per-run call budget and an audit log, connected to the graph through `langchain-mcp-adapters`, filter by time window, error level and score threshold, map results to `TraceSummary`. It first read a synthetic fixture and now reads Postgres only (the fixture is a test double); the read-only database role comes with the Postgres reader in the collector task above. Done when a unit test on a saved fixture passes.
 
 ### Phase 2 · Core agents (days 3–5)
 
@@ -267,7 +267,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 - [x] **Cluster the failures.** Embed the summaries and run HDBSCAN; fall back to grouping by step and error type when there are too few traces. Done when the fixture's known groups come out as separate clusters.
 - [x] **Clean the failure text before embedding.** The embedded string (`failure_text`) currently uses the raw error message, so IDs, timestamps and numbers in it can split or merge clusters. Mask them with the same rule as `normalise_error`, keep the error wording and the span context, and check the text carries no clinical content. Done when two traces that differ only in ids, timestamps or numbers produce the same text, and the fixture clusters are unchanged.
 - [x] **Write the taxonomy file.** `taxonomy.md` with a definition and one example per category, loaded into the diagnoser prompt. Done when every category has both.
-- [x] **Build the diagnoser.** One `with_structured_output(Diagnosis)` call per cluster, with the taxonomy as system prompt and the cluster's exemplar span trees as input; no tools, so no `create_agent`. Retries run in the graph's loop under a per-cluster budget of attempts, tokens and cost. Built and tested with a fake model. Done when it returns a valid `Diagnosis` for each fixture cluster on the real model (`RUN_LLM=1 uv run pytest -k real_model`).
+- [x] **Build the diagnoser.** One `with_structured_output(Diagnosis)` call per cluster, with the taxonomy as system prompt and the cluster's exemplar span trees as input; no tools, so no `create_agent`. Retries run in the graph's loop under a per-cluster budget of attempts, tokens and cost. Built and tested with a fake model. Done when it returns a valid `Diagnosis` for each cluster on the real model: first checked on the fixture clusters, now by the eval on a seeded day (`python -m eval.run`).
 - [x] **Diagnose unclustered failures individually.** `cluster_failures` turns each id in `unclustered` into a one-trace cluster (`method` `isolated`) numbered after the real clusters, so the existing fan-out, retries and early exit handle it unchanged. No cap yet: add one (and list the skipped ids in the run summary) if a real run shows too many isolated failures. Done when a fixture run with isolated failures returns a diagnosis for each.
 - [x] **Validate evidence.** Check that every cited trace id and span exists in the cluster; retry once if not, otherwise lower confidence. Done when a test with a fake citation is caught.
 - [ ] **Trace TraceScan itself.** Send its own runs to the same collector under a separate service name. Done when one triage run shows cost and latency per node.

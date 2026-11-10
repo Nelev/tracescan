@@ -4,8 +4,8 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
+from tests.fakes import FixtureTraceReader
 from trace_store.mcp_server import build_server
-from trace_store.reader import FixtureTraceReader
 
 SEARCH = {"query": {"app": "medas"}}
 OTHER_APP = {"query": {"app": "other"}}

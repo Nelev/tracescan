@@ -1,4 +1,4 @@
-"""collect_traces against a fake client, plus the compiled graph against the real trace server."""
+"""collect_traces against a fake client. The graph against the real trace server is in test_eval_run.py."""
 
 from datetime import UTC, datetime
 
@@ -59,17 +59,6 @@ async def test_graph_ends_early_when_no_traces_failed():
 async def test_naive_since_is_rejected():
     with pytest.raises(ValueError):
         await run(FakeTraces(), {"target_app": "medas", "since": "2026-11-05T09:30:00"})
-
-
-@pytest.mark.anyio
-async def test_graph_collects_fixture_traces_through_the_real_server(traces):
-    result = await run(traces, {"target_app": "medas"})
-    assert [t["trace_id"] for t in result["failed_traces"]] == [
-        "tr_tool_schema",
-        "tr_retrieval_miss",
-    ]
-    # Two failures are too few for HDBSCAN: one step_error cluster each.
-    assert [c["method"] for c in result["clusters"]] == ["step_error", "step_error"]
 
 
 def test_routes():

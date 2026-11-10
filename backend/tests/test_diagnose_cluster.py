@@ -2,19 +2,14 @@
 
 import asyncio
 import json
-import os
 
 import pytest
 from langgraph.runtime import Runtime
 
 from agent import model_guard
-from agent.clustering import cluster_summaries
 from agent.const import MAX_MODEL_ATTEMPTS, MAX_PARALLEL_BRANCHES, UNSUPPORTED_CONFIDENCE_CAP
-from agent.context import TraceContext
 from agent.evidence import FALLBACK_NOTE
 from agent.graph import build_graph
-from agent.mcp_client import TraceClient
-from agent.model import build_diagnoser_model
 from agent.nodes.diagnose_cluster import TAXONOMY, diagnose_cluster
 from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence
 from tests.fakes import (
@@ -22,7 +17,6 @@ from tests.fakes import (
     FakeApiError,
     FakeDiagnoserModel,
     FakeTraces,
-    HashingEmbedder,
     fake_context,
     fake_diagnoser,
     first_span_shown,
@@ -30,7 +24,6 @@ from tests.fakes import (
     span_tree,
     summary,
 )
-from trace_store.models import FailedTraceQuery
 
 CLUSTER = Cluster(
     cluster_id="c0",
@@ -360,20 +353,3 @@ async def test_a_spent_budget_keeps_the_diagnosis_as_unsupported_instead_of_aski
     assert diagnosis["confidence"] == UNSUPPORTED_CONFIDENCE_CAP
     (evidence,) = diagnosis["evidence"]
     assert (evidence["trace_id"], evidence["span_id"]) == ("t1", "s1")  # the failing span
-
-
-@pytest.mark.skipif(not os.environ.get("RUN_LLM"), reason="set RUN_LLM=1 (and OPENROUTER_API_KEY)")
-@pytest.mark.anyio
-async def test_the_real_model_diagnoses_every_fixture_cluster():
-    async with TraceClient() as traces:
-        failed = await traces.search_failed_traces(FailedTraceQuery(app="medas"))
-        clusters, _ = cluster_summaries(failed, HashingEmbedder())
-        context = TraceContext(traces, HashingEmbedder(), build_diagnoser_model())
-        for cluster in clusters:
-            result = await diagnose_cluster(ClusterTask(cluster=cluster), Runtime(context=context))
-            assert "diagnoses" in result, f"diagnosis failed, see the log: {result}"
-            diagnosis = result["diagnoses"][0]
-            Diagnosis.model_validate(diagnosis)
-            # How well the real model follows "cite only what is shown": unsupported means it did
-            # not, even after one retry.
-            assert diagnosis["evidence_check"] != "unsupported", diagnosis["cluster_id"]

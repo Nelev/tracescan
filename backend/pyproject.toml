@@ -8,7 +8,6 @@ dependencies = [
     "fastapi[standard]",
     "fastembed>=0.9.1",
     "fastmcp>=3.4,<4",
-    "langchain>=1.4.9",
     "langchain-mcp-adapters>=0.3.2",
     "langchain-openrouter>=0.2.9",
     "langgraph>=1.2.20",
