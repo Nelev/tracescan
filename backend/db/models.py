@@ -1,25 +1,29 @@
 """The application's tables: who uses TraceScan, the runs they start, and what they decide.
 
-They sit in the same database as the graph checkpoints (DATABASE_URL) and hold ids, counts and
-decisions only: no issue text and no span content. The checkpoint stays the record of a run's
-state and proposals; `runs` is the index and the lifecycle around it.
+They sit in the same database as the graph checkpoints (DATABASE_URL). `users`, `runs` and
+`reviews` hold ids, counts and decisions only: no issue text and no span content. The checkpoint
+stays the record of a run's state and proposals; `runs` is the index and the lifecycle around it.
+`spans` is the exception: it is the trace store, and holds what the collector received.
 
 Change a table here, then write a migration: `uv run alembic revision --autogenerate -m "..."`.
 """
 
 from datetime import datetime
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 from uuid import UUID, uuid4
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from agent.schemas import Decision
+from trace_store.models import SpanStatus
 
 # A new status or decision also needs a migration: the check constraints list them.
 RunStatus = Literal["in_progress", "review_required", "completed", "failed", "aborted"]
 RUN_STATUSES = get_args(RunStatus)
 DECISIONS = get_args(Decision)
+SPAN_STATUSES = get_args(SpanStatus)
 NAME_MAX = 80  # the width of users.name, and so the longest name the API accepts
 
 
@@ -77,3 +81,30 @@ class Review(Base):
     decision: Mapped[str] = mapped_column(String(10))
     reviewer_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Span(Base):
+    """One span as the collector received it (api/traces.py).
+
+    Unlike the other tables this one holds span content (attributes, events, status messages),
+    which for Medas can be clinical text. A trace is the spans that share a `trace_id`.
+    """
+
+    __tablename__ = "spans"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", SPAN_STATUSES), name="spans_status_known"),
+        Index("spans_app_start_time", "app", text("start_time DESC")),
+    )
+
+    trace_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    span_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    parent_span_id: Mapped[str | None] = mapped_column(String(16))
+    app: Mapped[str]  # the resource's service.name
+    name: Mapped[str]
+    kind: Mapped[str] = mapped_column(String(20))
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(10))
+    status_message: Mapped[str | None]
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    events: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
