@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "backend-8000",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd backend && exec uv run --env-file .env fastapi dev"
+      ],
+      "port": 8000
+    },
+    {
       "name": "backend-8010",
       "runtimeExecutable": "sh",
       "runtimeArgs": [

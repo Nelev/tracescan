@@ -36,15 +36,13 @@ class Verdict(BaseModel):
 
 
 async def judge(result: dict[str, Any], model: BaseChatModel) -> list[dict[str, Any]]:
-    """One verdict per diagnosis: its cluster id, the score and the judge's reasoning."""
+    """One verdict per diagnosis of a fault: its cluster id, the score and the reasoning."""
     grader = model.with_structured_output(Verdict, method="json_schema")
     kinds = majority_kinds(result)
 
     async def grade(diagnosis: dict[str, Any]) -> dict[str, Any]:
         cluster_id = diagnosis["cluster_id"]
-        fault = FAULTS.get(kinds[cluster_id])
-        if fault is None:
-            return {"cluster_id": cluster_id, "score": 0, "reasoning": "no fault was seeded here"}
+        fault = FAULTS[kinds[cluster_id]]
         answer = (
             f"True cause: {fault.cause}\n"
             f"Visible symptom: {fault.symptom}\n"
@@ -55,7 +53,9 @@ async def judge(result: dict[str, Any], model: BaseChatModel) -> list[dict[str, 
         )
         return {"cluster_id": cluster_id, **verdict.model_dump()}
 
-    return await asyncio.gather(*(grade(diagnosis) for diagnosis in result["diagnoses"]))
+    # A diagnosis of a cluster with no fault is a false alarm (eval/metrics.py), not judged.
+    of_faults = [d for d in result["diagnoses"] if kinds[d["cluster_id"]] in FAULTS]
+    return await asyncio.gather(*(grade(diagnosis) for diagnosis in of_faults))
 
 
 def main() -> None:
@@ -82,6 +82,7 @@ def main() -> None:
     for verdict in result["verdicts"]:
         cluster_id = verdict["cluster_id"]
         print(f"\n{cluster_id} ({kinds[cluster_id]}): {verdict['score']}")
+        print(f"  true:      {FAULTS[kinds[cluster_id]].cause}")
         print(f"  diagnosis: {root_causes[cluster_id]}")
         print(f"  judge:     {verdict['reasoning']}")
 

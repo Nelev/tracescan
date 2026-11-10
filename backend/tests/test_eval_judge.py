@@ -44,9 +44,8 @@ async def test_a_diagnosis_is_judged_against_the_cause_of_its_clusters_kind():
     verdicts = await judge(RESULT, cast(BaseChatModel, model))
 
     assert verdicts == [
+        # A diagnosis of healthy traces is a false alarm, counted by the metrics: not judged.
         {"cluster_id": "c0", "reasoning": "names the cause", "score": 2},
-        # A diagnosis of healthy traces is wrong whatever it says, so the judge is not asked.
-        {"cluster_id": "c1", "reasoning": "no fault was seeded here", "score": 0},
     ]
     (asked,) = model.asked
     fault = FAULTS["source_timeout"]

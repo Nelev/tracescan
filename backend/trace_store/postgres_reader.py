@@ -5,10 +5,9 @@ a trace_id, and a failed trace is one with a root span and at least one span of 
 Give it TRACE_DATABASE_URL; the session is opened read-only, whatever the role may do.
 """
 
-from collections.abc import Collection, Mapping, Sequence
-from typing import Any
+from collections.abc import Collection, Sequence
 
-from sqlalchemy import exists, func, literal_column, select
+from sqlalchemy import RowMapping, exists, func, literal_column, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import aliased
@@ -39,7 +38,7 @@ def read_only_engine(database_url: str) -> AsyncEngine:
     )
 
 
-def origin(error_spans: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
+def origin(error_spans: Sequence[RowMapping]) -> RowMapping:
     """The span a failure started in: an error span with no error span below it.
 
     An error usually marks every span up to the root, so the deepest one is the cause. With
@@ -91,7 +90,7 @@ class PostgresTraceReader:
                     Span.status == "error",
                 )
             )
-            error_spans: dict[str, list[Mapping[str, Any]]] = {}
+            error_spans: dict[str, list[RowMapping]] = {}
             for span in errors.mappings():
                 error_spans.setdefault(span["trace_id"], []).append(span)
 

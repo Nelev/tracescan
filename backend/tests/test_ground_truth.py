@@ -3,10 +3,9 @@
 from collections import Counter
 
 from api.traces import decode
-from eval.ground_truth import FAULTS
+from eval.ground_truth import FAULTS, NOT_FAULTS
 from scripts.seed_traces import COUNTS, export, healthy, kinds
 from tests.test_seed_traces import END, by_trace
-from trace_store.postgres_reader import origin
 
 SEEDED = {make.__name__: count for make, count in COUNTS.items()}
 
@@ -19,16 +18,21 @@ def test_every_seeded_trace_has_a_kind_and_the_kinds_add_up():
     assert kinds(END) == answer  # worked out again, the same
 
 
-def test_every_seeded_failure_has_an_answer_and_healthy_has_none():
-    assert set(FAULTS) == set(SEEDED) - {healthy.__name__}
+def test_every_seeded_kind_is_a_fault_or_is_said_not_to_be_one():
+    assert set(FAULTS).isdisjoint(NOT_FAULTS)
+    assert set(FAULTS) | set(NOT_FAULTS) == set(SEEDED)
 
 
 def test_a_trace_of_a_kind_fails_where_its_answer_says():
     traces = by_trace(decode(export(END)))
     for trace_id, kind in kinds(END).items():
-        errors = [span for span in traces[trace_id] if span["status"] == "error"]
+        spans = traces[trace_id]
+        errors = [span for span in spans if span["status"] == "error"]
+        if kind == healthy.__name__ or (kind in FAULTS and FAULTS[kind].silent):
+            assert errors == [], kind
         if kind in FAULTS:
-            # The same rule the reader uses to name the failing span of a trace.
-            assert origin(errors)["name"] == FAULTS[kind].failing_span, kind
-        else:
-            assert errors == []
+            # Among the error spans with no error span below them (one, but for a request
+            # with two errors); for a failure with no error, among all the spans.
+            parents = {span["parent_span_id"] for span in errors}
+            starts = [span["name"] for span in errors if span["span_id"] not in parents]
+            assert FAULTS[kind].failing_span in (starts or [span["name"] for span in spans]), kind

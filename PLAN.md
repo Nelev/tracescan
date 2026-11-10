@@ -186,6 +186,8 @@ Each diagnosis is graded on whether it names the actual cause (for example, the 
 
 TraceScan traces its own runs into the same trace store, so its cost and failures are observable the same way as the target app's.
 
+**First results (2026-11-10), on seeded traces, before Medas has fault switches.** The eval in `backend/eval/` grades a run against synthetic traces whose causes are known: five plain faults, then hard cases (a look-alike, one cause with two faces, two errors in one request, a failure with no visible cause, a failure with no error, and errors that are not faults). On the plain faults every score is full marks, which says little. With the hard cases the diagnoser is still right about every cluster it is given (category 6/6, cause 6/6, and `unknown` where the trace shows no cause), but the clustering merges look-alike failures and harmless errors into one cluster (detection 6/9, purity 24/36, separation 3/9), and the failure with no error is never collected (trace recall 30/34). So the next work on quality is the clustering and the scoring job, not the diagnoser. The log is in `docs/eval-notes.md`; this does not replace the fault-injection eval in Medas described above.
+
 ## Tech stack and running it
 
 The stack is Python with LangGraph 1.x for orchestration and its own OpenTelemetry trace store; the graph sketch already runs end to end on LangGraph 1.2 with stubbed nodes.
