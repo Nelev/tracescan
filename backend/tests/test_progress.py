@@ -66,7 +66,8 @@ async def test_reports_each_node_and_one_branch_per_cluster():
     }
     assert all(e["counts"] == {"diagnoses": 1} and "ok" not in e for e in finishes)
 
-    assert events[-1]["node"] == "apply_actions"
+    # The run stops at the review: the node pauses, it neither finishes nor fails.
+    assert (events[-1]["node"], events[-1]["event"]) == ("human_review", "node_paused")
     assert len(final["diagnoses"]) == 2
 
 

@@ -27,7 +27,8 @@ COUNTED_KEYS = (
 
 
 class ProgressEvent(TypedDict, total=False):
-    event: Literal["node_started", "node_finished", "node_failed"]
+    # node_paused: the node called interrupt() and waits for a resume (human_review).
+    event: Literal["node_started", "node_finished", "node_failed", "node_paused"]
     node: str
     task_id: str
     # Set on the branches of the diagnose fan-out, so the client can tell parallel tasks apart.
@@ -76,7 +77,10 @@ class ProgressTransformer(StreamTransformer):
         progress["counts"] = {key: len(writes[key]) for key in COUNTED_KEYS if key in writes}
         # The error text is dropped on purpose: it could carry span contents.
         failed = bool(data.get("error"))
-        progress["event"] = "node_failed" if failed else "node_finished"
+        if failed:
+            progress["event"] = "node_failed"
+        else:
+            progress["event"] = "node_paused" if data.get("interrupts") else "node_finished"
         if (cluster_id := self._cluster_ids.pop(data["id"], None)) is not None:
             progress["cluster_id"] = cluster_id
         if not failed and progress["counts"].get("diagnosis_failures"):

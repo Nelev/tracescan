@@ -20,7 +20,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.utils.json import parse_json_markdown
 
-from agent.const import UI_CALL_TIMEOUT_S
+from agent.const import MAX_UI_CALLS_PER_RUN, UI_CALL_TIMEOUT_S
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,20 @@ logger = logging.getLogger(__name__)
 _HERE = Path(__file__).parent
 CATALOG = (_HERE / "ui_catalog.md").read_text().strip()
 PROMPT = (_HERE / "ui_prompt.md").read_text().replace("{{catalog}}", CATALOG)
+
+
+class UiSpecs:
+    """The UI spec calls of one run: at most `MAX_UI_CALLS_PER_RUN`, then every message gets None."""
+
+    def __init__(self, model: BaseChatModel) -> None:
+        self._model = model
+        self._calls = 0
+
+    async def compose(self, event: str, data: dict) -> dict | None:
+        if self._calls >= MAX_UI_CALLS_PER_RUN:
+            return None
+        self._calls += 1
+        return await compose_ui(self._model, event, data)
 
 
 async def compose_ui(model: BaseChatModel, event: str, data: dict) -> dict | None:

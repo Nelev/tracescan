@@ -69,7 +69,14 @@ test("isFailure is run_failed or a failed step", () => {
   assert.equal(isFailure({ kind: "unknown" }), false);
 });
 
-test("only run_completed and run_failed end the run", () => {
+test("review_required is a run that waits for its review", () => {
+  const event = parseRunEvent({ event: "review_required", data: "{}" });
+  assert.deepEqual(event, { kind: "review" });
+  assert.equal(isFailure(event), false);
+});
+
+test("only review_required, run_completed and run_failed end the stream", () => {
+  assert.equal(outcomeOf({ kind: "review" }), "review");
   assert.equal(outcomeOf({ kind: "completed" }), "done");
   assert.equal(outcomeOf({ kind: "failed" }), "failed");
   assert.equal(outcomeOf({ kind: "started" }), null);

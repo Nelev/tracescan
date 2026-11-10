@@ -1,6 +1,11 @@
-"""Request and response bodies of the runs API. frontend/lib/types.ts mirrors them by hand."""
+"""Request and response bodies of the runs API. frontend/lib/types.ts mirrors them by hand.
+
+`GET /v1/runs/{run_id}` returns `runs.RunStatus` as it is.
+"""
 
 from pydantic import AwareDatetime, BaseModel
+
+from runs import Decision, RunState, RunSummary
 
 
 class RunRequest(BaseModel):
@@ -9,12 +14,11 @@ class RunRequest(BaseModel):
     until: AwareDatetime | None = None  # exclusive
 
 
-class RunResponse(BaseModel):
-    run_id: str  # the graph's thread_id
-    failed_traces: int
-    clusters: int
-    unclustered: int  # failures that fit no cluster; each is diagnosed on its own
-    diagnoses: int
-    diagnosis_failures: int  # clusters whose diagnosis failed; reported, not dropped
-    proposals: int
-    actions_log: list[str]
+class ReviewRequest(BaseModel):
+    # One decision per proposal, keyed by cluster id; the run refuses a partial set.
+    decisions: dict[str, Decision]
+
+
+class ReviewResponse(BaseModel):
+    status: RunState
+    summary: RunSummary  # its actions_log says what was written, or would be in a dry run

@@ -1,7 +1,7 @@
 import operator
 from typing import Annotated, Required, TypedDict
 
-from agent.schemas import Cluster
+from agent.schemas import Cluster, Decision
 
 
 class TriageState(TypedDict, total=False):
@@ -23,5 +23,5 @@ class TriageState(TypedDict, total=False):
     known_matches: dict[str, str]
     # One Proposal (agent.schemas) per cluster, in cluster order, written by draft_proposals.
     proposals: list[dict]
-    decisions: dict[str, str]
+    decisions: dict[str, Decision]  # by cluster id, set when human_review is resumed
     actions_log: list[str]

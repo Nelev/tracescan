@@ -1,6 +1,6 @@
 """
-TraceScan graph. collect_traces, cluster_failures, diagnose_cluster and draft_proposals are real;
-the other nodes are placeholders.
+TraceScan graph. collect_traces, cluster_failures, diagnose_cluster and draft_proposals are real,
+and human_review pauses the run with interrupt(); the other nodes are placeholders.
 
 Flow (diagnose_cluster runs once per cluster, in parallel, through Send):
   collect_traces -> cluster_failures -> diagnose_cluster x N -> join_diagnoses
@@ -11,7 +11,11 @@ A transient model error leaves a cluster unfinished: join_diagnoses then sends i
 diagnose_cluster, which checks the cluster's budget in `model_usage` before and after each run.
 
 Conditional edges end the run early when no traces failed, when no clusters were
-found, or when no proposal was approved. interrupt() comes later.
+found, or when no proposal was approved.
+
+human_review pauses the run. Resume it on the same thread_id with
+Command(resume={cluster_id: "approve" | "reject"}); that needs a checkpointer. Without one the
+first invoke still returns at the pause, with `__interrupt__` in its result.
 """
 
 import asyncio
@@ -19,7 +23,7 @@ import asyncio
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.store.base import BaseStore
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 
 from agent.const import MAX_PARALLEL_BRANCHES
 from agent.context import TraceContext
@@ -51,13 +55,25 @@ def match_known_issues(state: TriageState) -> dict:
 
 
 def human_review(state: TriageState) -> dict:
-    """Human approves or rejects each proposal."""
-    return {"decisions": {"c0": "approve"}}
+    """Pause until the reviewer has approved or rejected each proposal.
+
+    The interrupt value is saved in the checkpoint and reaches the stream, so it holds ids only.
+    The resume value is {cluster_id: Decision}, one per id asked here; whoever resumes checks it
+    against this value (runs.Runs.review does).
+    """
+    cluster_ids = [p["cluster_id"] for p in state.get("proposals", [])]
+    return {"decisions": interrupt({"cluster_ids": cluster_ids})}
 
 
 def apply_actions(state: TriageState) -> dict:
-    """Write issues and regression cases, only for approved proposals."""
-    return {"actions_log": ["[dry-run] create_issue c0"]}
+    """Write issues and regression cases, only for approved proposals. Placeholder: it logs only."""
+    decisions = state.get("decisions", {})
+    approved = [
+        p["cluster_id"]
+        for p in state.get("proposals", [])
+        if decisions.get(p["cluster_id"]) == "approve"
+    ]
+    return {"actions_log": [f"[dry-run] create_issue {cluster_id}" for cluster_id in approved]}
 
 
 def route_after_collect(state: TriageState) -> str:
@@ -146,6 +162,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
 async def main() -> None:
     async with TraceClient() as traces:
         context = TraceContext(traces, FastEmbedEmbedder(), build_diagnoser_model())
+        # No checkpointer here, so the run stops at the review pause and cannot be resumed.
         result = await build_graph().ainvoke({"target_app": "medas"}, context=context)
     for key, value in result.items():
         print(f"{key}: {value}")
