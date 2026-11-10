@@ -13,6 +13,7 @@ from agent.graph import build_graph
 from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model, build_ui_spec_model
 from api.runs import router as runs_router
+from api.traces import router as traces_router
 from db.engine import create_engine
 from runs import PostgresRunStore, Runs
 
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # checkpointer creates its own tables, Alembic creates ours (users, runs, reviews).
     database_url = os.environ["DATABASE_URL"]
     engine = create_engine(database_url)
+    app.state.engine = engine  # the collector (api.traces) writes spans through it
     async with AsyncPostgresSaver.from_conn_string(database_url) as checkpointer:
         store = PostgresRunStore(engine)
         await store.check()  # refuses to start until `alembic upgrade head` has run
@@ -55,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(title="TraceScan", lifespan=lifespan)
 app.include_router(runs_router)
+app.include_router(traces_router)
 
 
 @app.get("/health")
