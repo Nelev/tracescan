@@ -3,15 +3,16 @@
 import type { RunRecord, RunStatus } from "./types.ts";
 
 /**
- * What a status means, whatever it is the status of: nothing or stopped by choice (`neutral`),
- * under way (`info`), waiting for a person (`warning`), ended well, ended badly.
+ * What a status means, whatever it is the status of: nothing (`neutral`), under way (`info`),
+ * waiting for a person (`warning`), ended well, ended badly, cut short by choice (`stopped`).
  */
 export type StatusTone =
   | "neutral"
   | "info"
   | "warning"
   | "success"
-  | "destructive";
+  | "destructive"
+  | "stopped";
 
 /** How each status reads in the list. Only a run that waits for its review is a `warning`. */
 export const RUN_STATUS: Record<
@@ -22,7 +23,7 @@ export const RUN_STATUS: Record<
   review_required: { label: "Awaiting review", tone: "warning" },
   completed: { label: "Completed", tone: "success" },
   failed: { label: "Failed", tone: "destructive" },
-  aborted: { label: "Aborted", tone: "neutral" }, // stopped by its reader, not a failure
+  aborted: { label: "Aborted", tone: "stopped" }, // stopped by its reader, not a failure
 };
 
 export const isText = (v: unknown): v is string => typeof v === "string";

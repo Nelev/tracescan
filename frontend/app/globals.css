@@ -20,6 +20,7 @@
   --color-success: var(--success);
   --color-info: var(--info);
   --color-warning: var(--warning);
+  --color-stopped: var(--stopped);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -55,11 +56,13 @@
  *   foreground        primary text          muted-foreground  secondary text, overlines
  *   background < card < muted   surfaces, page to inset
  *   primary (electric blue)     the one accent: actions, focus, key metric
- *   info / warning / success / destructive   status only, never decoration (chip.tsx):
+ *   info / warning / success / destructive / stopped   status only, never decoration (chip.tsx):
  *     info         under way, nothing to do (a lighter blue than primary, so not a button)
  *     warning      waiting for a person: the only color that asks for action
  *     success      ended well            destructive  ended badly
- *     a status that is nothing, or was stopped by choice, is muted-foreground
+ *     stopped      cut short by choice (cancelled, aborted): an orange between warning's amber
+ *                  and destructive's red, since it is neither a request nor a failure
+ *     a status that is nothing (idle) is muted-foreground
  */
 @utility type-h1 {
   font-size: 1.5rem;
@@ -102,6 +105,7 @@
   --success: oklch(0.55 0.15 160);
   --info: oklch(0.55 0.16 255);
   --warning: oklch(0.6 0.14 80);
+  --stopped: oklch(0.6 0.16 50);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -145,6 +149,7 @@
   --success: oklch(0.78 0.17 160);
   --info: oklch(0.78 0.14 255);
   --warning: oklch(0.82 0.15 80);
+  --stopped: oklch(0.76 0.16 50);
   --border: oklch(0.75 0.08 265 / 16%);
   --input: oklch(0.75 0.08 265 / 20%);
   --ring: oklch(0.72 0.2 262);

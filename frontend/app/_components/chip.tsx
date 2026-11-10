@@ -1,4 +1,4 @@
-import { Check, type LucideIcon, UserCheck, X } from "lucide-react";
+import { Check, type LucideIcon, Square, UserCheck, X } from "lucide-react";
 import type { ReactNode } from "react";
 import type { StatusTone } from "@/lib/runs";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ export const CHIP_TONE: Record<StatusTone, string> = {
   warning: "border-warning/40 bg-warning/10 text-warning",
   success: "border-success/35 bg-success/10 text-success",
   destructive: "border-destructive/40 bg-destructive/10 text-destructive",
+  stopped: "border-stopped/40 bg-stopped/10 text-stopped",
 };
 
 const SIZE = {
@@ -26,6 +27,7 @@ const ICON: Partial<Record<StatusTone, LucideIcon>> = {
   warning: UserCheck,
   success: Check,
   destructive: X,
+  stopped: Square,
 };
 
 /** Each tone's mark, so a status never rests on its color alone. */
