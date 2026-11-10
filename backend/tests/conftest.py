@@ -1,12 +1,16 @@
 import os
 from pathlib import Path
 
+import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import text
 
 from agent import model_guard
 from agent.mcp_client import TraceClient
+from db.engine import create_engine
+from main import app
 
 BACKEND = Path(__file__).parent.parent
 
@@ -40,3 +44,24 @@ def postgres_url(monkeypatch) -> str:
     config.set_main_option("script_location", str(BACKEND / "migrations"))
     command.upgrade(config, "head")
     return url
+
+
+@pytest.fixture
+async def collector():
+    """An HTTP client on the app, for POST /v1/traces."""
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+async def spans_engine(postgres_url):
+    """The application's engine on an empty `spans` table, also set as the app's engine."""
+    engine = create_engine(postgres_url)
+    async with engine.begin() as conn:
+        await conn.execute(text("TRUNCATE spans"))
+    app.state.engine = engine
+    yield engine
+    del app.state.engine
+    await engine.dispose()

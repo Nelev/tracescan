@@ -12,9 +12,9 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | --- | --- |
 | Graph: collect, cluster, diagnose, draft, review, apply | Working |
 | Graph: `reproduce_failure`, `match_known_issues` | Placeholders that return fixed values |
-| Trace MCP server (read-only, sanitized, budgeted) | Working, over the fixture reader |
+| Trace MCP server (read-only, sanitized, budgeted) | Working, over the fixture reader or the Postgres reader |
 | OTLP collector (`POST /v1/traces` into the `spans` table) | Working, minimal: localhost and synthetic traffic only |
-| Postgres trace reader | Not built. Nothing reads `spans` yet, so runs read the fixture |
+| Postgres trace reader | Simplest version: used when `TRACE_DATABASE_URL` is set, the fixture otherwise. No scores, no read-only role yet |
 | Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
 | Fault-injection eval in Medas | Not built |
@@ -53,7 +53,7 @@ flowchart LR
     out[["out/issues/*.md<br/>out/regression_cases.jsonl"]]
 
     collector --> spans
-    spans -. "planned: Postgres reader" .-> reader
+    spans -. "when TRACE_DATABASE_URL is set" .-> reader
     reader --> fixture
     agent -- "TraceClient" --> tools
     agent --> llm
@@ -203,7 +203,7 @@ The graph uses the first two. `get_span` is served but `TraceClient` does not ca
 
 ### The reader
 
-The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. `FixtureTraceReader` is the only implementation. A Postgres reader over `spans`, connecting with a read-only role, is the next step, and it also has to derive the summary fields (failing span, signature, minimum score) that the fixture stores ready-made.
+The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. `FixtureTraceReader` is the default. With `TRACE_DATABASE_URL` set, the server uses `PostgresTraceReader` over `spans` instead. It derives the summary fields the fixture stores ready-made: a failed trace is one with an error span, the failing span is the deepest error span, and the signature is that span's name and exception type. It is the simplest version: there are no scores, and its session is read-only but a dedicated read-only role does not exist yet.
 
 ### What the server enforces
 
@@ -213,7 +213,7 @@ The server's tools only call the three methods of the `TraceReader` protocol, so
 - **Budget.** `TraceGuard` allows 300 tool calls per server process. `TraceClient` starts a fresh subprocess for each run, so that is a per-run budget. Rejected calls count too.
 - **Audit log.** Every call is logged to stderr with the tool, the outcome and a hash of the arguments. Raw arguments, results and exception messages are never logged.
 
-Two known limits: FastMCP's own "Invalid arguments" warning repeats a rejected id on stderr, and `get_trace_tree` and `get_span` take only ids, so they are not scoped to an app until the Postgres reader does it.
+Two known limits: FastMCP's own "Invalid arguments" warning repeats a rejected id on stderr, and `get_trace_tree` and `get_span` take only ids, so only the Postgres reader scopes them to an app.
 
 The session cannot outlive one graph invocation, so the resume after the human review opens no session. It gets `ClosedTraces`, whose every call raises, because that part of the run must read no traces.
 

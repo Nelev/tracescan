@@ -1,6 +1,7 @@
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from functools import partial
 
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -46,7 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         context = TraceContext(
             ClosedTraces(), FastEmbedEmbedder(), build_diagnoser_model(), dry_run=dry_run
         )
-        app.state.runs = Runs(app.state.graph, context, TraceClient, store)
+        # Optional: with it, runs read the spans table; without it, the synthetic fixture.
+        open_traces = partial(TraceClient, os.environ.get("TRACE_DATABASE_URL"))
+        app.state.runs = Runs(app.state.graph, context, open_traces, store)
         # The small model that writes the UI spec of each streamed message (api.ui_spec).
         app.state.ui_spec_model = build_ui_spec_model()
         try:
