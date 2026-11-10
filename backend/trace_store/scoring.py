@@ -42,14 +42,16 @@ def _failed(span: Row) -> bool:
 
 
 def _exception_type(span: Row) -> str:
-    """The exception type a span recorded, on itself or on its first exception event.
+    """What kind of error a span recorded: its `error.type` attribute, else the type of its
+    first exception event. A step can fail without raising (a tool that reports a failure),
+    and then only the attribute says so.
 
     The same places, in the same order, as the reader's SQL (postgres_reader._EXCEPTION_TYPE).
     """
-    for attributes in [span["attributes"], *(e.get("attributes") or {} for e in span["events"])]:
-        if found := attributes.get("exception.type"):
-            return str(found)
-    return ""
+    attributes = span["attributes"]
+    recorded = [attributes.get("error.type"), attributes.get("exception.type")]
+    recorded += [(event.get("attributes") or {}).get("exception.type") for event in span["events"]]
+    return next((str(found) for found in recorded if found), "")
 
 
 def origin(error_spans: Sequence[Row]) -> Row:
