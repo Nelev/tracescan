@@ -8,4 +8,5 @@ __pycache__/
 *.tsbuildinfo
 
 # dry-run output of apply_actions (issues, regression cases)
-/out/
+# (backend/out when the app runs from backend/)
+out/

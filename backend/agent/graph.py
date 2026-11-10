@@ -1,6 +1,7 @@
 """
 TraceScan graph. collect_traces, cluster_failures, diagnose_cluster and draft_proposals are real,
-and human_review pauses the run with interrupt(); the other nodes are placeholders.
+human_review pauses the run with interrupt(), and apply_actions writes the approved proposals as
+a dry run; reproduce_failure and match_known_issues are placeholders.
 
 Flow (diagnose_cluster runs once per cluster, in parallel, through Send):
   collect_traces -> cluster_failures -> diagnose_cluster x N -> join_diagnoses
@@ -30,6 +31,7 @@ from agent.context import TraceContext
 from agent.embeddings import FastEmbedEmbedder
 from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model
+from agent.nodes.apply_actions import apply_actions
 from agent.nodes.cluster_failures import cluster_failures
 from agent.nodes.collect_traces import collect_traces
 from agent.nodes.diagnose_cluster import diagnose_cluster
@@ -63,17 +65,6 @@ def human_review(state: TriageState) -> dict:
     """
     cluster_ids = [p["cluster_id"] for p in state.get("proposals", [])]
     return {"decisions": interrupt({"cluster_ids": cluster_ids})}
-
-
-def apply_actions(state: TriageState) -> dict:
-    """Write issues and regression cases, only for approved proposals. Placeholder: it logs only."""
-    decisions = state.get("decisions", {})
-    approved = [
-        p["cluster_id"]
-        for p in state.get("proposals", [])
-        if decisions.get(p["cluster_id"]) == "approve"
-    ]
-    return {"actions_log": [f"[dry-run] create_issue {cluster_id}" for cluster_id in approved]}
 
 
 def route_after_collect(state: TriageState) -> str:

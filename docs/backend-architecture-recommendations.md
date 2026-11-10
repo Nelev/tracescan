@@ -1,6 +1,6 @@
 # Backend architecture: recommendations
 
-Saved from a design interview on 2026-11-10. **Applied so far:** the `PLAN.md` corrections (Q5), and the runs module with the review pause and its endpoints (Q6 to Q14). **Not applied:** the server-side `dry_run` setting and the real `apply_actions` (Q15, Q16), the trace server configuration (Q17) and the collector (Q4, Q18).
+Saved from a design interview on 2026-11-10. **Applied so far:** the `PLAN.md` corrections (Q5), and the runs module with the review pause and its endpoints (Q6 to Q14), and the server-side `dry_run` setting with the dry-run `apply_actions` (Q15, and the dry-run branch of Q16). **Not applied:** the real writers behind `apply_actions` (the other branch of Q16), the trace server configuration (Q17) and the collector (Q4, Q18).
 
 One difference from Q8 as written: `review_required` carries the run's summary, and the proposals travel as the `proposal` events just before it, so their text is not sent twice. All three rounds (Q1 to Q18) are answered: every recommendation is accepted except Q16, which was decided the other way.
 

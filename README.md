@@ -173,7 +173,7 @@ cd backend && DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgr
 
 `POST /v1/runs/stream` with `{"target_app": "medas"}` starts a run and streams it as server-sent events. The stream ends with `review_required` when the run waits for a human review, or with `run_completed` when nothing failed. Both carry counts (failed traces, clusters, unclustered failures, diagnoses, proposals), the actions log and a `run_id`, which is the run's `thread_id`.
 
-`GET /v1/runs/{run_id}` returns the run's status and proposals. `POST /v1/runs/{run_id}/review` with one decision per proposal, for example `{"decisions": {"c0": "approve"}}`, resumes the run and returns the actions log. Nothing is written yet: the action step only logs what it would do.
+`GET /v1/runs/{run_id}` returns the run's status and proposals. `POST /v1/runs/{run_id}/review` with one decision per proposal, for example `{"decisions": {"c0": "approve"}}`, resumes the run and returns the actions log. This is a dry run: each approved proposal is written to `backend/out/issues/<cluster>.md` and its regression case is appended to `backend/out/regression_cases.jsonl`, and nothing else is written. `DRY_RUN` is on by default and only the server can set it; turning it off is refused at startup until the GitHub writer exists.
 
 Run the backend tests. Set `TEST_DATABASE_URL` to a Postgres as well to run the persistence test (see the top of `backend/tests/test_persistence.py`):
 

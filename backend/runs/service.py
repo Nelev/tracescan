@@ -11,12 +11,11 @@ there, and the server cannot list runs: a client keeps its `run_id`.
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.stream import AsyncGraphRunStream
@@ -24,7 +23,6 @@ from langgraph.types import Command, StateSnapshot
 from pydantic import BaseModel
 
 from agent.context import ClosedTraces, TraceAccess, TraceContext
-from agent.embeddings import Embedder
 from agent.progress import ProgressEvent, progress_events
 from agent.schemas import Decision, Proposal
 from agent.state import TriageState
@@ -152,13 +150,13 @@ class Runs:
     def __init__(
         self,
         graph: CompiledStateGraph,
-        embedder: Embedder,
-        model: BaseChatModel,
+        context: TraceContext,
         open_traces: OpenTraces,
     ) -> None:
         self._graph = graph  # must have a checkpointer: status and review read it
-        self._embedder = embedder
-        self._model = model
+        # What every run segment gets, set once by the server so no request reaches it. Its
+        # `traces` is replaced per segment: an open session to start, ClosedTraces to review.
+        self._context = context
         self._open_traces = open_traces
         self._resuming: set[str] = set()  # runs whose review is being applied, in this process
 
@@ -182,9 +180,11 @@ class Runs:
         async with AsyncExitStack() as stack:
             try:
                 traces = await stack.enter_async_context(self._open_traces())
-                context = TraceContext(traces, self._embedder, self._model)
                 run = self._graph.astream_events(
-                    state, _config(run_id), version="v3", context=context
+                    state,
+                    _config(run_id),
+                    version="v3",
+                    context=replace(self._context, traces=traces),
                 )
                 stream = await stack.enter_async_context(await run)
             except Exception as exc:
@@ -239,9 +239,10 @@ class Runs:
         # No await between the check above and this line, so two reviews cannot both pass it.
         self._resuming.add(run_id)
         try:
-            context = TraceContext(ClosedTraces(), self._embedder, self._model)
             values = await self._graph.ainvoke(
-                Command(resume=dict(decisions)), _config(run_id), context=context
+                Command(resume=dict(decisions)),
+                _config(run_id),
+                context=replace(self._context, traces=ClosedTraces()),
             )
         except Exception as exc:
             _log_failure(exc)

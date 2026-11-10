@@ -12,10 +12,12 @@ already in state), so it opens no session and passes `ClosedTraces()` instead.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from langchain_core.language_models import BaseChatModel
 
+from agent.actions import OUT_DIR
 from agent.embeddings import Embedder
 from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
@@ -43,3 +45,6 @@ class TraceContext:
     traces: TraceAccess
     embedder: Embedder  # required: the API passes one shared model, tests pass a HashingEmbedder
     model: BaseChatModel  # the diagnoser's chat model; tests pass a fake
+    # Read by apply_actions only. The server sets both; nothing in a request can change them.
+    dry_run: bool = True  # off is refused until the real writers exist
+    out_dir: Path = OUT_DIR  # where a dry run writes its files

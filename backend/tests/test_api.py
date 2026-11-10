@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
@@ -11,18 +12,20 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
+from agent.actions import OUT_DIR, REGRESSION_FILE
 from agent.graph import build_graph
 from agent.schemas import Proposal
 from api import ui_spec
-from main import app
+from main import app, dry_run_setting
 from runs import Runs
 from tests.fakes import (
     DIAGNOSIS,
     SPEC,
     FakeTraces,
-    HashingEmbedder,
+    fake_context,
     fake_diagnoser,
     fake_model,
+    files_under,
     scripted,
     span_tree,
     summary,
@@ -32,8 +35,8 @@ from tests.fakes import (
 def use_runs(traces: FakeTraces | None = None, model=None, open_traces=None) -> None:
     """Give the app a runs module over `traces` (or a session factory of the test's own).
 
-    The embedder is offline, so the real model is never downloaded, and the chat model is a fake
-    that is never called unless the test passes a diagnoser.
+    The context is the shared fake one: an offline embedder, so the real model is never downloaded,
+    and a chat model that is never called unless the test passes a diagnoser.
     """
 
     @asynccontextmanager
@@ -41,7 +44,7 @@ def use_runs(traces: FakeTraces | None = None, model=None, open_traces=None) -> 
         yield traces or FakeTraces()
 
     app.state.runs = Runs(
-        app.state.graph, HashingEmbedder(), model or fake_model(), open_traces or session
+        app.state.graph, fake_context(FakeTraces(), model), open_traces or session
     )
 
 
@@ -65,7 +68,14 @@ async def broken_session():
 
 
 @pytest.fixture
-async def client():
+def out_dir(tmp_path, monkeypatch) -> Path:
+    """Where this test's dry run writes: the default `out`, under a working directory of its own."""
+    monkeypatch.chdir(tmp_path)
+    return tmp_path / OUT_DIR
+
+
+@pytest.fixture
+async def client(out_dir):
     # ASGITransport does not run the lifespan, so attach an in-memory graph to the app here.
     app.state.graph = build_graph(InMemorySaver(), InMemoryStore())
     use_runs()
@@ -366,26 +376,30 @@ async def test_an_unknown_run_is_404_and_a_malformed_id_422(client):
 
 
 @pytest.mark.anyio
-async def test_approving_resumes_the_run_through_apply_actions(client):
+async def test_approving_writes_the_issue_and_the_regression_case_as_a_dry_run(client, out_dir):
     use_diagnosed_run()
     run_id = await start(client)
+    assert files_under(out_dir) == []  # nothing is written before the review
 
     response = await client.post(f"/v1/runs/{run_id}/review", json={"decisions": {"c0": "approve"}})
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
-    assert body["summary"]["actions_log"] == ["[dry-run] create_issue c0"]
+    assert len(body["summary"]["actions_log"]) == 2  # the wording is tested in test_actions
+    assert files_under(out_dir) == ["issues/c0.md", REGRESSION_FILE]
+    assert "## Suspected cause" in (out_dir / "issues" / "c0.md").read_text()
     assert (await client.get(f"/v1/runs/{run_id}")).json()["status"] == "completed"
 
 
 @pytest.mark.anyio
-async def test_rejecting_everything_ends_the_run_without_any_action(client):
+async def test_rejecting_everything_ends_the_run_without_writing_anything(client, out_dir):
     use_diagnosed_run()
     run_id = await start(client)
     response = await client.post(f"/v1/runs/{run_id}/review", json={"decisions": {"c0": "reject"}})
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
     assert response.json()["summary"]["actions_log"] == []
+    assert files_under(out_dir) == []
 
 
 @pytest.mark.anyio
@@ -450,3 +464,29 @@ async def test_the_review_opens_no_trace_session(client):
     review = {"decisions": {"c0": "approve"}}
     assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 200
     assert opened == [True]
+
+
+# --- the DRY_RUN setting
+
+
+@pytest.mark.parametrize("value", [None, "true", "1", "yes", ""])
+def test_dry_run_is_on_unless_the_environment_turns_it_off(monkeypatch, value):
+    monkeypatch.delenv("DRY_RUN", raising=False)
+    if value is not None:
+        monkeypatch.setenv("DRY_RUN", value)
+    assert dry_run_setting() is True
+
+
+@pytest.mark.parametrize("value", ["false", "0", "no", "off", " False "])
+def test_dry_run_is_off_when_the_environment_says_so(monkeypatch, value):
+    monkeypatch.setenv("DRY_RUN", value)
+    assert dry_run_setting() is False
+
+
+@pytest.mark.anyio
+async def test_the_app_refuses_to_start_with_dry_run_off(monkeypatch):
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.delenv("DATABASE_URL", raising=False)  # refused before the database is needed
+    with pytest.raises(NotImplementedError):
+        async with app.router.lifespan_context(app):
+            pass
