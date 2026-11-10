@@ -16,7 +16,7 @@ the same `end` twice stores nothing new and another `end` adds another day.
 import argparse
 import asyncio
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from random import Random
@@ -25,7 +25,7 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.id_generator import IdGenerator
@@ -201,8 +201,8 @@ def _emit(tracer: trace.Tracer, step: Step, parent: trace.Span | None, start_ns:
     return end_ns
 
 
-def export(end: datetime) -> bytes:
-    """The day of traffic that ends at `end`, as one OTLP trace export."""
+def _day(end: datetime) -> tuple[Sequence[ReadableSpan], dict[str, str]]:
+    """The spans of the day that ends at `end`, and the kind of each of its traces."""
     rng = Random(int(end.timestamp()))
     finished = InMemorySpanExporter()
     provider = TracerProvider(resource=Resource({"service.name": APP}), id_generator=SeededIds(rng))
@@ -213,10 +213,30 @@ def export(end: datetime) -> bytes:
     rng.shuffle(makers)
     # One request per slot, started at the slot's start: each is over well before `end`.
     slot = DAY / len(makers)
+    kinds = {}
     for i, make in enumerate(makers):
         start = end - DAY + slot * i
         _emit(tracer, make(rng), None, int(start.timestamp() * 1e9))
-    return encode_spans(finished.get_finished_spans()).SerializeToString()
+        context = finished.get_finished_spans()[
+            -1
+        ].context  # any span just made: all are of this trace
+        assert context is not None  # a span the SDK made always has one
+        kinds[format(context.trace_id, "032x")] = make.__name__
+    return finished.get_finished_spans(), kinds
+
+
+def export(end: datetime) -> bytes:
+    """The day of traffic that ends at `end`, as one OTLP trace export."""
+    return encode_spans(_day(end)[0]).SerializeToString()
+
+
+def kinds(end: datetime) -> dict[str, str]:
+    """What each trace of that day is: trace id to the name of its maker in COUNTS.
+
+    The answer key of the eval (eval/ground_truth.py). It is worked out again from `end`
+    and never stored, so nothing the diagnoser can read says what a trace is.
+    """
+    return _day(end)[1]
 
 
 async def seed(database_url: str, rows: list[dict[str, Any]]) -> int:

@@ -17,6 +17,7 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | Postgres trace reader | Simplest version: used when `TRACE_DATABASE_URL` is set, the fixture otherwise. No scores, no read-only role yet |
 | Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
+| Eval on seeded traces (`backend/eval/`) | Working: ground truth, runner, coded scores and a judge for the root cause. The seeded faults are easy, so it proves the harness more than the agent |
 | Fault-injection eval in Medas | Not built |
 
 `PLAN.md` holds the scope and the task order.
@@ -413,6 +414,7 @@ Start a run for `medas` from the page. It reads the fixture, diagnoses two clust
 | `OPENROUTER_API_KEY` | yes | The diagnoser's and the UI model's key |
 | `DIAGNOSER_MODEL` | no | OpenRouter slug; default `anthropic/claude-sonnet-5-5` |
 | `UI_SPEC_MODEL` | no | OpenRouter slug; default `anthropic/claude-haiku-5.5` |
+| `JUDGE_MODEL` | no | The eval's judge; default `openai/gpt-6.1-sol` |
 | `DRY_RUN` | no | On by default. Off is refused at startup |
 | `FASTEMBED_CACHE_PATH` | no | Where the embedding model is cached |
 | `BACKEND_URL` | no | For the frontend; default `http://localhost:8000` |
@@ -438,6 +440,37 @@ cd backend && uv run --env-file .env python -m scripts.seed_traces
 ```
 
 The day ends now unless `--end` gives another time; the same `--end` twice adds nothing. Runs read them only when `TRACE_DATABASE_URL` is set.
+
+Run the eval on a seeded day (it needs `DATABASE_URL`, `TRACE_DATABASE_URL` and `OPENROUTER_API_KEY`). The first command seeds a fixed day, runs the triage up to the review pause and saves a results file under `backend/out/eval/`; the second has a model of another vendor grade each root cause from 0 to 2 against `eval/judge_rubric.md`; the third prints the scores:
+
+```bash
+cd backend && uv run --env-file .env python -m eval.run
+```
+
+```bash
+cd backend && uv run --env-file .env python -m eval.judge
+```
+
+```bash
+cd backend && uv run python -m eval.metrics
+```
+
+The scores of one run on `anthropic/claude-sonnet-5-5`, judged by `openai/gpt-6.1-sol` (22 failed traces of five seeded faults, 8 healthy ones):
+
+| Score | Meaning | Result |
+| --- | --- | --- |
+| Detection | Seeded faults that are the majority of a diagnosed cluster | 5/5 |
+| Purity | Traces that belong to their cluster's majority fault | 22/22 |
+| Separation | Faults whose traces sit in one cluster that holds nothing else | 5/5 |
+| Rare-failure recall | Faults seeded once that still got a diagnosis | 1/1 |
+| False alarms | Clusters that hold a healthy trace | 0 |
+| Category accuracy | Diagnoses with the fault's expected category | 5/5 |
+| Evidence valid | Diagnoses whose citations are all real spans | 5/5 |
+| Evidence relevant | Diagnoses that cite the span the trace failed in | 5/5 |
+| Cause accuracy | Diagnoses the judge scored 2: they name the injected cause, not the symptom | 5/5 |
+| Cost and time | One run | 5 calls, about 27,000 tokens, $0.08, 10 s |
+
+Each seeded fault raises its own exception, so these are easy to tell apart: the table shows that the eval works, and says little about the agent until the faults get harder. The judge's agreement with a person's grades (`python -m eval.judge --human c0=2 c1=1 ...`) is not measured yet.
 
 Run the graph once without the API. It stops at the review pause and cannot be resumed, because it has no checkpointer:
 
