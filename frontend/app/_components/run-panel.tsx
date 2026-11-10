@@ -225,6 +225,8 @@ export function RunPanel() {
         lines={run.lines}
         messages={run.messages}
         phase={run.phase}
+        runId={run.runId}
+        onReviewed={run.markReviewed}
         error={run.error}
         events={run.events}
         startedAt={run.startedAt}

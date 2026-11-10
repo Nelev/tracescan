@@ -25,7 +25,9 @@ export const RUN_STATUS: Record<
   aborted: { label: "Aborted", tone: "neutral" }, // stopped by its reader, not a failure
 };
 
-const isText = (v: unknown): v is string => typeof v === "string";
+export const isText = (v: unknown): v is string => typeof v === "string";
+export const isRunStatus = (v: unknown): v is RunStatus =>
+  isText(v) && Object.hasOwn(RUN_STATUS, v);
 const isTextOrNull = (v: unknown): v is string | null =>
   v === null || isText(v);
 const isCount = (v: unknown): v is number => Number.isInteger(v);
@@ -38,8 +40,7 @@ function isRun(row: unknown): row is RunRecord {
     isText(r.target_app) &&
     isTextOrNull(r.since) &&
     isTextOrNull(r.until) &&
-    isText(r.status) &&
-    Object.hasOwn(RUN_STATUS, r.status) &&
+    isRunStatus(r.status) &&
     isTextOrNull(r.started_by) &&
     isText(r.created_at) &&
     isTextOrNull(r.ended_at) &&

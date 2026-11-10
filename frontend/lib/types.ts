@@ -29,6 +29,9 @@ export type RunRecord = {
   proposals: number;
 };
 
+/** What the reviewer answers per proposal (Decision in backend/agent/schemas.py). */
+export type Decision = "approve" | "reject";
+
 /**
  * Event names of POST /v1/runs/stream. `lib/events.ts` parses them into typed events: the console
  * draws the `ui_spec` ones, the UI spec the server's model wrote for the message just before it,

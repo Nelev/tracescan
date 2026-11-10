@@ -4,10 +4,11 @@ import { RUN_EVENTS } from "./types.ts";
 /**
  * One stream message, parsed once at the edge. Anything that does not match the contract becomes
  * `unknown`: the raw log still prints it, and the console draws nothing for it. A progress event
- * is read only for whether its step failed, which tints its line in the raw log.
+ * is read only for whether its step failed, which tints its line in the raw log. `run_started`
+ * names the run, which is how its review is sent later; null when the id is missing.
  */
 export type RunEvent =
-  | { kind: "started" }
+  | { kind: "started"; runId: string | null }
   | { kind: "progress"; failed: boolean }
   | { kind: "review" }
   | { kind: "completed" }
@@ -28,7 +29,7 @@ export type UiMessage = UiSpecEvent & { id: number };
 
 const UNKNOWN: RunEvent = { kind: "unknown" };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -43,8 +44,14 @@ function parseData(text: string): unknown {
 
 export function parseRunEvent(message: SseMessage): RunEvent {
   switch (message.event) {
-    case RUN_EVENTS.started:
-      return { kind: "started" };
+    case RUN_EVENTS.started: {
+      const data = parseData(message.data);
+      const runId = isRecord(data) ? data.run_id : undefined;
+      return {
+        kind: "started",
+        runId: typeof runId === "string" ? runId : null,
+      };
+    }
     case RUN_EVENTS.reviewRequired:
       return { kind: "review" };
     case RUN_EVENTS.completed:

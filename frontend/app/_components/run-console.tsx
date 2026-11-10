@@ -10,6 +10,7 @@ import { RUN_EVENTS } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
 import { PANE_HEIGHT } from "./console-styles";
+import { ReviewPane } from "./review-pane";
 import { RunsTable } from "./runs-table";
 import type { ConsoleLine, Phase, Tone } from "./use-run-stream";
 import { type RunsState, useRuns } from "./use-runs";
@@ -203,7 +204,7 @@ function ScrollPane({
   );
 }
 
-type Tab = "console" | "raw" | "runs";
+type Tab = "console" | "raw" | "runs" | "review";
 
 function runsFooter({ status, runs, loadedAt }: RunsState): string {
   if (loadedAt === null) {
@@ -218,14 +219,17 @@ function runsFooter({ status, runs, loadedAt }: RunsState): string {
 
 /**
  * The page's whole output: the messages the server streams, drawn from the UI specs its model
- * wrote (Console), the same stream as received (Raw events), and the runs the server has recorded
- * (Runs), which are loaded when that tab opens, when this page's run changes phase, and on
- * Refresh.
+ * wrote (Console), the same stream as received (Raw events), the runs the server has recorded
+ * (Runs), which are loaded when that tab opens, when this page's run changes phase or is
+ * reviewed, and on Refresh, and the review of one run (Review): this page's run once it waits
+ * for one, or a waiting run picked under Runs.
  */
 export function RunConsole({
   lines,
   messages,
   phase,
+  runId,
+  onReviewed,
   error,
   events,
   startedAt,
@@ -235,6 +239,10 @@ export function RunConsole({
   lines: ConsoleLine[];
   messages: UiMessage[];
   phase: Phase;
+  /** This page's run, once the server has named it. */
+  runId: string | null;
+  /** A run was reviewed here, this page's or another. */
+  onReviewed: (runId: string) => void;
   /** Why the run did not start or was cut short; shown above the messages. */
   error: string | null;
   events: number;
@@ -244,17 +252,41 @@ export function RunConsole({
 }) {
   const running = phase === "running";
   const [copied, setCopied] = useState(false);
-  const [tab, setTab] = useState<Tab>("console");
+  const [tab, setTab] = useState<Tab>("runs");
+  // The run picked for review. Without one, the Review tab shows this page's run while it waits.
+  const [picked, setPicked] = useState<string | null>(null);
+  const waitingId = phase === "review" ? runId : null;
+  const reviewId = picked ?? waitingId;
   // Reloaded on each phase change and once the run has started: the server records a run when it
-  // accepts it, which is after this page has already switched to `running`.
+  // accepts it, which is after this page has already switched to `running`. A review needs no
+  // reload of its own: it ends on the Review tab, and opening Runs loads the list.
   const recorded = useRuns(
     tab === "runs",
     `${phase}:${events > 0}`,
     phase === "cancelled" || phase === "lost",
   );
 
+  function openReview(id: string) {
+    setPicked(id);
+    setTab("review");
+  }
+
+  function reviewed(id: string) {
+    setPicked(id); // keeps the outcome on screen once this page's run no longer waits
+    onReviewed(id);
+  }
+
+  function footer(): string {
+    if (tab === "runs") return runsFooter(recorded);
+    if (tab === "review") return reviewId ? `Run ${reviewId}` : "No run open";
+    return PHASE[phase].footer(events);
+  }
+
+  // A run that starts is shown: the page opens on Runs, and its messages are under Console.
   useEffect(() => {
-    if (running) preloadUiMessages();
+    if (!running) return;
+    preloadUiMessages();
+    setTab("console");
   }, [running]);
 
   async function copy() {
@@ -281,13 +313,19 @@ export function RunConsole({
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="sr-only">Run output</h2>
           <TabsList aria-label="Run output">
+            <TabsTrigger value="runs">Runs</TabsTrigger>
             <TabsTrigger value="console">Console</TabsTrigger>
             <TabsTrigger value="raw">Raw events</TabsTrigger>
-            <TabsTrigger value="runs">Runs</TabsTrigger>
+            <TabsTrigger value="review">Review</TabsTrigger>
           </TabsList>
           <StatusChip phase={phase} />
+          {waitingId && tab !== "review" && (
+            <Button onClick={() => openReview(waitingId)}>
+              Review proposals
+            </Button>
+          )}
         </div>
-        {tab === "runs" ? (
+        {tab === "runs" && (
           <Button
             variant="outline"
             onClick={recorded.refresh}
@@ -295,7 +333,8 @@ export function RunConsole({
           >
             Refresh
           </Button>
-        ) : (
+        )}
+        {(tab === "console" || tab === "raw") && (
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -355,14 +394,34 @@ export function RunConsole({
           </ScrollPane>
         </TabsContent>
         <TabsContent value="runs">
-          <RunsTable status={recorded.status} runs={recorded.runs} />
+          <RunsTable
+            status={recorded.status}
+            runs={recorded.runs}
+            onReview={openReview}
+          />
+        </TabsContent>
+        {/* Kept mounted, unlike the other panes: a look at another tab must not lose the
+            decisions made so far, or the outcome of a review. */}
+        <TabsContent value="review" keepMounted>
+          <div className={cn(PANE_HEIGHT, "flex flex-col")}>
+            {reviewId ? (
+              <ReviewPane
+                key={reviewId}
+                runId={reviewId}
+                onReviewed={reviewed}
+              />
+            ) : (
+              <p className="type-body p-4 text-muted-foreground">
+                No run is open for review. A run that waits for one has a Review
+                button under Runs.
+              </p>
+            )}
+          </div>
         </TabsContent>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 pt-3 pb-6">
-        <span className="type-h4">
-          {tab === "runs" ? runsFooter(recorded) : PHASE[phase].footer(events)}
-        </span>
+        <span className="type-h4">{footer()}</span>
         <Elapsed startedAt={startedAt} endedAt={endedAt} />
       </div>
     </Tabs>

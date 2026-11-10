@@ -21,7 +21,8 @@ export default function Home() {
             <p className="type-body text-muted-foreground">
               Starts a triage run and shows the messages the server streams:
               drawn under Console, and as received under Raw events. Runs lists
-              the runs the server has recorded.
+              the runs the server has recorded, and Review is where you approve
+              or reject a run's proposals.
             </p>
           </div>
         </div>

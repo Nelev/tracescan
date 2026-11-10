@@ -34,6 +34,8 @@ const MAX_LINES = 500;
 
 type State = {
   phase: Phase;
+  /** The run's id, from `run_started`: what its review is sent under. Null before it. */
+  runId: string | null;
   /** Every message as received, for the raw log. */
   lines: ConsoleLine[];
   /** Events received from the server; `lines` may have dropped the oldest. */
@@ -56,10 +58,13 @@ type Action =
   | { type: "event"; message: SseMessage; event: RunEvent; at: number }
   | { type: "batch"; actions: Action[] }
   | { type: "end"; phase: Ending; at: number; error?: string }
+  /** The run was reviewed: if it is this page's run, it no longer waits. */
+  | { type: "reviewed"; runId: string }
   | { type: "clear" };
 
 const IDLE: State = {
   phase: "idle",
+  runId: null,
   lines: [],
   events: 0,
   nextId: 0,
@@ -99,7 +104,14 @@ function reduce(state: State, action: Action): State {
         }),
         events: state.events + 1,
         messages: foldEvent(state.messages, action.event),
+        runId:
+          action.event.kind === "started" ? action.event.runId : state.runId,
       };
+    case "reviewed":
+      // The stream ended at the review; the review ended the run.
+      return state.phase === "review" && state.runId === action.runId
+        ? { ...state, phase: "done" }
+        : state;
     case "batch":
       return action.actions.reduce(reduce, state);
     case "end":
@@ -215,6 +227,7 @@ export function useRunStream() {
 
   return {
     phase: state.phase,
+    runId: state.runId,
     lines: state.lines,
     events: state.events,
     error: state.error,
@@ -224,5 +237,6 @@ export function useRunStream() {
     start,
     cancel: () => abortRef.current?.abort(),
     clear: () => dispatch({ type: "clear" }),
+    markReviewed: (runId: string) => dispatch({ type: "reviewed", runId }),
   };
 }
