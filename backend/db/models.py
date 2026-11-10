@@ -3,7 +3,8 @@
 They sit in the same database as the graph checkpoints (DATABASE_URL). `users`, `runs` and
 `reviews` hold ids, counts and decisions only: no issue text and no span content. The checkpoint
 stays the record of a run's state and proposals; `runs` is the index and the lifecycle around it.
-`spans` is the exception: it is the trace store, and holds what the collector received.
+`spans` is the exception: it is the trace store, and holds what the collector received;
+`scores` is what the heuristic checks say about each of its traces (ids and numbers only).
 
 Change a table here, then write a migration: `uv run alembic revision --autogenerate -m "..."`.
 """
@@ -12,7 +13,7 @@ from datetime import datetime
 from typing import Any, Literal, get_args
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func, text
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -108,3 +109,19 @@ class Span(Base):
     status_message: Mapped[str | None]
     attributes: Mapped[dict[str, Any]] = mapped_column(JSONB)
     events: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+
+
+class Score(Base):
+    """What one heuristic check says about one stored trace (trace_store/scoring.py).
+
+    0.0 is bad and 1.0 is fine. A trace counts as failed when its lowest score is low. `span_id`
+    is the span the check blames, when it blames one. Ids and numbers only, no span content.
+    """
+
+    __tablename__ = "scores"
+
+    trace_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    evaluator: Mapped[str] = mapped_column(primary_key=True)  # the check's name
+    value: Mapped[float] = mapped_column(Float)
+    span_id: Mapped[str | None] = mapped_column(String(16))
+    scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

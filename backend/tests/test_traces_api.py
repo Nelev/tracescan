@@ -47,6 +47,7 @@ def export(service: str = "medas") -> bytes:
         end_time_unix_nano=START_NS + 5_000_000,
         status=Status(code=Status.STATUS_CODE_ERROR, message="no documents"),
     )
+    child.attributes.add(key="gen_ai.operation.name").value.string_value = "execute_tool"
     child.attributes.add(key="retrieval.count").value.int_value = 0
     child.attributes.add(key="gen_ai.system").value.string_value = "openrouter"
     tags = child.attributes.add(key="tags").value.array_value
@@ -76,6 +77,7 @@ def test_an_export_becomes_one_row_per_span():
     assert (child["parent_span_id"], child["kind"]) == (ROOT_ID.hex(), "unspecified")
     assert (child["status"], child["status_message"]) == ("error", "no documents")
     assert child["attributes"] == {
+        "gen_ai.operation.name": "execute_tool",
         "retrieval.count": 0,
         "gen_ai.system": "openrouter",
         "tags": ["a", True],

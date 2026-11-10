@@ -1,19 +1,20 @@
 """The trace reader over Postgres: the `spans` table the collector writes (api/traces.py).
 
-The simplest version. There is no traces or scores table, so a trace is the spans that share
-a trace_id, and a failed trace is one with a root span and at least one span of status error.
+There is no traces table: a trace is the spans that share a trace_id. A failed trace is one
+with a root span whose lowest score (trace_store/scoring.py) is at most the query's max_score.
+An error span alone does not make a trace failed, and a trace with no scores yet is not served.
+The failing span of a trace is the one its lowest score blames.
 Give it TRACE_DATABASE_URL; the session is opened read-only, whatever the role may do.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
 
-from sqlalchemy import RowMapping, exists, func, literal_column, select
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import and_, func, literal_column, select
+from sqlalchemy.dialects.postgresql import JSONB, distinct_on
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.orm import aliased
 
 from db.engine import sqlalchemy_url
-from db.models import Span
+from db.models import Score, Span
 from trace_store.const import ALLOWED_APPS
 from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 from trace_store.reader import build_tree
@@ -38,17 +39,6 @@ def read_only_engine(database_url: str) -> AsyncEngine:
     )
 
 
-def origin(error_spans: Sequence[RowMapping]) -> RowMapping:
-    """The span a failure started in: an error span with no error span below it.
-
-    An error usually marks every span up to the root, so the deepest one is the cause. With
-    several such spans, the one that started first.
-    """
-    parents = {span["parent_span_id"] for span in error_spans}
-    leaves = [span for span in error_spans if span["span_id"] not in parents]
-    return min(leaves, key=lambda span: span["start_time"])
-
-
 class PostgresTraceReader:
     """Serves the traces of `apps` only, on every method."""
 
@@ -57,14 +47,17 @@ class PostgresTraceReader:
         self._apps = list(apps)
 
     async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
-        # max_score is not used: there are no scores yet, so only an error status is a failure.
         if query.app not in self._apps:
             return []
-        error = aliased(Span)
-        roots = select(Span.trace_id, Span.start_time, Span.end_time).where(
-            Span.parent_span_id.is_(None),
-            Span.app == query.app,
-            exists().where(error.trace_id == Span.trace_id, error.status == "error"),
+        # Root spans, each with its trace's lowest score: Postgres lets the other root columns
+        # be selected because the grouping is by the table's primary key.
+        lowest = func.min(Score.value)
+        roots = (
+            select(Span.trace_id, Span.start_time, Span.end_time, Span.status, lowest.label("low"))
+            .join(Score, Score.trace_id == Span.trace_id)
+            .where(Span.parent_span_id.is_(None), Span.app == query.app)
+            .group_by(Span.trace_id, Span.span_id)
+            .having(lowest <= query.max_score)
         )
         if query.since is not None:
             roots = roots.where(Span.start_time >= query.since)
@@ -76,39 +69,43 @@ class PostgresTraceReader:
             traces = (await conn.execute(roots)).mappings().all()
             if not traces:
                 return []
-            errors = await conn.execute(
+            # Per trace, the span its lowest score blames (of several, the first check by name).
+            blamed_spans = await conn.execute(
                 select(
-                    Span.trace_id,
+                    Score.trace_id,
+                    Score.evaluator,
                     Span.span_id,
-                    Span.parent_span_id,
                     Span.name,
-                    Span.start_time,
                     Span.status_message,
                     _EXCEPTION_TYPE,
-                ).where(
-                    Span.trace_id.in_([trace["trace_id"] for trace in traces]),
-                    Span.status == "error",
                 )
+                .ext(distinct_on(Score.trace_id))
+                .join(Span, and_(Span.trace_id == Score.trace_id, Span.span_id == Score.span_id))
+                .where(
+                    Score.trace_id.in_([trace["trace_id"] for trace in traces]),
+                    Score.value <= query.max_score,
+                )
+                .order_by(Score.trace_id, Score.value, Score.evaluator)
             )
-            error_spans: dict[str, list[RowMapping]] = {}
-            for span in errors.mappings():
-                error_spans.setdefault(span["trace_id"], []).append(span)
+            blamed = {span["trace_id"]: span for span in blamed_spans.mappings()}
 
         summaries = []
         for trace in traces:
-            failing = origin(error_spans[trace["trace_id"]])
+            failing = blamed[trace["trace_id"]]  # every low score blames a span
             summaries.append(
                 TraceSummary(
                     trace_id=trace["trace_id"],
                     app=query.app,
                     start_time=trace["start_time"],
                     duration_ms=(trace["end_time"] - trace["start_time"]).total_seconds() * 1000,
-                    status="error",
+                    status=trace["status"],
                     error_message=failing["status_message"],
                     failing_span_id=failing["span_id"],
                     failing_span_name=failing["name"],
-                    # Names only: no message and no attribute value, so no span content.
-                    signature=" ".join(filter(None, [failing["name"], failing["exception_type"]])),
+                    min_score=trace["low"],
+                    # Names only (the span, then its exception type or, without one, the check
+                    # that scored it low): no message and no attribute value.
+                    signature=f"{failing['name']} {failing['exception_type'] or failing['evaluator']}",
                 )
             )
         return summaries

@@ -80,7 +80,8 @@ async def test_seeded_failures_are_what_the_reader_finds(spans_engine, reader):
         "chat openai/gpt-4.1-mini openai.BadRequestError": COUNTS[seed.context_overflow],
         "retrieval record_chunks sqlalchemy.exc.OperationalError": COUNTS[seed.store_down],
         "invoke_agent medas schema.AgentUnavailable": COUNTS[seed.unexplained],
-        # Errors that are not faults are found all the same; the failure with no error is not.
-        "execute_tool search_medlineplus httpx.HTTPStatusError": COUNTS[seed.retried_ok],
-        "execute_tool search_patient_record medas.PatientNotFound": COUNTS[seed.not_found],
+        # Found by its score: no span failed, the retrieval came back empty.
+        "retrieval record_chunks empty_retrieval": COUNTS[seed.silent_no_hits],
+        # The errors that are not faults (a retried call, a record that does not exist) score
+        # fine, so they are not found.
     }

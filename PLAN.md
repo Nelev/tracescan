@@ -186,7 +186,7 @@ Each diagnosis is graded on whether it names the actual cause (for example, the 
 
 TraceScan traces its own runs into the same trace store, so its cost and failures are observable the same way as the target app's.
 
-**First results (2026-11-10), on seeded traces, before Medas has fault switches.** The eval in `backend/eval/` grades a run against synthetic traces whose causes are known: five plain faults, then hard cases (a look-alike, one cause with two faces, two errors in one request, a failure with no visible cause, a failure with no error, and errors that are not faults). On the plain faults every score is full marks, which says little. With the hard cases the diagnoser is still right about every cluster it is given (category 6/6, cause 6/6, and `unknown` where the trace shows no cause), but the clustering merges look-alike failures and harmless errors into one cluster (detection 6/9, purity 24/36, separation 3/9), and the failure with no error is never collected (trace recall 30/34). So the next work on quality is the clustering and the scoring job, not the diagnoser. The log is in `docs/eval-notes.md`; this does not replace the fault-injection eval in Medas described above.
+**First results (2026-11-10), on seeded traces, before Medas has fault switches.** The eval in `backend/eval/` grades a run against synthetic traces whose causes are known: five plain faults, then hard cases (a look-alike, one cause with two faces, two errors in one request, a failure with no visible cause, a failure with no error, and errors that are not faults). On the plain faults every score is full marks, which says little. With the hard cases the diagnoser is still right about every cluster it is given (category 6/6, cause 6/6, and `unknown` where the trace shows no cause), but the clustering merges look-alike failures and harmless errors into one cluster (detection 6/9, purity 24/36, separation 3/9), and the failure with no error is never collected (trace recall 30/34). So the next work on quality is the clustering and the scoring job, not the diagnoser. With the scoring job built, trace recall is 34/34 and the harmless errors are no longer collected; the clustering still groups by failing step (detection 5/9, separation 2/9), so it is what is left. The log is in `docs/eval-notes.md`; this does not replace the fault-injection eval in Medas described above.
 
 ## Tech stack and running it
 
@@ -216,7 +216,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 **MVP (must ship)**
 
 - [ ] Medas traced with OpenTelemetry into the own trace store, plus a script that generates realistic and adversarial traffic
-- [ ] Minimal trace collector, Postgres store, heuristic scoring and read-only MCP server
+- [x] Minimal trace collector, Postgres store, heuristic scoring and read-only MCP server
 - [x] Clustering of failures with embeddings and HDBSCAN, isolated failures kept for individual diagnosis
 - [x] Diagnoser with structured output and the failure taxonomy
 - [x] Human review gate with approve or reject per proposal
@@ -271,7 +271,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 - [x] **Diagnose unclustered failures individually.** `cluster_failures` turns each id in `unclustered` into a one-trace cluster (`method` `isolated`) numbered after the real clusters, so the existing fan-out, retries and early exit handle it unchanged. No cap yet: add one (and list the skipped ids in the run summary) if a real run shows too many isolated failures. Done when a fixture run with isolated failures returns a diagnosis for each.
 - [x] **Validate evidence.** Check that every cited trace id and span exists in the cluster; retry once if not, otherwise lower confidence. Done when a test with a fake citation is caught.
 - [ ] **Trace TraceScan itself.** Send its own runs to the same collector under a separate service name. Done when one triage run shows cost and latency per node.
-- [ ] **Build the scoring job.** Heuristic checks on every trace (empty retrieval, schema errors, timeouts), written to the scores table; the LLM judge is a stretch goal. Done when every fixture trace has a score.
+- [x] **Build the scoring job.** Heuristic checks on every trace (empty retrieval, schema errors, timeouts, other tool errors, a failed request), written to the scores table when a trace's root span is stored (`trace_store/scoring.py`); the LLM judge is a stretch goal. The Postgres reader now calls a trace failed when its lowest score is low, not when it has an error span, so a recovered or expected error is left out. Done when every fixture trace has a score: every seeded trace gets at least `request_failed`.
 
 ### Phase 3 · Loop and eval (days 6–10)
 

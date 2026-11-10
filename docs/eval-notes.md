@@ -2,6 +2,67 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("Other entry points"); the code is in `backend/eval/`.
 
+## Experiment 2: the scoring job (2026-11-10)
+
+### Question
+
+Experiment 1 showed two things the reader got wrong before any clustering: failures with no error were never collected, and harmless errors were. Does scoring each trace with heuristic checks fix both?
+
+### What changed
+
+- `trace_store/scoring.py` scores each trace with five checks in plain code (`request_failed`, `timeout`, `tool_schema_error`, `tool_error`, `empty_retrieval`) when its root span is stored.
+- The Postgres reader calls a trace failed when its lowest score is low. An error span alone no longer counts: a failed tool call that was retried successfully, or that ended in an expected error, scores fine.
+- The seed writes the hit count as `retrieval.hits`, the name the trace server lets through, so the diagnoser can see an empty retrieval.
+- Same models, clustering and judge as experiment 1. The seeded day is a new one (ending 2026-01-29), because the seeded content changed.
+
+### Results
+
+| Score | Run B (before) | Run C (with scores) |
+| --- | --- | --- |
+| Trace recall | 30/34 | 34/34 |
+| False alarms | 1 | 0 |
+| Detection | 6/9 | 5/9 |
+| Purity | 24/36 | 23/34 |
+| Separation | 3/9 | 2/9 |
+| Rare-failure recall | 1/1 | 0/1 |
+| Category accuracy | 6/6 | 4/5 |
+| Evidence valid, evidence relevant | 6/6, 6/6 | 5/5, 5/5 |
+| Cause accuracy (judge scored 2) | 6/6 | 5/5 |
+| Cost and time | 6 calls, $0.10, 11 s | 5 calls, $0.10, 16 s |
+
+The clusters of run C:
+
+| Cluster | Size | What it holds | Diagnosis | Judge |
+| --- | --- | --- | --- | --- |
+| `c0` | 11 | `source_timeout` 6, `tight_timeout` 3, `double_failure` 2 | `infra_error`: PubMed does not answer in time | 2 |
+| `c1` | 10 | `context_overflow` 5, `model_unavailable` 5 | `context_overflow` | 2 |
+| `c2` | 5 | `tool_arguments` 5 | `tool_schema_error` | 2 |
+| `c3` | 5 | `silent_no_hits` 4, `store_down` 1 | `unknown`, confidence 0.4: "the cluster mixes two different failure signatures" | 2 |
+| `c4` | 3 | `unexplained` 3 | `unknown`, confidence 0.3 | 2 |
+
+### Findings
+
+1. **The scoring job fixed what it was built to fix.** All 34 faulty traces are collected, the four with no error included, and the six harmless requests (`retried_ok`, `not_found`) are left out. Both numbers moved exactly as predicted before the run.
+2. **The clustering groups by failing step, whatever the cause.** With the harmless errors gone, the big cluster is the three kinds of PubMed timeout; every failure of a chat call is one cluster; and the silent retrieval misses share a cluster with the one store outage, because both point at the retrieval span. Each cluster is "one step", none is "one cause".
+3. **The rare fault lost its diagnosis.** In run B the single store outage was isolated and diagnosed alone. Now it has neighbours with the same failing span and is absorbed, so rare-failure recall fell from 1/1 to 0/1. Collecting more traces made the rare one easier to lose.
+4. **The diagnoser can tell a mixed cluster when its exemplars show it.** For `c3` it saw two empty retrievals and the store outage, said the cluster mixes two failures, and answered `unknown` at 0.4 instead of naming one cause. That is honest, but it cost the category (expected `retrieval_miss`), and for `c0` and `c1` it still wrote one confident cause for a mixed cluster.
+5. **The judge is lenient about hedged answers.** It gave `c3` a 2 because the diagnosis mentions the empty retrieval, although the diagnosis declines to name a cause. The rubric says extra detail does not lower a score; it does not say what to do with a diagnosis that describes the cause but refuses to commit to it.
+
+### Limits
+
+- **Runs B and C are different seeded days.** The provider outage has two faces chosen at random: day B had four server errors and one timeout, day C two and three. Two server errors are too few for a cluster of their own, which is part of why all five landed with the context overflows. The drop in detection is not only the scoring job's doing.
+- **One run each**, as before.
+- **Traces stored before the job** were scored afterwards with the old attribute name for the hit count, so their silent failures still score fine. Only days seeded from now on have them.
+- **A trace is scored once.** Spans that arrive after the root do not change its scores.
+- **The list of expected errors is one entry**, chosen for the seeded case.
+
+### What to do next
+
+1. The clustering, now the only place faults are lost: stop grouping causes that share a failing step. Candidates are the text that is embedded (it leads with the step name), the thresholds, and keeping a low-volume failure apart when its signature differs from its neighbours'.
+2. Tighten the rubric for a diagnosis that describes the cause but answers `unknown`.
+3. Keep the seeded day fixed between experiments, or pin the two faces of the provider outage, so runs are comparable.
+4. Still open from experiment 1: human grades for the judge, three runs per configuration, a healthy-only control day.
+
 ## Experiment 1: seeded traces, plain faults then hard cases (2026-11-10)
 
 ### Question

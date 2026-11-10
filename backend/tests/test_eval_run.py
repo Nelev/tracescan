@@ -22,13 +22,8 @@ async def test_a_seeded_day_is_triaged_up_to_the_review_and_keeps_its_answer_key
     async with TraceClient(postgres_url) as traces:
         result = await triage(END, traces, HashingEmbedder(), fake_diagnoser(DIAGNOSIS))
 
-    # Collected: every trace with an error span, fault or not. Not the healthy ones, and not
-    # the fault that raises no error.
-    failed = {
-        trace_id
-        for trace_id, kind in kinds(END).items()
-        if kind != "healthy" and not (kind in FAULTS and FAULTS[kind].silent)
-    }
+    # Collected: the traces of a fault, the one with no error included, and nothing else.
+    failed = {trace_id for trace_id, kind in kinds(END).items() if kind in FAULTS}
     assert set(result["failing_spans"]) == failed
     assert {t for cluster in result["clusters"] for t in cluster["trace_ids"]} == failed
     assert result["kinds"] == kinds(END)
