@@ -1,8 +1,12 @@
 """The runs API: HTTP and server-sent events over the runs module (runs.Runs), nothing more.
 
 - `POST /v1/runs/stream` starts a run and streams it until it waits for review or ends.
+- `GET /v1/runs` lists the newest runs: who started each, its status and counts.
 - `GET /v1/runs/{run_id}` returns its status, counts and proposals, read from the checkpoint.
 - `POST /v1/runs/{run_id}/review` resumes it with one decision per proposal.
+
+Who starts or reviews a run is recorded by name, from the `X-User-Name` header (`local` without
+one). There is no login: the name is not checked, so it says who claimed to act, nothing more.
 
 No response carries raw state: failed traces can hold clinical span data. What leaves the server
 is counts, the actions log and the drafted proposals, plus on the stream the UI spec the small
@@ -13,18 +17,20 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from api.schemas import ReviewRequest, ReviewResponse, RunRequest
 from api.ui_spec import UiSpecs
 from runs import (
+    NAME_MAX,
     Ended,
     IncompleteDecisions,
     NotWaitingForReview,
     Progress,
     RunFailed,
     RunNotFound,
+    RunRecord,
     Runs,
     RunStatus,
     StartedRun,
@@ -48,8 +54,18 @@ def _runs(request: Request) -> Runs:
     return request.app.state.runs
 
 
+DEFAULT_USER = "local"  # whoever sends no X-User-Name header
+
+
+def _user(x_user_name: Annotated[str | None, Header(max_length=NAME_MAX)] = None) -> str:
+    """The name to record a run or a review under. Unverified: there is no login."""
+    return (x_user_name or "").strip() or DEFAULT_USER
+
+
 async def _open_run(
-    body: RunRequest, runs: Annotated[Runs, Depends(_runs)]
+    body: RunRequest,
+    runs: Annotated[Runs, Depends(_runs)],
+    user: Annotated[str, Depends(_user)],
 ) -> AsyncIterator[StartedRun]:
     """Own the started run for the whole response.
 
@@ -59,7 +75,7 @@ async def _open_run(
     collection.
     """
     try:
-        async with runs.start(body.target_app, body.since, body.until) as run:
+        async with runs.start(body.target_app, body.since, body.until, user) as run:
             yield run
     except RunFailed:
         # Raised only while opening, so before the stream starts: a plain 502.
@@ -112,6 +128,14 @@ async def stream_run(
             yield ServerSentEvent(event="run_failed", data={})
 
 
+@router.get("/runs")
+async def list_runs(
+    runs: Annotated[Runs, Depends(_runs)], limit: Annotated[int, Query(ge=1, le=200)] = 50
+) -> list[RunRecord]:
+    """The newest runs first: ids, names, statuses and counts, never state or proposals."""
+    return await runs.list(limit)
+
+
 @router.get("/runs/{run_id}")
 async def get_run(run_id: UUID, runs: Annotated[Runs, Depends(_runs)]) -> RunStatus:
     try:
@@ -122,11 +146,14 @@ async def get_run(run_id: UUID, runs: Annotated[Runs, Depends(_runs)]) -> RunSta
 
 @router.post("/runs/{run_id}/review")
 async def review_run(
-    run_id: UUID, body: ReviewRequest, runs: Annotated[Runs, Depends(_runs)]
+    run_id: UUID,
+    body: ReviewRequest,
+    runs: Annotated[Runs, Depends(_runs)],
+    user: Annotated[str, Depends(_user)],
 ) -> ReviewResponse:
     """Resume a run that waits for review. `409` when it does not, `422` for a partial review."""
     try:
-        status = await runs.review(str(run_id), body.decisions)
+        status = await runs.review(str(run_id), body.decisions, user)
     except RunNotFound:
         raise _run_not_found() from None
     except NotWaitingForReview:

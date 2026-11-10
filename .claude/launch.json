@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend-8010",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd backend && exec uv run --env-file .env uvicorn main:app --port 8010"
+      ],
+      "port": 8010
+    },
+    {
+      "name": "frontend-3010",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && BACKEND_URL=http://localhost:8010 exec npx next start --port 3010"
+      ],
+      "port": 3010
+    }
+  ]
+}

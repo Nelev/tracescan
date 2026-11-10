@@ -1,7 +1,10 @@
 """Test doubles shared by the graph and API tests."""
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +16,16 @@ from pydantic import Field
 from sklearn.feature_extraction.text import HashingVectorizer
 
 from agent.context import TraceAccess, TraceContext
-from agent.schemas import Diagnosis, Evidence
+from agent.schemas import Decision, Diagnosis, Evidence
+from runs.store import (
+    CLAIMABLE,
+    ENDED,
+    NotClaimable,
+    ReviewRecord,
+    RunCounts,
+    RunRecord,
+    StoredStatus,
+)
 from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
 
@@ -195,3 +207,88 @@ def summary(trace_id: str, **overrides) -> TraceSummary:
             **overrides,
         }
     )
+
+
+class InMemoryRunStore:
+    """The run store without a database: what runs.store.RunStore promises, in two dicts."""
+
+    def __init__(self) -> None:
+        self.runs: dict[str, RunRecord] = {}
+        self.decided: dict[str, list[ReviewRecord]] = {}
+        self.held: set[str] = set()  # runs a review is being applied to
+
+    async def create_run(
+        self,
+        run_id: str,
+        target_app: str,
+        since: datetime | None,
+        until: datetime | None,
+        status: StoredStatus,
+        user: str | None,
+    ) -> None:
+        if run_id in self.runs:
+            return
+        self.runs[run_id] = RunRecord(
+            run_id=run_id,
+            target_app=target_app,
+            since=since,
+            until=until,
+            status=status,
+            started_by=user,
+            created_at=datetime.now(UTC),
+            ended_at=None,
+            failed_traces=0,
+            clusters=0,
+            proposals=0,
+        )
+
+    async def set_status(
+        self, run_id: str, status: StoredStatus, counts: RunCounts | None = None
+    ) -> None:
+        if run_id not in self.runs:
+            return
+        changes: dict = {"status": status}
+        if status in ENDED:
+            changes["ended_at"] = datetime.now(UTC)
+        if counts is not None:
+            changes |= asdict(counts)
+        self.runs[run_id] = self.runs[run_id].model_copy(update=changes)
+
+    @asynccontextmanager
+    async def reviewing(self, run_id: str, decisions: Mapping[str, Decision], reviewer: str):
+        # No await before the run is held, so two reviews cannot both get in.
+        run = self.runs.get(run_id)
+        if run is None or run.status not in CLAIMABLE or run_id in self.held:
+            raise NotClaimable
+        self.held.add(run_id)
+        self.decided[run_id] = [
+            ReviewRecord(
+                cluster_id=cluster_id,
+                decision=decision,
+                reviewer=reviewer,
+                decided_at=datetime.now(UTC),
+            )
+            for cluster_id, decision in sorted(decisions.items())
+        ]
+
+        async def finish(status: StoredStatus, counts: RunCounts) -> None:
+            await self.set_status(run_id, status, counts)
+
+        try:
+            yield finish
+        except BaseException:  # what a rolled-back transaction leaves: nothing
+            self.runs[run_id] = run
+            del self.decided[run_id]
+            raise
+        finally:
+            self.held.discard(run_id)
+
+    async def get_run(self, run_id: str) -> RunRecord | None:
+        return self.runs.get(run_id)
+
+    async def list_runs(self, limit: int) -> list[RunRecord]:
+        newest_first = sorted(self.runs.values(), key=lambda r: r.created_at, reverse=True)
+        return newest_first[:limit]
+
+    async def reviews(self, run_id: str) -> list[ReviewRecord]:
+        return self.decided.get(run_id, [])

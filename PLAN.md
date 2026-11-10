@@ -306,6 +306,7 @@ Do these in order and stop where time runs out; each one is useful on its own.
 ### Phase 5 · Ship (days 15–16)
 
 - [ ] **Switch to Postgres.** Postgres checkpointer and store instead of the in-memory versions. The checkpointer is done (`AsyncPostgresSaver` in `main.py`); the store is still `InMemoryStore`. Done when a paused run survives a restart.
+- [x] **Record runs, users and reviews.** Three tables next to the checkpoints (`users`, `runs`, `reviews`), created by Alembic migrations, and a run store the runs module writes to: who started a run, how it ended (`failed` and `aborted` included), who decided what. Users are recorded by name from a header; there is no login. `GET /v1/runs` lists the runs. Done when the run store tests pass against Postgres (`TEST_DATABASE_URL`) and the app refuses to start before the migration has run.
 - [ ] **Deploy.** Docker Compose with Medas, TraceScan, the trace collector and Postgres. Done when a triage run works on the deployed version.
 - [ ] **Schedule a daily run.** A cron job that triages the last 24 hours and waits for review. Done when one scheduled run has produced proposals.
 - [ ] **Write the README.** Problem, architecture diagram, how to run, eval results, limitations. Done when someone new could run the demo from it.

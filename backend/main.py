@@ -13,7 +13,8 @@ from agent.graph import build_graph
 from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model, build_ui_spec_model
 from api.runs import router as runs_router
-from runs import Runs
+from db.engine import create_engine
+from runs import PostgresRunStore, Runs
 
 
 def dry_run_setting() -> bool:
@@ -29,8 +30,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     dry_run = dry_run_setting()
     # Checked before anything opens: better to refuse at startup than after a run's review.
     require_dry_run(dry_run)
-    # DATABASE_URL: a role separate from the read-only trace role.
-    async with AsyncPostgresSaver.from_conn_string(os.environ["DATABASE_URL"]) as checkpointer:
+    # DATABASE_URL: a role separate from the read-only trace role. One database, two owners: the
+    # checkpointer creates its own tables, Alembic creates ours (users, runs, reviews).
+    database_url = os.environ["DATABASE_URL"]
+    engine = create_engine(database_url)
+    async with AsyncPostgresSaver.from_conn_string(database_url) as checkpointer:
+        store = PostgresRunStore(engine)
+        await store.check()  # refuses to start until `alembic upgrade head` has run
         await checkpointer.setup()  # creates the checkpoint tables when missing
         app.state.graph = build_graph(checkpointer, InMemoryStore())
         # One embedder per process (it loads its model on first use); the diagnoser's chat model
@@ -38,10 +44,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         context = TraceContext(
             ClosedTraces(), FastEmbedEmbedder(), build_diagnoser_model(), dry_run=dry_run
         )
-        app.state.runs = Runs(app.state.graph, context, TraceClient)
+        app.state.runs = Runs(app.state.graph, context, TraceClient, store)
         # The small model that writes the UI spec of each streamed message (api.ui_spec).
         app.state.ui_spec_model = build_ui_spec_model()
-        yield
+        try:
+            yield
+        finally:
+            await engine.dispose()
 
 
 app = FastAPI(title="TraceScan", lifespan=lifespan)

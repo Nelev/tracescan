@@ -1,0 +1,20 @@
+# A local Postgres for development: the graph checkpoints and the users, runs and reviews tables.
+#   docker compose up -d
+#   DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres
+# The password is a local default, and the port is bound to this machine only.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_PASSWORD: tracescan
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - tracescan-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  tracescan-db:

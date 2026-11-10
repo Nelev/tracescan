@@ -8,7 +8,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { UiMessage } from "@/lib/events";
 import { RUN_EVENTS } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import {
+  CHIP_ACTIVE,
+  CHIP_DESTRUCTIVE,
+  CHIP_SUCCESS,
+  PANE_HEIGHT,
+} from "./console-styles";
+import { RunsTable } from "./runs-table";
 import type { ConsoleLine, Phase, Tone } from "./use-run-stream";
+import { type RunsState, useRuns } from "./use-runs";
 
 // The messages draw with json-render, zod and the package's components, which the page does not
 // need until a run sends its first message: their own chunk. It starts loading when a run starts
@@ -30,10 +38,6 @@ const TONE: Record<Tone, string> = {
   bad: "text-destructive",
 };
 
-const ACTIVE = "border-ring bg-accent text-foreground";
-const SUCCESS = "border-success/30 bg-success/10 text-success";
-const DESTRUCTIVE = "border-destructive/40 bg-destructive/10 text-destructive";
-
 const channel = (state: string) => (events: number) =>
   `${state} · text/event-stream · ${events} ${events === 1 ? "event" : "events"}`;
 
@@ -49,19 +53,19 @@ const PHASE: Record<
   },
   running: {
     label: "Streaming",
-    className: ACTIVE,
+    className: CHIP_ACTIVE,
     footer: channel("Connected"),
   },
-  done: { label: "Done", className: SUCCESS, footer: channel("Closed") },
+  done: { label: "Done", className: CHIP_SUCCESS, footer: channel("Closed") },
   // The stream is over, the run is not: it waits for the review.
   review: {
     label: "Awaiting review",
-    className: ACTIVE,
+    className: CHIP_ACTIVE,
     footer: channel(`Closed by ${RUN_EVENTS.reviewRequired}`),
   },
   failed: {
     label: "Failed",
-    className: DESTRUCTIVE,
+    className: CHIP_DESTRUCTIVE,
     // run_started always comes first, so no events means the run never started.
     footer: (events) =>
       events === 0
@@ -70,7 +74,7 @@ const PHASE: Record<
   },
   lost: {
     label: "Connection lost",
-    className: DESTRUCTIVE,
+    className: CHIP_DESTRUCTIVE,
     footer: channel("Closed early"),
   },
   cancelled: {
@@ -209,18 +213,31 @@ function ScrollPane({
     <div
       ref={ref}
       onScroll={onScroll}
-      className="h-[36rem] overflow-y-auto sm:h-[28.75rem]"
+      className={cn(PANE_HEIGHT, "overflow-y-auto")}
     >
       {children}
     </div>
   );
 }
 
-type Tab = "console" | "raw";
+type Tab = "console" | "raw" | "runs";
+
+function runsFooter({ status, runs, loadedAt }: RunsState): string {
+  if (loadedAt === null) {
+    return status === "error" ? "Runs not loaded" : "Loading runs…";
+  }
+  const count = `${runs.length} ${runs.length === 1 ? "run" : "runs"}`;
+  const at = new Date(loadedAt).toLocaleTimeString();
+  return status === "error"
+    ? `${count} · last loaded ${at} · refresh failed`
+    : `${count} · loaded ${at}`;
+}
 
 /**
  * The page's whole output: the messages the server streams, drawn from the UI specs its model
- * wrote (Console), and the same stream as received (Raw events).
+ * wrote (Console), the same stream as received (Raw events), and the runs the server has recorded
+ * (Runs), which are loaded when that tab opens, when this page's run changes phase, and on
+ * Refresh.
  */
 export function RunConsole({
   lines,
@@ -245,6 +262,13 @@ export function RunConsole({
   const running = phase === "running";
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("console");
+  // Reloaded on each phase change and once the run has started: the server records a run when it
+  // accepts it, which is after this page has already switched to `running`.
+  const recorded = useRuns(
+    tab === "runs",
+    `${phase}:${events > 0}`,
+    phase === "cancelled" || phase === "lost",
+  );
 
   useEffect(() => {
     if (running) preloadUiMessages();
@@ -276,28 +300,38 @@ export function RunConsole({
           <TabsList aria-label="Run output">
             <TabsTrigger value="console">Console</TabsTrigger>
             <TabsTrigger value="raw">Raw events</TabsTrigger>
+            <TabsTrigger value="runs">Runs</TabsTrigger>
           </TabsList>
           <StatusChip phase={phase} />
         </div>
-        <div className="flex gap-2">
+        {tab === "runs" ? (
           <Button
             variant="outline"
-            onClick={copy}
-            disabled={(tab === "console" ? messages : lines).length === 0}
+            onClick={recorded.refresh}
+            disabled={recorded.status === "loading"}
           >
-            {copied ? "Copied" : "Copy"}
+            Refresh
           </Button>
-          <Button
-            variant="outline"
-            onClick={onClear}
-            disabled={running || phase === "idle"}
-          >
-            Clear
-          </Button>
-        </div>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={copy}
+              disabled={(tab === "console" ? messages : lines).length === 0}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={onClear}
+              disabled={running || phase === "idle"}
+            >
+              Clear
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Both panels have the same fixed height, so switching tabs does not move the page. */}
       <div className="mx-6 rounded-xl border bg-muted shadow-[inset_0_2px_8px_0_oklch(0.05_0.05_265/0.6)]">
         <TabsContent value="console">
           <ScrollPane watch={messages.length}>
@@ -337,10 +371,15 @@ export function RunConsole({
             </ol>
           </ScrollPane>
         </TabsContent>
+        <TabsContent value="runs">
+          <RunsTable status={recorded.status} runs={recorded.runs} />
+        </TabsContent>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 pt-3 pb-6">
-        <span className="type-h4">{PHASE[phase].footer(events)}</span>
+        <span className="type-h4">
+          {tab === "runs" ? runsFooter(recorded) : PHASE[phase].footer(events)}
+        </span>
         <Elapsed startedAt={startedAt} endedAt={endedAt} />
       </div>
     </Tabs>
