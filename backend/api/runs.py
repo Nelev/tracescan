@@ -2,8 +2,10 @@
 as a server-sent event stream.
 
 The sync response carries counts and the actions log only, never the raw state: failed traces can
-hold clinical span data. Only the stream also sends the drafted proposals, as `proposal` events. A run opens its own TraceClient because the trace session lives for exactly
-one graph invocation (see agent.mcp_client).
+hold clinical span data. Only the stream also sends the drafted proposals, as `proposal` events, and
+the UI spec the small model writes for each message, as a `ui_spec` event right behind it
+(api.ui_spec). A run opens its own TraceClient because the trace session lives for exactly one
+graph invocation (see agent.mcp_client).
 """
 
 import logging
@@ -17,12 +19,14 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.runnables import RunnableConfig
 from langgraph.stream import AsyncGraphRunStream
 
+from agent.const import MAX_UI_CALLS_PER_RUN
 from agent.context import TraceContext
 from agent.mcp_client import TraceClient
 from agent.progress import progress_events
 from agent.schemas import Proposal
 from agent.state import TriageState
 from api.schemas import RunRequest, RunResponse
+from api.ui_spec import compose_ui
 
 logger = logging.getLogger(__name__)
 
@@ -117,16 +121,37 @@ async def _open_run(
 @router.post("/runs/stream", response_class=EventSourceResponse)
 async def stream_run(
     opened: Annotated[tuple[str, AsyncGraphRunStream], Depends(_open_run)],
+    request: Request,
 ) -> AsyncIterator[ServerSentEvent]:
     """Stream a run: `run_started`, `progress`*, `proposal`*, then `run_completed` or `run_failed`.
 
-    A failed run sends no proposals.
+    Each message except `run_failed` is followed by a `ui_spec {event, spec}`: the UI spec the small
+    model wrote for it (api.ui_spec), sent once its call is done, so a message is never held back
+    by its own call, only the next one is. A message whose call failed, was too slow or was past
+    `MAX_UI_CALLS_PER_RUN` has none. A failed run sends no proposals.
     """
     run_id, stream = opened
-    yield ServerSentEvent(event="run_started", data={"run_id": run_id})
+    model = request.app.state.ui_spec_model
+    calls = 0
+
+    async def message(event: str, data: dict) -> AsyncIterator[ServerSentEvent]:
+        """A message, then the UI spec the model writes for it (none past the call limit)."""
+        nonlocal calls
+        yield ServerSentEvent(event=event, data=data)
+        if calls >= MAX_UI_CALLS_PER_RUN:
+            return
+        calls += 1
+        # Awaited here, not in a task: a client that leaves cancels the request, and with it the call.
+        spec = await compose_ui(model, event, data)
+        if spec is not None:
+            yield ServerSentEvent(event="ui_spec", data={"event": event, "spec": spec})
+
+    async for sse in message("run_started", {"run_id": run_id}):
+        yield sse
     try:
         async for progress in progress_events(stream):
-            yield ServerSentEvent(event="progress", data=progress)
+            async for sse in message("progress", progress):
+                yield sse
         result = await stream.output()
         if result is None:  # no final state: report the failure, not an empty run
             raise RuntimeError("run produced no output")
@@ -139,5 +164,7 @@ async def stream_run(
         yield ServerSentEvent(event="run_failed", data={})
         return
     for proposal in proposals:
-        yield ServerSentEvent(event="proposal", data=proposal)
-    yield ServerSentEvent(event="run_completed", data=summary)
+        async for sse in message("proposal", proposal):
+            yield sse
+    async for sse in message("run_completed", summary.model_dump(mode="json")):
+        yield sse

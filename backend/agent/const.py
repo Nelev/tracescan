@@ -4,10 +4,17 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # fastembed ONNX model, runs locally
 
 # An OpenRouter slug ("vendor/model"); the DIAGNOSER_MODEL environment variable overrides it.
 DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"
+# The small, cheap model for generated UI, which only arranges text it is given. The UI_SPEC_MODEL
+# environment variable overrides it.
+DEFAULT_UI_SPEC_MODEL = "anthropic/claude-haiku-5.5"
 
 # Parallel branches within one run (the graph's max_concurrency): N clusters would otherwise
 # mean N model calls at once. It does not limit several runs at the same time.
 MAX_PARALLEL_BRANCHES = 4
+
+# The UI spec of each streamed message (api.ui_spec), one model call per message. Starting values.
+MAX_UI_CALLS_PER_RUN = 40  # past it, a message gets no call and no spec
+UI_CALL_TIMEOUT_S = 15  # one call; a slow one is not waited for, the message goes without a spec
 
 # Below this many failed traces HDBSCAN has too little to work with: group by step and error.
 MIN_TRACES_FOR_HDBSCAN = 6

@@ -22,7 +22,16 @@ export type RunEvent =
   | { kind: "progress"; progress: ProgressEvent }
   | { kind: "completed" }
   | { kind: "failed" }
+  | { kind: "ui_spec"; ui: UiSpecEvent }
   | { kind: "unknown" };
+
+/**
+ * Mirrors the `ui_spec` event of backend/api/runs.py: the json-render spec the server's model
+ * wrote for one message, and the name of that message (`progress`, `proposal`, ...). The spec is
+ * unchecked here: it is whatever the model replied, and lib/ui-catalog.ts checks it before it is
+ * drawn.
+ */
+export type UiSpecEvent = { event: string; spec: Record<string, unknown> };
 
 const UNKNOWN: RunEvent = { kind: "unknown" };
 
@@ -58,6 +67,15 @@ function toProgress(data: unknown): ProgressEvent | null {
   return progress;
 }
 
+/** A message's data as JSON, or undefined when it is not: the callers refuse non-objects anyway. */
+function parseData(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 export function parseRunEvent(message: SseMessage): RunEvent {
   switch (message.event) {
     case RUN_EVENTS.started:
@@ -67,14 +85,14 @@ export function parseRunEvent(message: SseMessage): RunEvent {
     case RUN_EVENTS.failed:
       return { kind: "failed" };
     case RUN_EVENTS.progress: {
-      let data: unknown;
-      try {
-        data = JSON.parse(message.data);
-      } catch {
-        return UNKNOWN;
-      }
-      const progress = toProgress(data);
+      const progress = toProgress(parseData(message.data));
       return progress ? { kind: "progress", progress } : UNKNOWN;
+    }
+    case RUN_EVENTS.uiSpec: {
+      const data = parseData(message.data);
+      if (!isRecord(data) || !isRecord(data.spec)) return UNKNOWN;
+      if (typeof data.event !== "string") return UNKNOWN;
+      return { kind: "ui_spec", ui: { event: data.event, spec: data.spec } };
     }
     default:
       return UNKNOWN;
@@ -85,12 +103,4 @@ export function parseRunEvent(message: SseMessage): RunEvent {
 export function outcomeOf(event: RunEvent): "done" | "failed" | null {
   if (event.kind === "completed") return "done";
   return event.kind === "failed" ? "failed" : null;
-}
-
-/** True for run_failed and for a progress event that reports a failed node. */
-export function isFailure(event: RunEvent): boolean {
-  return (
-    event.kind === "failed" ||
-    (event.kind === "progress" && event.progress.event === "node_failed")
-  );
 }

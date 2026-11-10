@@ -1,4 +1,4 @@
-import type { ProgressEvent, RunEvent } from "./events.ts";
+import type { ProgressEvent, RunEvent, UiSpecEvent } from "./events.ts";
 
 /**
  * The progress view of a run: a pure fold over the typed events. Nothing here touches React or
@@ -48,9 +48,14 @@ export type ClusterRow = {
   endedAt?: number;
 };
 
+/** A UI spec the server sent, in arrival order. `id` is its position, so it is a stable key. */
+export type UiMessage = UiSpecEvent & { id: number };
+
 export type RunView = {
   stages: Stage[];
   clusters: ClusterRow[];
+  /** What the console draws: the UI spec of each message the server's model laid out. */
+  messages: UiMessage[];
 };
 
 /** The graph's nodes in run order (backend/agent/graph.py), with the label shown for each. */
@@ -87,6 +92,7 @@ function newStage(node: string): Stage {
 export const INITIAL_VIEW: RunView = {
   stages: PIPELINE.map(([node]) => newStage(node)),
   clusters: [],
+  messages: [],
 };
 
 function stageStatus(stage: Stage): StageStatus {
@@ -166,6 +172,13 @@ function foldCluster(
 
 /** Applies one event. `at` is milliseconds since the run started. */
 export function foldEvent(view: RunView, event: RunEvent, at: number): RunView {
+  if (event.kind === "ui_spec") {
+    const messages = [
+      ...view.messages,
+      { ...event.ui, id: view.messages.length },
+    ];
+    return { ...view, messages };
+  }
   if (event.kind !== "progress") return view;
   const p = event.progress;
 
@@ -181,7 +194,7 @@ export function foldEvent(view: RunView, event: RunEvent, at: number): RunView {
     const next = foldCluster(clusters[i], id, p, at);
     clusters = i === -1 ? [...clusters, next] : clusters.with(i, next);
   }
-  return { stages, clusters };
+  return { ...view, stages, clusters };
 }
 
 export type Ending = "done" | "failed" | "lost" | "cancelled";
@@ -204,7 +217,7 @@ export function freezeView(view: RunView, ending: Ending): RunView {
       ? { ...c, status: "interrupted" as const }
       : c,
   );
-  return { stages, clusters };
+  return { ...view, stages, clusters };
 }
 
 const countOf = (view: RunView, node: string, key: string) =>
