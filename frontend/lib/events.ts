@@ -9,6 +9,7 @@ import { RUN_EVENTS } from "./types.ts";
 export type RunEvent =
   | { kind: "started" }
   | { kind: "progress"; failed: boolean }
+  | { kind: "review" }
   | { kind: "completed" }
   | { kind: "failed" }
   | { kind: "ui_spec"; ui: UiSpecEvent }
@@ -44,6 +45,8 @@ export function parseRunEvent(message: SseMessage): RunEvent {
   switch (message.event) {
     case RUN_EVENTS.started:
       return { kind: "started" };
+    case RUN_EVENTS.reviewRequired:
+      return { kind: "review" };
     case RUN_EVENTS.completed:
       return { kind: "completed" };
     case RUN_EVENTS.failed:
@@ -65,9 +68,15 @@ export function parseRunEvent(message: SseMessage): RunEvent {
   }
 }
 
-/** How the run ended, if this event ends it. */
-export function outcomeOf(event: RunEvent): "done" | "failed" | null {
+/**
+ * How the stream ended, if this event ends it. `review` is a run that stopped at the human
+ * review: its stream is over, the run is not.
+ */
+export type Outcome = "done" | "review" | "failed";
+
+export function outcomeOf(event: RunEvent): Outcome | null {
   if (event.kind === "completed") return "done";
+  if (event.kind === "review") return "review";
   return event.kind === "failed" ? "failed" : null;
 }
 

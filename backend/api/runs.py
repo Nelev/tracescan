@@ -1,170 +1,140 @@
-"""POST /v1/runs: trigger one triage run and return a summary; POST /v1/runs/stream: the same run
-as a server-sent event stream.
+"""The runs API: HTTP and server-sent events over the runs module (runs.Runs), nothing more.
 
-The sync response carries counts and the actions log only, never the raw state: failed traces can
-hold clinical span data. Only the stream also sends the drafted proposals, as `proposal` events, and
-the UI spec the small model writes for each message, as a `ui_spec` event right behind it
-(api.ui_spec). A run opens its own TraceClient because the trace session lives for exactly one
-graph invocation (see agent.mcp_client).
+- `POST /v1/runs/stream` starts a run and streams it until it waits for review or ends.
+- `GET /v1/runs/{run_id}` returns its status, counts and proposals, read from the checkpoint.
+- `POST /v1/runs/{run_id}/review` resumes it with one decision per proposal.
+
+No response carries raw state: failed traces can hold clinical span data. What leaves the server
+is counts, the actions log and the drafted proposals, plus on the stream the UI spec the small
+model writes for each message (api.ui_spec).
 """
 
-import logging
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from langchain_core.runnables import RunnableConfig
-from langgraph.stream import AsyncGraphRunStream
 
-from agent.const import MAX_UI_CALLS_PER_RUN
-from agent.context import TraceContext
-from agent.mcp_client import TraceClient
-from agent.progress import progress_events
-from agent.schemas import Proposal
-from agent.state import TriageState
-from api.schemas import RunRequest, RunResponse
-from api.ui_spec import compose_ui
-
-logger = logging.getLogger(__name__)
+from api.schemas import ReviewRequest, ReviewResponse, RunRequest
+from api.ui_spec import UiSpecs
+from runs import (
+    Ended,
+    IncompleteDecisions,
+    NotWaitingForReview,
+    Progress,
+    RunFailed,
+    RunNotFound,
+    Runs,
+    RunStatus,
+    StartedRun,
+)
 
 router = APIRouter(prefix="/v1")
 
-
-def _initial_state(body: RunRequest) -> TriageState:
-    state = TriageState(target_app=body.target_app)
-    if body.since is not None:
-        state["since"] = body.since.isoformat()
-    if body.until is not None:
-        state["until"] = body.until.isoformat()
-    return state
+# The stream's last message for each way a run can end without failing.
+_LAST_MESSAGE = {"review_required": "review_required", "completed": "run_completed"}
 
 
-def _new_run() -> tuple[str, RunnableConfig]:
-    # A fresh thread per run: reusing a thread id would continue the earlier run's state.
-    run_id = str(uuid4())
-    return run_id, {"configurable": {"thread_id": run_id}}
+def _run_failed() -> HTTPException:
+    return HTTPException(status_code=502, detail="triage run failed")
 
 
-def _context(request: Request, traces: TraceClient) -> TraceContext:
-    return TraceContext(traces, request.app.state.embedder, request.app.state.model)
+def _run_not_found() -> HTTPException:
+    return HTTPException(status_code=404, detail="run not found")
 
 
-def _log_failure(exc: Exception) -> None:
-    # Type name only: the message or traceback could carry span contents.
-    logger.error("triage run failed: %s", type(exc).__name__)
-
-
-def _summary(run_id: str, result: dict) -> RunResponse:
-    return RunResponse(
-        run_id=run_id,
-        failed_traces=len(result.get("failed_traces", [])),
-        clusters=len(result.get("clusters", [])),
-        unclustered=len(result.get("unclustered", [])),
-        diagnoses=len(result.get("diagnoses", [])),
-        diagnosis_failures=len(result.get("diagnosis_failures", [])),
-        proposals=len(result.get("proposals", [])),
-        actions_log=result.get("actions_log", []),
-    )
-
-
-def _proposals(result: dict) -> list[dict]:
-    """The drafted proposals, cut to the `Proposal` schema's fields.
-
-    The one part of state besides counts that leaves the server, and only on the stream. The issue
-    text is the diagnoser's own prose, so it can hold clinical content: it goes to whoever runs the
-    triage, to review it, and is never logged.
-    """
-    return [Proposal.model_validate(p).model_dump(mode="json") for p in result.get("proposals", [])]
-
-
-@router.post("/runs")
-async def create_run(body: RunRequest, request: Request) -> RunResponse:
-    run_id, config = _new_run()
-    try:
-        async with TraceClient() as traces:
-            result = await request.app.state.graph.ainvoke(
-                _initial_state(body), config, context=_context(request, traces)
-            )
-    except Exception as exc:
-        _log_failure(exc)
-        raise HTTPException(status_code=502, detail="triage run failed") from None
-    return _summary(run_id, result)
+def _runs(request: Request) -> Runs:
+    return request.app.state.runs
 
 
 async def _open_run(
-    body: RunRequest, request: Request
-) -> AsyncIterator[tuple[str, AsyncGraphRunStream]]:
-    """Own the trace session and the run stream for the whole response.
+    body: RunRequest, runs: Annotated[Runs, Depends(_runs)]
+) -> AsyncIterator[StartedRun]:
+    """Own the started run for the whole response.
 
     FastAPI unwinds a dependency when the response ends, including when the client disconnects.
     A generator suspended at a `yield` is not closed on disconnect, so the endpoint must not own
-    these itself: the run would keep going, and keep the trace session open, until garbage
+    the run itself: it would keep going, and keep the trace session open, until garbage
     collection.
     """
-    run_id, config = _new_run()
-    async with AsyncExitStack() as stack:
-        try:
-            traces = await stack.enter_async_context(TraceClient())
-            run = request.app.state.graph.astream_events(
-                _initial_state(body), config, version="v3", context=_context(request, traces)
-            )
-            stream = await stack.enter_async_context(await run)
-        except Exception as exc:
-            _log_failure(exc)
-            raise HTTPException(status_code=502, detail="triage run failed") from None
-        yield run_id, stream
+    try:
+        async with runs.start(body.target_app, body.since, body.until) as run:
+            yield run
+    except RunFailed:
+        # Raised only while opening, so before the stream starts: a plain 502.
+        raise _run_failed() from None
 
 
 @router.post("/runs/stream", response_class=EventSourceResponse)
 async def stream_run(
-    opened: Annotated[tuple[str, AsyncGraphRunStream], Depends(_open_run)],
-    request: Request,
+    run: Annotated[StartedRun, Depends(_open_run)], request: Request
 ) -> AsyncIterator[ServerSentEvent]:
-    """Stream a run: `run_started`, `progress`*, `proposal`*, then `run_completed` or `run_failed`.
+    """Stream a run: `run_started`, `progress`*, `proposal`*, then its last message.
+
+    The last message is `review_required` (the run waits at the review; decide it with
+    `POST /v1/runs/{run_id}/review`), `run_completed` (it ended with nothing to review) or
+    `run_failed {}`. The first two carry the run's summary; the proposals to decide are the
+    `proposal` messages just before.
 
     Each message except `run_failed` is followed by a `ui_spec {event, spec}`: the UI spec the small
     model wrote for it (api.ui_spec), sent once its call is done, so a message is never held back
     by its own call, only the next one is. A message whose call failed, was too slow or was past
-    `MAX_UI_CALLS_PER_RUN` has none. A failed run sends no proposals.
+    the run's call limit has none. A failed run sends no proposals.
     """
-    run_id, stream = opened
-    model = request.app.state.ui_spec_model
-    calls = 0
+    ui = UiSpecs(request.app.state.ui_spec_model)
 
     async def message(event: str, data: dict) -> AsyncIterator[ServerSentEvent]:
-        """A message, then the UI spec the model writes for it (none past the call limit)."""
-        nonlocal calls
+        """A message, then the UI spec the model writes for it, if any."""
         yield ServerSentEvent(event=event, data=data)
-        if calls >= MAX_UI_CALLS_PER_RUN:
-            return
-        calls += 1
         # Awaited here, not in a task: a client that leaves cancels the request, and with it the call.
-        spec = await compose_ui(model, event, data)
+        spec = await ui.compose(event, data)
         if spec is not None:
             yield ServerSentEvent(event="ui_spec", data={"event": event, "spec": spec})
 
-    async for sse in message("run_started", {"run_id": run_id}):
+    async for sse in message("run_started", {"run_id": run.run_id}):
         yield sse
-    try:
-        async for progress in progress_events(stream):
-            async for sse in message("progress", progress):
+    async for event in run.events:
+        if isinstance(event, Progress):
+            async for sse in message("progress", dict(event.data)):
                 yield sse
-        result = await stream.output()
-        if result is None:  # no final state: report the failure, not an empty run
-            raise RuntimeError("run produced no output")
-        summary = _summary(run_id, result)
-        # Built before the first yield: a bad entry fails the run, not half the stream.
-        proposals = _proposals(result)
-    except Exception as exc:
-        _log_failure(exc)
-        # The status is already 200 once the stream opens, so the failure travels as an event.
-        yield ServerSentEvent(event="run_failed", data={})
-        return
-    for proposal in proposals:
-        async for sse in message("proposal", proposal):
-            yield sse
-    async for sse in message("run_completed", summary.model_dump(mode="json")):
-        yield sse
+        elif isinstance(event, Ended):
+            status = event.status
+            for proposal in status.proposals:
+                async for sse in message("proposal", proposal.model_dump(mode="json")):
+                    yield sse
+            name = _LAST_MESSAGE[status.status]
+            async for sse in message(name, status.summary.model_dump(mode="json")):
+                yield sse
+        else:
+            # Failed. The status is already 200 once the stream opens, so the failure travels
+            # as an event.
+            yield ServerSentEvent(event="run_failed", data={})
+
+
+@router.get("/runs/{run_id}")
+async def get_run(run_id: UUID, runs: Annotated[Runs, Depends(_runs)]) -> RunStatus:
+    try:
+        return await runs.status(str(run_id))
+    except RunNotFound:
+        raise _run_not_found() from None
+
+
+@router.post("/runs/{run_id}/review")
+async def review_run(
+    run_id: UUID, body: ReviewRequest, runs: Annotated[Runs, Depends(_runs)]
+) -> ReviewResponse:
+    """Resume a run that waits for review. `409` when it does not, `422` for a partial review."""
+    try:
+        status = await runs.review(str(run_id), body.decisions)
+    except RunNotFound:
+        raise _run_not_found() from None
+    except NotWaitingForReview:
+        raise HTTPException(status_code=409, detail="run is not waiting for review") from None
+    except IncompleteDecisions as exc:
+        # Cluster ids only: they are already in the proposals the reviewer holds.
+        detail = {"missing": exc.missing, "unknown": exc.unknown}
+        raise HTTPException(status_code=422, detail=detail) from None
+    except RunFailed:
+        raise _run_failed() from None
+    return ReviewResponse(status=status.status, summary=status.summary)

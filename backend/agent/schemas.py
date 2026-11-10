@@ -10,6 +10,9 @@ from trace_store.models import TraceId
 # isolated: one isolated failure that fit no group, diagnosed on its own.
 ClusterMethod = Literal["hdbscan", "step_error", "isolated"]
 
+# What the reviewer answers per proposal. human_review is resumed with {cluster_id: Decision}.
+Decision = Literal["approve", "reject"]
+
 
 class Cluster(TypedDict):
     """One group of failed traces, as stored in state (a plain dict) and read by later nodes."""

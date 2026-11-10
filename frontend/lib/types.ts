@@ -14,6 +14,9 @@ export type RunRequest = {
 export const RUN_EVENTS = {
   started: "run_started",
   progress: "progress",
+  // The run stopped at the human review: it waits for POST /v1/runs/{run_id}/review.
+  reviewRequired: "review_required",
+  // The run ended with nothing to review.
   completed: "run_completed",
   failed: "run_failed",
   uiSpec: "ui_spec",

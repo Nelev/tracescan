@@ -146,7 +146,7 @@ Diagnoses are graded on the injected cause, not just the visible symptom. Metric
 | --- | --- |
 | `PLAN.md` | Scope, architecture, task order and "Done when" checks |
 | `.claude/prds/` | PRD and the generated work-packages brief |
-| `backend/` | Python (FastAPI + LangGraph); `main.py` opens the Postgres checkpointer and is the future trace collector, `api/runs.py` is `POST /v1/runs` (bodies in `api/schemas.py`), `tracedoctor_graph.py` the graph sketch |
+| `backend/` | Python (FastAPI + LangGraph); `main.py` opens the Postgres checkpointer and is the future trace collector, `runs/` owns the life of a run (start, status, review), `api/runs.py` is its HTTP and event-stream API (bodies in `api/schemas.py`), `tracedoctor_graph.py` the graph sketch |
 | `frontend/` | Next.js 16 app: a run console today, the trace viewer and review UI later |
 | `tools/board/`, `tracescan-board.html` | Kanban board generator and its output |
 | `CLAUDE.md` | Working rules and commands for Claude Code |
@@ -171,7 +171,9 @@ Run the API (docs at `/docs`). It fails at startup without `DATABASE_URL` and cr
 cd backend && DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres uv run uvicorn main:app --reload
 ```
 
-`POST /v1/runs` with `{"target_app": "medas"}` runs the graph once and returns counts (failed traces, clusters, unclustered failures, diagnoses, proposals), the actions log and a `run_id`, which is the run's `thread_id`.
+`POST /v1/runs/stream` with `{"target_app": "medas"}` starts a run and streams it as server-sent events. The stream ends with `review_required` when the run waits for a human review, or with `run_completed` when nothing failed. Both carry counts (failed traces, clusters, unclustered failures, diagnoses, proposals), the actions log and a `run_id`, which is the run's `thread_id`.
+
+`GET /v1/runs/{run_id}` returns the run's status and proposals. `POST /v1/runs/{run_id}/review` with one decision per proposal, for example `{"decisions": {"c0": "approve"}}`, resumes the run and returns the actions log. Nothing is written yet: the action step only logs what it would do.
 
 Run the backend tests. Set `TEST_DATABASE_URL` to a Postgres as well to run the persistence test (see the top of `backend/tests/test_persistence.py`):
 

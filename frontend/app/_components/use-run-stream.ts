@@ -5,16 +5,17 @@ import { openRunStream, RUN_STREAM_PATH, RunError } from "@/lib/api";
 import {
   foldEvent,
   isFailure,
+  type Outcome,
   outcomeOf,
   parseRunEvent,
   type RunEvent,
   type UiMessage,
 } from "@/lib/events";
 import type { SseMessage } from "@/lib/sse";
-import type { RunRequest } from "@/lib/types";
+import { RUN_EVENTS, type RunRequest } from "@/lib/types";
 
-/** How a run ended. */
-type Ending = "done" | "failed" | "lost" | "cancelled";
+/** How a run's stream ended. `review`: the run stopped at the human review and waits for it. */
+type Ending = Outcome | "lost" | "cancelled";
 export type Phase = "idle" | "running" | Ending;
 export type Tone = "muted" | "run" | "ok" | "bad";
 
@@ -71,7 +72,7 @@ const IDLE: State = {
 function eventTone(event: RunEvent): Tone {
   if (isFailure(event)) return "bad";
   if (event.kind === "started") return "run";
-  return event.kind === "completed" ? "ok" : "muted";
+  return event.kind === "completed" || event.kind === "review" ? "ok" : "muted";
 }
 
 function appendLine(state: State, line: Omit<ConsoleLine, "id">): State {
@@ -174,7 +175,7 @@ export function useRunStream() {
       const stream = await openRunStream(body, controller.signal);
       note(`${stream.status} ${stream.contentType.split(";")[0]}`);
 
-      let outcome: "done" | "failed" | null = null;
+      let outcome: Outcome | null = null;
       for await (const message of stream.messages) {
         const event = parseRunEvent(message);
         batch.push({
@@ -186,7 +187,9 @@ export function useRunStream() {
         outcome = outcomeOf(event) ?? outcome;
       }
       if (outcome === null) {
-        lost("the stream ended before run_completed or run_failed");
+        lost(
+          `the stream ended before ${RUN_EVENTS.reviewRequired}, ${RUN_EVENTS.completed} or ${RUN_EVENTS.failed}`,
+        );
       } else {
         note("stream closed");
         end(outcome);

@@ -5,7 +5,8 @@ Use it as the source of truth for scope and task order:
 - Keep the MVP tight. Do not start stretch tasks before the MVP gate check passes.
 - MVP proposals are "unverified"; never drop a cluster because it did not reproduce.
 - Trace access is read-only (MCP server on a read-only DB role). All writes happen only in apply_actions, after human approval, with dry_run on by default.
-- The starting point is the graph sketch tracedoctor_graph.py (rename into the tracescan/ package).
+- The code lives in backend/agent/ (the graph) and backend/trace_store/ (trace contracts, reader, MCP server); there is no tracescan/ package. The original sketch is backend/tracedoctor_graph.py.
+- Where this plan and the code disagree, the code and CLAUDE.md are right: correct the plan.
 -->
 
 # TraceScan — AI Agent for LLM Failure Triage
@@ -43,8 +44,8 @@ TraceScan is a single LangGraph graph of eight nodes, with two stages that fan o
 ```text
 TraceScan MCP (read-only) --read--> collect_traces
                                     cluster_failures      (embeddings + HDBSCAN in code; isolated failures kept as `unclustered`; ends if there are none at all)
-                                    diagnose_cluster  x N (create_agent per cluster and per unclustered failure, in parallel; read-only trace tools)
-                                    [join]                (waits for all diagnoses)
+                                    diagnose_cluster  x N (one structured-output call per cluster and per unclustered failure, in parallel; reads the exemplar span trees)
+                                    [join]                (waits for all diagnoses; sends unfinished clusters back for a retry)
 Medas sandbox  <--replay--          reproduce_failure x N (stretch: replays inputs; MVP marks every diagnosis "unverified")
 Known-issues store --lookup-->      match_known_issues    (links clusters to issues from earlier runs)
                                     draft_proposals       (create or update issue; shows verification status)
@@ -53,29 +54,32 @@ GitHub + eval dataset <--write--    apply_actions         (approved items only; 
                                     END
 ```
 
-Stacked boxes run once per item in parallel: one diagnosis per cluster and one per unclustered failure (capped, see Clustering), one replay per diagnosis. A no-op join node (not drawn) waits for every diagnosis before reproduction starts. The run ends early if there are no failures at all (no clusters and nothing unclustered) or if the reviewer approves nothing. In the MVP the reproduce step only marks each diagnosis as unverified; replay against Medas is a stretch goal.
+Stacked boxes run once per item in parallel: one diagnosis per cluster and one per unclustered failure (not capped yet, see Clustering), one replay per diagnosis. The join node waits for every diagnosis of a round, sends back each cluster that has neither a diagnosis nor a failure, and lets reproduction start once none is left. The run ends early if there are no failures at all (no clusters and nothing unclustered) or if the reviewer approves nothing. In the MVP the reproduce step only marks each diagnosis as unverified; replay against Medas is a stretch goal.
 
-Inside the graph, `diagnose_cluster` is a small agent of its own, built with LangChain's `create_agent`. It can call the read-only trace tools to inspect a failing trace's full span tree, single spans or similar traces before it answers, and returns a `Diagnosis` through `response_format`. A low recursion limit caps its steps. The outer pipeline stays a plain `StateGraph`, so order, parallelism, batch approval and evaluation remain fixed.
+Inside the graph, `diagnose_cluster` is a plain node, not an agent. It fetches the span trees of the cluster's exemplar traces through the read-only trace server, then makes one structured-output call (`with_structured_output(Diagnosis)`) with the taxonomy as the system prompt. The model gets no tools. Retries are the graph's own loop (`diagnose_cluster` → join → `diagnose_cluster`) under a per-cluster budget of attempts, tokens and cost that is kept in state, so they survive a resume. If the diagnoser ever needs tools, it moves to `create_agent(response_format=Diagnosis)` with a low recursion limit. The outer pipeline stays a plain `StateGraph`, so order, parallelism, batch approval and evaluation remain fixed.
 
 ## State and data model
 
-One shared state object flows through the graph; the two fields filled by parallel branches use an append reducer so results are merged, not overwritten.
+One shared state object flows through the graph; the three fields filled by the parallel diagnose branches use an append reducer so results are merged, not overwritten.
 
 | Field | Type | Written by | Notes |
 | --- | --- | --- | --- |
-| `target_app`, `since` | str | input | Which app and time window to triage |
+| `target_app`, `since`, `until` | str | input | Which app and time window to triage; `since` and `until` are optional |
 | `failed_traces` | list\[TraceSummary\] | collect\_traces | Compact view of each failed or low-score trace |
 | `clusters` | list\[Cluster\] | cluster\_failures | Groups with a signature and a few exemplar traces |
 | `unclustered` | list\[str\] | cluster\_failures | Ids of isolated failures; each is also a one-trace cluster (`method` `isolated`) and is diagnosed on its own |
 | `diagnoses` | list\[Diagnosis\], append reducer | diagnose\_cluster (parallel) | Category, root cause, fix, confidence, evidence spans |
 | `diagnosis_failures` | list\[str\], append reducer | diagnose\_cluster (parallel) | Ids of clusters whose diagnosis failed; reported, not dropped |
-| `reproductions` | list\[Reproduction\], append reducer | reproduce\_failure (parallel) | Unverified in the MVP; with replay, confirmed, flaky or unconfirmed |
+| `model_usage` | list\[dict\], append reducer | diagnose\_cluster (parallel) | One entry per diagnose run, failed or not: calls, tokens and cost; the per-cluster budget is checked against it |
+| `reproductions` | list\[dict\] | reproduce\_failure | Unverified in the MVP; with replay, confirmed, flaky or unconfirmed. No reducer yet: it needs an append reducer once the replay fans out in parallel |
 | `known_matches` | dict cluster → issue id | match\_known\_issues | Links to issues from earlier runs |
 | `proposals` | list\[Proposal\] | draft\_proposals | Create or update issue, body, regression case |
 | `decisions` | dict cluster → approve/reject | human\_review | Supplied by the reviewer on resume |
-| `actions_log` | list\[str\], append reducer | apply\_actions | What was written, or would be in dry run |
+| `actions_log` | list\[str\] | apply\_actions | What was written, or would be in dry run |
 
-Parallel branches do not receive the whole state. Each diagnose branch gets a small `ClusterTask` (target app plus one cluster) and each reproduce branch a `ReproTask` (cluster plus its diagnosis), which keeps prompts short.
+State holds plain dicts, not Pydantic objects, so checkpoints serialize without a warning.
+
+Parallel branches do not receive the whole state. Each diagnose branch gets a small `ClusterTask` (one cluster plus that cluster's `model_usage` entries, because a node reached through `Send` sees only its payload), which keeps prompts short. The reproduce branches will get a `ReproTask` (cluster plus its diagnosis) in the same way; that type does not exist yet.
 
 The diagnoser returns a Pydantic `Diagnosis` through structured output, so its category must be one of the allowed values and it carries a list of the trace spans it is based on.
 
@@ -95,17 +99,17 @@ Three nodes touch the outside world: one reads traces, one replays inputs in a s
 
 | Tool | Type | Used by | Safeguard |
 | --- | --- | --- | --- |
-| TraceScan MCP server over the trace store (search traces, get trace tree, get span) | Read | collect\_traces, diagnose\_cluster (agent) | Read-only database role |
+| TraceScan MCP server over the trace store (search traces, get trace tree, get span) | Read | collect\_traces, diagnose\_cluster | Read-only database role, a per-run call budget and an audit log |
 | Target app API in a sandbox | Execute | reproduce\_failure | Replays exemplar inputs only, N attempts each |
 | GitHub issues (create, comment) | Write | apply\_actions | Approved proposals only |
 | Eval dataset (add regression case) | Write | apply\_actions | Approved proposals only |
 | Known-issues store | Write | apply\_actions | Updated after an approved action |
 
-The trace reader is a small MCP server built with FastMCP on top of the trace store. It offers three tools (`search_failed_traces`, `get_trace_tree`, `get_span`) and connects to Postgres with a read-only database role, so it cannot change data whatever the agent asks. Both the collector node and the diagnoser agent use it.
+The trace reader is a small MCP server built with FastMCP on top of the trace store. It offers three tools (`search_failed_traces`, `get_trace_tree`, `get_span`) and connects to Postgres with a read-only database role, so it cannot change data whatever the agent asks. Both the collector node and the diagnoser node use it, and the model itself never calls it. Until the Postgres store exists, the server reads the synthetic fixture.
 
 The human gate is LangGraph's `interrupt()` in the `human_review` node. The graph pauses with the list of proposals, the reviewer resumes it with an approve or reject per cluster, and only approved items reach `apply_actions`. If nothing is approved, the graph ends without writing anything.
 
-A `dry_run` flag in the run config makes `apply_actions` log what it would do instead of calling GitHub. It is on by default and used for demos and eval runs.
+A `dry_run` setting makes `apply_actions` log what it would do instead of calling GitHub. The server sets it (an environment variable, on by default) and no request can turn it off. It is used for demos and eval runs.
 
 ## Tracing stack
 
@@ -197,7 +201,7 @@ The stack is Python with LangGraph 1.x for orchestration and its own OpenTelemet
 | Issue tracker | GitHub API | Draft and update issues |
 | Dev UI | LangGraph Studio (`langgraph dev`) | Step through nodes, inspect state, approve at the pause |
 | Review UI | Next.js (App Router, TypeScript) + LangGraph JS SDK | Runs list, run detail, approve or reject proposals, eval results |
-| Diagnoser agent | LangChain create\_agent with response\_format | Investigates each cluster with the read-only trace tools |
+| Diagnoser | One structured-output call per cluster through OpenRouter (`langchain-openrouter`) | Diagnoses each cluster from its exemplar span trees |
 
 To run the sketch locally: install LangGraph in a virtual environment and run `python tracedoctor_graph.py` (the file can be renamed). The script runs until the review pause, prints the proposals, then resumes with decisions; the same `thread_id` links the two calls.
 
@@ -211,7 +215,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 
 - [ ] Medas traced with OpenTelemetry into the own trace store, plus a script that generates realistic and adversarial traffic
 - [ ] Minimal trace collector, Postgres store, heuristic scoring and read-only MCP server
-- [ ] Clustering of failures with embeddings and HDBSCAN, isolated failures kept for individual diagnosis
+- [x] Clustering of failures with embeddings and HDBSCAN, isolated failures kept for individual diagnosis
 - [ ] Diagnoser with structured output and the failure taxonomy
 - [ ] Human review gate with approve or reject per proposal
 - [ ] Draft issues written to markdown files (dry run)
@@ -233,7 +237,7 @@ The phases below are in working days, since no start date is fixed yet.
 | Phase | Days | Focus | MVP? |
 | --- | --- | --- | --- |
 | Foundations | 1–2 | Repo, trace collector and store, Medas instrumentation, traffic script, MCP server | Yes |
-| Core agents | 3–5 | Clustering, taxonomy, diagnoser agent, evidence check, scoring job | Yes |
+| Core agents | 3–5 | Clustering, taxonomy, diagnoser, evidence check, scoring job | Yes |
 | Loop and eval | 6–10 | Proposals, human review, dry-run actions, fault injection with controls, metrics | Yes |
 | **Gate: MVP complete, day 10** | | Six faults run, controls run, metrics table filled | |
 | Stretch | 11–14 | Reproducer, known-issues memory, GitHub, MAST-Data, review UI | No |
@@ -247,12 +251,13 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 
 ### Phase 1 · Foundations (days 1–2)
 
-- [ ] **Set up the repo.** Package layout `tracescan/` with `graph.py`, `nodes/`, `tools/`, `models.py`, `evals/`; `pyproject.toml`, `.env.example`, pre-commit with ruff. Done when `pytest` runs green on an empty test.
-- [ ] **Move the sketch in and fix serialization.** Split models and nodes out of the sketch; store plain dicts in state (or register the models module) so the checkpoint warning disappears. Done when the demo run prints no warnings.
-- [ ] **Build the trace collector and store.** A FastAPI endpoint that accepts OTLP over HTTP, decodes it with opentelemetry-proto and writes the traces and spans tables in Postgres. Done when a test span sent from a script appears in the spans table.
+- [x] **Set up the repo.** Monorepo with `backend/` (packages `agent/` with `graph.py`, `nodes/` and `schemas.py`, and `trace_store/`; `pyproject.toml` on uv, `.env.example`, ruff) and `frontend/`. Done when `pytest` runs green on an empty test.
+- [ ] **Add the ruff pre-commit hook.** Done when a commit with a lint error is refused.
+- [x] **Move the sketch in and fix serialization.** Models and nodes are split out of the sketch into `agent/`, and state holds plain dicts, so the checkpoint warning is gone. Done when the test run prints no serialization warning.
+- [ ] **Build the trace collector and store.** A FastAPI endpoint that accepts OTLP over HTTP, decodes it with opentelemetry-proto and writes the traces and spans tables in Postgres; plus the Postgres `TraceReader`, on a read-only role, for the MCP server to use in place of the fixture reader. Done when a test span sent from a script appears in the spans table and comes back through `get_trace_tree`.
 - [ ] **Instrument Medas.** One trace per request, with spans for retrieval, each tool call and generation, using the gen\_ai.\* attribute names, exported over OTLP to the collector. Done when a request shows its full span tree in the database.
 - [ ] **Write the traffic generator.** A YAML file of normal, edge-case and adversarial queries and a script that sends them to Medas. Done when one run produces a mix of passing and failing traces.
-- [ ] **Build the MCP server and collector node.** A FastMCP server with search\_failed\_traces, get\_trace\_tree and get\_span on a read-only database role, connected to the graph through `langchain-mcp-adapters`, filter by time window, error level and score threshold, map results to `TraceSummary`. Done when a unit test on a saved fixture passes.
+- [x] **Build the MCP server and collector node.** A FastMCP server with search\_failed\_traces, get\_trace\_tree and get\_span, read-only, behind a per-run call budget and an audit log, connected to the graph through `langchain-mcp-adapters`, filter by time window, error level and score threshold, map results to `TraceSummary`. It reads the synthetic fixture for now; the read-only database role comes with the Postgres reader in the collector task above. Done when a unit test on a saved fixture passes.
 
 ### Phase 2 · Core agents (days 3–5)
 
@@ -260,7 +265,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 - [x] **Cluster the failures.** Embed the summaries and run HDBSCAN; fall back to grouping by step and error type when there are too few traces. Done when the fixture's known groups come out as separate clusters.
 - [x] **Clean the failure text before embedding.** The embedded string (`failure_text`) currently uses the raw error message, so IDs, timestamps and numbers in it can split or merge clusters. Mask them with the same rule as `normalise_error`, keep the error wording and the span context, and check the text carries no clinical content. Done when two traces that differ only in ids, timestamps or numbers produce the same text, and the fixture clusters are unchanged.
 - [x] **Write the taxonomy file.** `taxonomy.md` with a definition and one example per category, loaded into the diagnoser prompt. Done when every category has both.
-- [ ] **Build the diagnoser.** A create\_agent with the taxonomy as system prompt, the read-only trace tools, the cluster's exemplar spans as input, response\_format=Diagnosis and a recursion limit of about 12, instead of a single call through `with_structured_output(Diagnosis)`. Done when it returns a valid `Diagnosis` for each fixture cluster.
+- [ ] **Build the diagnoser.** One `with_structured_output(Diagnosis)` call per cluster, with the taxonomy as system prompt and the cluster's exemplar span trees as input; no tools, so no `create_agent`. Retries run in the graph's loop under a per-cluster budget of attempts, tokens and cost. Built and tested with a fake model. Done when it returns a valid `Diagnosis` for each fixture cluster on the real model (`RUN_LLM=1 uv run pytest -k real_model`).
 - [x] **Diagnose unclustered failures individually.** `cluster_failures` turns each id in `unclustered` into a one-trace cluster (`method` `isolated`) numbered after the real clusters, so the existing fan-out, retries and early exit handle it unchanged. No cap yet: add one (and list the skipped ids in the run summary) if a real run shows too many isolated failures. Done when a fixture run with isolated failures returns a diagnosis for each.
 - [x] **Validate evidence.** Check that every cited trace id and span exists in the cluster; retry once if not, otherwise lower confidence. Done when a test with a fake citation is caught.
 - [ ] **Trace TraceScan itself.** Send its own runs to the same collector under a separate service name. Done when one triage run shows cost and latency per node.
@@ -269,7 +274,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 ### Phase 3 · Loop and eval (days 6–10)
 
 - [x] **Template the proposals.** A markdown issue template (the `_issue` function in `agent/proposals.py`: summary, evidence, suspected cause, fix, verification status) and a regression-case format that fits a regression-cases table in Postgres (`RegressionCase`: ids only, no span text). `draft_proposals` is code, no model call (`agent/proposals.py`), and a cluster without a diagnosis still gets a stub proposal. Done when `draft_proposals` fills both for each cluster.
-- [ ] **Wire the human review.** A small CLI that shows each proposal and asks approve or reject, then resumes with `Command(resume=...)`. Done when a run pauses, takes your input and continues.
+- [x] **Wire the human review.** `human_review` pauses the run with `interrupt()`. The run stream ends in `review_required`, `GET /v1/runs/{run_id}` returns the status and proposals, and `POST /v1/runs/{run_id}/review` takes approve or reject for every proposal and resumes with `Command(resume=...)`. The runs module (`backend/runs/`) owns all of it. No CLI: the review goes through the API, and the review screen in the UI is a separate task. Done when a run pauses, takes your decisions and continues.
 - [ ] **Set up LangGraph Studio.** Add the `local` flag to `build_graph`, a `langgraph.json`, and run `langgraph dev`. Done when you can approve proposals from the Studio UI.
 - [ ] **Implement dry-run actions.** `apply_actions` writes each approved issue to `out/issues/<cluster>.md` and appends regression cases to a local JSONL file. Done when a dry run produces those files and nothing else.
 - [ ] **Add fault switches to Medas.** One environment variable per fault: empty retrieval for one category, broken tool schema, truncated system prompt, small context window, weaker model, upstream timeouts. Done when each switch reliably causes its failure.
@@ -290,7 +295,7 @@ Do these in order and stop where time runs out; each one is useful on its own.
 
 **Review UI (Next.js).** Not yet scheduled: about 2–3 days, which would come out of the tasks above.
 
-- [ ] **Scaffold the app.** Next.js with the App Router and TypeScript in `ui/`, talking to the LangGraph server through `@langchain/langgraph-sdk`; server keys stay in server-side route handlers. Done when the home page lists existing threads.
+- [ ] **Scaffold the app.** Next.js with the App Router and TypeScript in `frontend/` (the app exists there as a single run-console page that streams a run from the FastAPI backend), talking to the LangGraph server through `@langchain/langgraph-sdk`; server keys stay in server-side route handlers. Done when the home page lists existing threads.
 - [ ] **Runs page.** Each triage run with its window, status (running, waiting for review, done) and number of clusters. Done when a new run appears without a restart.
 - [ ] **Run detail page.** Clusters with trace counts, each diagnosis with category, confidence and cited spans linked to the trace in the trace viewer, plus verification status. Done when every field in the state shows up somewhere.
 - [ ] **Review screen.** Approve or reject per proposal, then resume the paused thread with the decisions. Done when approving in the UI produces the same actions as the CLI.
@@ -300,7 +305,7 @@ Do these in order and stop where time runs out; each one is useful on its own.
 
 ### Phase 5 · Ship (days 15–16)
 
-- [ ] **Switch to Postgres.** Postgres checkpointer and store instead of the in-memory versions. Done when a paused run survives a restart.
+- [ ] **Switch to Postgres.** Postgres checkpointer and store instead of the in-memory versions. The checkpointer is done (`AsyncPostgresSaver` in `main.py`); the store is still `InMemoryStore`. Done when a paused run survives a restart.
 - [ ] **Deploy.** Docker Compose with Medas, TraceScan, the trace collector and Postgres. Done when a triage run works on the deployed version.
 - [ ] **Schedule a daily run.** A cron job that triages the last 24 hours and waits for review. Done when one scheduled run has produced proposals.
 - [ ] **Write the README.** Problem, architecture diagram, how to run, eval results, limitations. Done when someone new could run the demo from it.
@@ -317,9 +322,9 @@ The biggest risk is not the agent logic but producing enough realistic failing t
 | Feels like infrastructure, not a product | Weaker demo for reviewers | Three-minute demo: inject a bug, run triage, approve, issue appears |
 | Building the tracing stack takes time | About 3–4 days less for stretch goals | Keep the store to three tables and the MCP server to three tools; real GitHub issues and MAST-Data stay stretch only |
 | Diagnoser overconfident on vague clusters | False positives filed | Require cited evidence; show verification status and confidence on every proposal; grade root cause, not symptom, in the eval |
-| Pydantic objects in checkpoints | LangGraph warns now and will block later | Register the models module with the serializer, or store plain dicts |
+| Pydantic objects in checkpoints | LangGraph warns and will block later | Solved: state stores plain dicts. Keep it that way for new fields |
 | Proposal text echoes clinical content | The diagnoser sees span attributes, and its prose (cause, fix, evidence notes) goes into the issue body | Regression cases and evidence carry ids only; the run stream sends each proposal, issue text included, to the browser of whoever runs the triage and nothing logs it; dry run by default and the human review gate come before any write; add a PII scan of proposal text before real GitHub issues |
-| LLM cost of triage runs | Budget overrun during eval | Clustering in code; LLM calls only per cluster, not per trace; the one exception, unclustered failures, is capped per run |
+| LLM cost of triage runs | Budget overrun during eval | Clustering in code; LLM calls only per cluster, not per trace; the one exception, unclustered failures, is not capped yet (add a per-run cap if a real run shows too many); each cluster has a budget of attempts, tokens and cost |
 | Look-alike failures merge, or one cause splits | Wrong or duplicate diagnoses | Embed a cleaned summary; check purity and cause separation against the injected faults before adding any complexity |
 | Rare failures lost as noise | A real issue never reaches the reviewer | Keep `unclustered` and diagnose each one |
 

@@ -30,6 +30,7 @@ const TONE: Record<Tone, string> = {
   bad: "text-destructive",
 };
 
+const ACTIVE = "border-ring bg-accent text-foreground";
 const SUCCESS = "border-success/30 bg-success/10 text-success";
 const DESTRUCTIVE = "border-destructive/40 bg-destructive/10 text-destructive";
 
@@ -48,10 +49,16 @@ const PHASE: Record<
   },
   running: {
     label: "Streaming",
-    className: "border-ring bg-accent text-foreground",
+    className: ACTIVE,
     footer: channel("Connected"),
   },
   done: { label: "Done", className: SUCCESS, footer: channel("Closed") },
+  // The stream is over, the run is not: it waits for the review.
+  review: {
+    label: "Awaiting review",
+    className: ACTIVE,
+    footer: channel(`Closed by ${RUN_EVENTS.reviewRequired}`),
+  },
   failed: {
     label: "Failed",
     className: DESTRUCTIVE,
