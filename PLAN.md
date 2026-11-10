@@ -218,7 +218,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 - [x] Clustering of failures with embeddings and HDBSCAN, isolated failures kept for individual diagnosis
 - [ ] Diagnoser with structured output and the failure taxonomy
 - [ ] Human review gate with approve or reject per proposal
-- [ ] Draft issues written to markdown files (dry run)
+- [x] Draft issues written to markdown files (dry run)
 - [ ] Fault-injection eval with six seeded bugs, varied inputs, healthy control runs and the metrics table; proposals marked unverified
 - [ ] Minimal trace viewer in Next.js: plain trace list and span tree
 
@@ -276,7 +276,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 - [x] **Template the proposals.** A markdown issue template (the `_issue` function in `agent/proposals.py`: summary, evidence, suspected cause, fix, verification status) and a regression-case format that fits a regression-cases table in Postgres (`RegressionCase`: ids only, no span text). `draft_proposals` is code, no model call (`agent/proposals.py`), and a cluster without a diagnosis still gets a stub proposal. Done when `draft_proposals` fills both for each cluster.
 - [x] **Wire the human review.** `human_review` pauses the run with `interrupt()`. The run stream ends in `review_required`, `GET /v1/runs/{run_id}` returns the status and proposals, and `POST /v1/runs/{run_id}/review` takes approve or reject for every proposal and resumes with `Command(resume=...)`. The runs module (`backend/runs/`) owns all of it. No CLI: the review goes through the API, and the review screen in the UI is a separate task. Done when a run pauses, takes your decisions and continues.
 - [ ] **Set up LangGraph Studio.** Add the `local` flag to `build_graph`, a `langgraph.json`, and run `langgraph dev`. Done when you can approve proposals from the Studio UI.
-- [ ] **Implement dry-run actions.** `apply_actions` writes each approved issue to `out/issues/<cluster>.md` and appends regression cases to a local JSONL file. Done when a dry run produces those files and nothing else.
+- [x] **Implement dry-run actions.** `apply_actions` writes each approved issue to `out/issues/<cluster>.md` and appends regression cases to `out/regression_cases.jsonl`. `dry_run` comes from the server's `DRY_RUN` setting (on by default, refused when off until the real writers exist). Issue files are named by cluster id only, so a later run replaces an earlier run's file with the same id. Done when a dry run produces those files and nothing else.
 - [ ] **Add fault switches to Medas.** One environment variable per fault: empty retrieval for one category, broken tool schema, truncated system prompt, small context window, weaker model, upstream timeouts. Done when each switch reliably causes its failure.
 - [ ] **Write the ground-truth file.** For each fault, the expected category, the actual cause and the visible symptom, plus several input sets that trigger it. Done when all six faults are listed with at least two input sets each, including at least one pair of faults whose error messages look alike (for example the upstream timeout and the retrieval failure) and one low-volume fault that should land in `unclustered`.
 - [ ] **Build the eval runner.** For each fault and input set: switch it on, run traffic, run triage, save the proposals, switch it off; plus healthy control runs with no fault. Done when one command runs all faults and controls.

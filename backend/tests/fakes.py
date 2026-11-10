@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 from langchain_core.language_models import BaseChatModel
@@ -141,6 +142,11 @@ def scripted_diagnoser(*answers: Diagnosis | Exception) -> FakeDiagnoserModel:
         return item
 
     return FakeDiagnoserModel(messages=iter(()), answer=answer)
+
+
+def files_under(path: Path) -> list[str]:
+    """Every file under `path`, relative to it and sorted: what a dry run wrote."""
+    return sorted(str(f.relative_to(path)) for f in path.rglob("*") if f.is_file())
 
 
 def fake_context(traces: TraceAccess, model: BaseChatModel | None = None) -> TraceContext:
