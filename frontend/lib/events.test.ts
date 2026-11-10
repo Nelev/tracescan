@@ -9,10 +9,17 @@ const uiSpec = (data: unknown) =>
 
 const SPEC = { root: "page", elements: {} };
 
-test("lifecycle events carry no payload", () => {
-  assert.deepEqual(parseRunEvent({ event: "run_started", data: "{}" }), {
-    kind: "started",
-  });
+test("run_started names the run, and the other lifecycle events carry no payload", () => {
+  assert.deepEqual(
+    parseRunEvent({ event: "run_started", data: '{"run_id":"3f9a1c2e"}' }),
+    { kind: "started", runId: "3f9a1c2e" },
+  );
+  for (const data of ["{}", '{"run_id":7}', "not json"]) {
+    assert.deepEqual(parseRunEvent({ event: "run_started", data }), {
+      kind: "started",
+      runId: null,
+    });
+  }
   assert.deepEqual(parseRunEvent({ event: "run_completed", data: "{}" }), {
     kind: "completed",
   });
@@ -79,7 +86,7 @@ test("only review_required, run_completed and run_failed end the stream", () => 
   assert.equal(outcomeOf({ kind: "review" }), "review");
   assert.equal(outcomeOf({ kind: "completed" }), "done");
   assert.equal(outcomeOf({ kind: "failed" }), "failed");
-  assert.equal(outcomeOf({ kind: "started" }), null);
+  assert.equal(outcomeOf({ kind: "started", runId: null }), null);
   assert.equal(outcomeOf({ kind: "unknown" }), null);
   assert.equal(outcomeOf(progress({ event: "node_failed" })), null);
 });
