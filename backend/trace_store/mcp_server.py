@@ -29,7 +29,8 @@ from trace_store.const import (
 )
 from trace_store.guard import TraceGuard
 from trace_store.models import FailedTraceQuery, SpanNode, TraceId, TraceSummary
-from trace_store.reader import FixtureTraceReader, TraceReader
+from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
+from trace_store.reader import TraceReader
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -103,7 +104,7 @@ def build_server(
 ) -> FastMCP:
     """Build the MCP server with its three read-only tools, all reading through `reader`.
 
-    Any TraceReader works (fixture now, Postgres later); the server never touches the data store itself.
+    Any TraceReader works (Postgres in the app, a small one in tests); the server never touches the data store itself.
     Every tool call passes through TraceGuard (a budget of `max_calls` per server process, so per
     graph run, plus an audit log). search_failed_traces serves only `allowed_apps`, and trace and
     span ids must match TraceId.
@@ -149,17 +150,14 @@ def build_server(
 
 
 def main() -> None:
-    """Serve traces over stdio: from Postgres when TRACE_DATABASE_URL is set, else the fixture."""
+    """Serve the traces stored in Postgres over stdio. Needs TRACE_DATABASE_URL."""
     # The guard's audit log goes to stderr; stdout belongs to the protocol.
     logging.basicConfig(level=logging.WARNING)
     logging.getLogger("trace_store.guard").setLevel(logging.INFO)
-    reader: TraceReader = FixtureTraceReader()
-    if url := os.environ.get("TRACE_DATABASE_URL"):
-        # Imported here so the fixture server starts without loading the database driver.
-        from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
-
-        reader = PostgresTraceReader(read_only_engine(url))
-    build_server(reader).run()
+    url = os.environ.get("TRACE_DATABASE_URL")
+    if not url:
+        raise SystemExit("set TRACE_DATABASE_URL (a role that can read spans and scores)")
+    build_server(PostgresTraceReader(read_only_engine(url))).run()
 
 
 if __name__ == "__main__":

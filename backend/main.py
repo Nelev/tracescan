@@ -47,8 +47,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         context = TraceContext(
             ClosedTraces(), FastEmbedEmbedder(), build_diagnoser_model(), dry_run=dry_run
         )
-        # Optional: with it, runs read the spans table; without it, the synthetic fixture.
-        open_traces = partial(TraceClient, os.environ.get("TRACE_DATABASE_URL"))
+        # Where each run's trace server reads spans and scores: meant for a read-only role.
+        open_traces = partial(TraceClient, os.environ["TRACE_DATABASE_URL"])
         app.state.runs = Runs(app.state.graph, context, open_traces, store)
         # The small model that writes the UI spec of each streamed message (api.ui_spec).
         app.state.ui_spec_model = build_ui_spec_model()

@@ -4,7 +4,7 @@ Run-scoped resources handed to the graph at invoke time, not at compile time.
 The trace session lives for one invocation (see agent.mcp_client), so the compiled graph
 must not hold it. Pass it per call:
 
-    async with TraceClient() as traces:
+    async with TraceClient(trace_database_url) as traces:
         await build_graph().ainvoke(input, context=TraceContext(traces, embedder, model))
 
 The resume after the human review reads no traces (apply_actions works from the approved proposals

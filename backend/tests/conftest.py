@@ -8,7 +8,6 @@ from alembic.config import Config
 from sqlalchemy import text
 
 from agent import model_guard
-from agent.mcp_client import TraceClient
 from db.engine import create_engine
 from main import app
 from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
@@ -23,13 +22,6 @@ def no_retry_wait(monkeypatch):
 
 
 @pytest.fixture
-async def traces():
-    """One open session to the real trace server."""
-    async with TraceClient() as client:
-        yield client
-
-
-@pytest.fixture
 def postgres_url(monkeypatch) -> str:
     """TEST_DATABASE_URL, migrated to the newest revision; the test is skipped without it.
 
@@ -41,6 +33,7 @@ def postgres_url(monkeypatch) -> str:
     if not url:
         pytest.skip("set TEST_DATABASE_URL to run against Postgres")
     monkeypatch.setenv("DATABASE_URL", url)  # what migrations/env.py and the lifespan read
+    monkeypatch.setenv("TRACE_DATABASE_URL", url)  # where the lifespan points the trace server
     config = Config()  # no ini file: this path is all an upgrade needs from it
     config.set_main_option("script_location", str(BACKEND / "migrations"))
     command.upgrade(config, "head")

@@ -4,6 +4,7 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
+from tests.fakes import FixtureTraceReader
 from trace_store.const import (
     MAX_ATTR_CHARS_TREE,
     MAX_SUMMARY_CHARS,
@@ -12,7 +13,6 @@ from trace_store.const import (
 )
 from trace_store.mcp_server import build_server, sanitize_span, sanitize_summary
 from trace_store.models import SpanNode, TraceSummary
-from trace_store.reader import FixtureTraceReader
 
 T0 = datetime(2026, 11, 5, 9, tzinfo=UTC)
 LONG = MAX_ATTR_CHARS_TREE + 1  # over the tree limit, well under the single-span limit

@@ -12,7 +12,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from pydantic import Field
+from pydantic import BaseModel, Field
 from sklearn.feature_extraction.text import HashingVectorizer
 
 from agent.context import TraceAccess, TraceContext
@@ -27,6 +27,7 @@ from runs.store import (
     StoredStatus,
 )
 from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
+from trace_store.reader import build_tree
 
 
 class HashingEmbedder:
@@ -292,3 +293,60 @@ class InMemoryRunStore:
 
     async def reviews(self, run_id: str) -> list[ReviewRecord]:
         return self.decided.get(run_id, [])
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "medas_traces.json"
+
+
+def _fixture_failed(summary: TraceSummary, max_score: float) -> bool:
+    """Its lowest score is low. A summary with no score counts a status of error as 0."""
+    score = summary.min_score
+    if score is None:
+        score = 0.0 if summary.status == "error" else 1.0
+    return score <= max_score
+
+
+class _FixtureTrace(BaseModel):
+    summary: TraceSummary
+    spans: list[SpanNode]
+
+
+class _FixtureFile(BaseModel):
+    traces: list[_FixtureTrace]
+
+
+class FixtureTraceReader:
+    """A TraceReader over three hand-written traces (tests/fixtures/medas_traces.json), for the
+    trace server's own tests: its tools, its sanitizing and its guard need no database."""
+
+    def __init__(self, path: Path = FIXTURE) -> None:
+        self._summaries: dict[str, TraceSummary] = {}
+        self._trees: dict[str, SpanNode] = {}
+        self._spans: dict[str, dict[str, SpanNode]] = {}
+        for trace in _FixtureFile.model_validate_json(path.read_bytes()).traces:
+            trace_id = trace.summary.trace_id
+            tree = build_tree(trace.spans)  # fails at load time on a broken fixture
+            if tree.trace_id != trace_id:
+                raise ValueError(f"spans do not belong to trace {trace_id}")
+            self._summaries[trace_id] = trace.summary
+            self._trees[trace_id] = tree
+            self._spans[trace_id] = {s.span_id: s for s in trace.spans}
+
+    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
+        matches = [
+            s
+            for s in self._summaries.values()
+            if s.app == query.app
+            and (query.since is None or s.start_time >= query.since)
+            and (query.until is None or s.start_time < query.until)
+            and _fixture_failed(s, query.max_score)
+        ]
+        matches.sort(key=lambda s: s.start_time, reverse=True)
+        return matches[: query.limit]
+
+    async def get_trace_tree(self, trace_id: str) -> SpanNode | None:
+        return self._trees.get(trace_id)
+
+    async def get_span(self, trace_id: str, span_id: str) -> SpanNode | None:
+        span = self._spans.get(trace_id, {}).get(span_id)
+        return span.model_copy(update={"children": []}) if span else None

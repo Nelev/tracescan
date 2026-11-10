@@ -12,9 +12,9 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | --- | --- |
 | Graph: collect, cluster, diagnose, draft, review, apply | Working |
 | Graph: `reproduce_failure`, `match_known_issues` | Placeholders that return fixed values |
-| Trace MCP server (read-only, sanitized, budgeted) | Working, over the fixture reader or the Postgres reader |
+| Trace MCP server (read-only, sanitized, budgeted) | Working, over the Postgres reader |
 | OTLP collector (`POST /v1/traces` into the `spans` table) | Working, minimal: localhost and synthetic traffic only |
-| Postgres trace reader | Used when `TRACE_DATABASE_URL` is set, the fixture otherwise. A trace is failed when its lowest score is low. No read-only role yet |
+| Postgres trace reader | The only trace source. A trace is failed when its lowest score is low. No read-only role yet |
 | Scoring job (`trace_store/scoring.py`) | Working: five heuristic checks score each trace when its root span is stored. No model judge |
 | Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
@@ -49,14 +49,12 @@ flowchart LR
         tools --> reader
     end
 
-    fixture[["medas_traces.json<br/>(synthetic)"]]
     ui["Run console<br/>Next.js"]
     llm["OpenRouter<br/>diagnoser model"]
     out[["out/issues/*.md<br/>out/regression_cases.jsonl"]]
 
     collector --> spans
-    spans -. "when TRACE_DATABASE_URL is set" .-> reader
-    reader --> fixture
+    spans --> reader
     agent -- "TraceClient" --> tools
     agent --> llm
     agent -- "apply_actions (dry run)" --> out
@@ -70,7 +68,7 @@ The dotted arrow is the missing piece: the collector stores spans, but the reade
 The parts and what each one owns:
 
 - **`backend/agent/`** is the graph. It reaches traces only through the MCP client. It imports `trace_store.models` and nothing else from the server side, and no database driver; `tests/test_boundaries.py` enforces this.
-- **`backend/trace_store/`** is the server side of trace access: the contracts (`models.py`), the `TraceReader` protocol with its fixture implementation, the MCP server and its guard.
+- **`backend/trace_store/`** is the server side of trace access: the contracts (`models.py`), the `TraceReader` protocol, the Postgres reader, the scoring job, the MCP server and its guard.
 - **`backend/runs/`** is the only code that knows a run is a graph thread. It starts runs, reads their status from the checkpoint, and resumes them at the review. Callers never get raw graph state.
 - **`backend/api/`** is HTTP and server-sent events over the runs module, plus the collector.
 - **`backend/db/`** and **`backend/migrations/`** hold the application's own tables (SQLAlchemy and Alembic). LangGraph's checkpointer creates and owns its own tables in the same database.
@@ -99,7 +97,7 @@ One row per failed trace, small enough to cluster without fetching the tree:
 }
 ```
 
-A trace counts as **failed** when its lowest score is at or below `max_score` (default 0.5). An error span alone does not make it failed, since an error can be harmless (see the scoring job below); a fixture summary with no score counts a status of `error` as a score of 0. `signature` is a short text written by the producer, with no clinical content, and is what the clustering embeds.
+A trace counts as **failed** when its lowest score is at or below `max_score` (default 0.5). An error span alone does not make it failed, since an error can be harmless (see the scoring job below). `signature` is a short text written by the producer, with no clinical content, and is what the clustering embeds.
 
 ### SpanNode
 
@@ -116,21 +114,19 @@ One span, with its children nested under it:
 | `events` | Timestamped events on the span, each with its own attributes |
 | `children` | The child spans, ordered by start time |
 
-The fixture's retrieval-miss trace as a tree:
+A seeded trace whose record store is down, as a tree:
 
 ```
-medas.request            [error]  answer not grounded in retrieved context
-├── retrieve             [error]  0 chunks above similarity threshold
-│                                 retrieval.top_k=5, retrieval.hits=0
-└── chat gpt-4o          [ok]     gen_ai.request.model=gpt-4o
-                                  gen_ai.usage.input_tokens=120
+invoke_agent medas                      [error]  connection to the record store was refused
+├── chat openai/gpt-4.1-mini            [unset]  gen_ai.usage.input_tokens=2130
+└── execute_tool search_patient_record  [error]  connection to the record store was refused
+    └── retrieval record_chunks         [error]  connection to the record store was refused
 ```
 
 `build_tree` in `reader.py` nests flat span rows under their parents, and refuses a trace with more than one root, a missing parent, or spans from two traces.
 
 ### Where traces are stored
 
-- **The fixture**, `backend/trace_store/fixtures/medas_traces.json`: three synthetic traces (two failed, one healthy), each with a summary, flat spans and scores. This is what every run reads today.
 - **The `spans` table**, written by the collector: one row per span, keyed by `trace_id` and `span_id`, with `app`, `name`, `kind`, timing, status, and `attributes` and `events` as JSONB. There is no `traces` table: a trace is the spans that share a `trace_id`.
 - **The `scores` table**, written by the scoring job: one row per trace and check, with a value (0.0 bad, 1.0 fine) and the span the check blames, if any. Ids and numbers only.
 
@@ -206,7 +202,7 @@ The graph uses the first two. `get_span` is served but `TraceClient` does not ca
 
 ### The reader
 
-The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. `FixtureTraceReader` is the default. With `TRACE_DATABASE_URL` set, the server uses `PostgresTraceReader` over `spans` instead. It derives the summary fields the fixture stores ready-made: a failed trace is one whose lowest score is low, the failing span is the one that score blames, and the signature is that span's name and its exception type or, without one, the name of the check. Its session is read-only, but a dedicated read-only role does not exist yet.
+The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. The one implementation in the app is `PostgresTraceReader`, over `spans` and `scores`; the server's own tests use a small in-memory one. It derives every summary field from what is stored: a failed trace is one whose lowest score is low, the failing span is the one that score blames, and the signature is that span's name and its exception type or, without one, the name of the check. Its session is read-only, but a dedicated read-only role does not exist yet.
 
 ### The scoring job
 
@@ -420,13 +416,14 @@ Start the frontend, then open `http://localhost:3000`:
 cd frontend && npm install && npm run dev
 ```
 
-Start a run for `medas` from the page. It reads the fixture, diagnoses two clusters with the real model, and waits for your review. Approved proposals are written under `backend/out/`.
+Start a run for `medas` from the page. It reads the stored traces (seed a day of them first, see below), diagnoses each cluster with the real model, and waits for your review. Approved proposals are written under `backend/out/`.
 
 ### Environment variables
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres for the checkpoints and the application's tables |
+| `TRACE_DATABASE_URL` | yes | Where the trace server reads spans and scores: the same database, meant for a read-only role |
 | `OPENROUTER_API_KEY` | yes | The diagnoser's and the UI model's key |
 | `DIAGNOSER_MODEL` | no | OpenRouter slug; default `anthropic/claude-sonnet-5-5` |
 | `UI_SPEC_MODEL` | no | OpenRouter slug; default `anthropic/claude-haiku-5.5` |
@@ -437,16 +434,10 @@ Start a run for `medas` from the page. It reads the fixture, diagnoses two clust
 
 ### Other entry points
 
-Run the trace MCP server by itself over stdio:
+Run the trace MCP server by itself over stdio (it needs `TRACE_DATABASE_URL`):
 
 ```bash
-cd backend && uv run python -m trace_store.mcp_server
-```
-
-Call the server through the agent's client and print what comes back:
-
-```bash
-cd backend && uv run python scripts/demo_client.py
+cd backend && uv run --env-file .env python -m trace_store.mcp_server
 ```
 
 Fill `spans` with a day of synthetic Medas traffic, most of it failed, so a run can read from Postgres before Medas is instrumented:
@@ -503,12 +494,6 @@ What it shows: the scoring job did what it was built for. The four failures with
 
 [docs/eval-notes.md](docs/eval-notes.md) is the log of the eval experiments: the setup, both runs of the first one (plain faults, then the hard cases), the clusters it produced, the findings, the limits and what to do next.
 
-Run the graph once without the API. It stops at the review pause and cannot be resumed, because it has no checkpointer:
-
-```bash
-cd backend && uv run --env-file .env python -m agent.graph
-```
-
 ## Tests and checks
 
 Backend (what CI runs):
@@ -517,13 +502,12 @@ Backend (what CI runs):
 cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest
 ```
 
-Tests never call a model and never download the embedding model: they use a fake chat model and `HashingEmbedder` from `tests/fakes.py`. Three groups of tests are opt-in:
+Tests never call a model and never download the embedding model: they use a fake chat model and `HashingEmbedder` from `tests/fakes.py`. Two groups of tests are opt-in (the diagnoser on the real model is the eval, `python -m eval.run`):
 
 | Setting | Runs |
 | --- | --- |
-| `TEST_DATABASE_URL=...` | The Postgres tests: persistence, the run store, the collector's store |
+| `TEST_DATABASE_URL=...` | The Postgres tests: persistence, the run store, the collector, the reader, the scoring job, the trace client and the eval runner. CI sets it, with a Postgres service |
 | `RUN_SLOW=1 uv run pytest -k fastembed` | Clustering with the real embedding model (downloads it once) |
-| `RUN_LLM=1 OPENROUTER_API_KEY=... uv run pytest -k real_model` | The diagnoser on the real model |
 
 Frontend:
 
@@ -536,7 +520,7 @@ cd frontend && npm run lint && npx tsc --noEmit && npm test && npm run build
 | Path | Content |
 | --- | --- |
 | `backend/agent/` | The graph, its nodes, clustering, the diagnoser's guards, the MCP client |
-| `backend/trace_store/` | Trace contracts, reader, MCP server, guard, the fixture |
+| `backend/trace_store/` | Trace contracts, Postgres reader, scoring job, MCP server, guard |
 | `backend/runs/` | Run lifecycle and the run store |
 | `backend/api/` | Runs API, the SSE stream, the UI spec call, the collector |
 | `backend/db/`, `backend/migrations/` | Tables and Alembic migrations |
