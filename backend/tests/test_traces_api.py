@@ -13,7 +13,6 @@ from opentelemetry.proto.trace.v1.trace_pb2 import Status
 from sqlalchemy import text
 
 from api.traces import PROTOBUF, decode
-from db.engine import create_engine
 from main import app
 
 TRACE_ID = bytes.fromhex("0af7651916cd43dd8448eb211c80319c")
@@ -94,53 +93,34 @@ def test_spans_of_an_app_that_is_not_allowed_are_left_out():
     assert decode(export("someone-else")) == []
 
 
-@pytest.fixture
-async def client():
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        yield c
-
-
 async def post(client, body: bytes, content_type: str = PROTOBUF) -> httpx.Response:
     return await client.post("/v1/traces", content=body, headers={"content-type": content_type})
 
 
 @pytest.mark.anyio
-async def test_only_protobuf_is_taken(client):
-    assert (await post(client, b"{}", "application/json")).status_code == 415
+async def test_only_protobuf_is_taken(collector):
+    assert (await post(collector, b"{}", "application/json")).status_code == 415
 
 
 @pytest.mark.anyio
-async def test_a_body_that_is_not_an_export_is_refused(client):
-    assert (await post(client, b"\xff\xff\xff")).status_code == 400
+async def test_a_body_that_is_not_an_export_is_refused(collector):
+    assert (await post(collector, b"\xff\xff\xff")).status_code == 400
 
 
 @pytest.mark.anyio
-async def test_an_export_of_another_app_is_accepted_and_stores_nothing(client):
+async def test_an_export_of_another_app_is_accepted_and_stores_nothing(collector):
     # No engine on the app here: reaching the database would fail the request.
-    response = await post(client, export("someone-else"))
+    response = await post(collector, export("someone-else"))
     assert response.status_code == 200
     assert response.headers["content-type"] == PROTOBUF
     ExportTraceServiceResponse().ParseFromString(response.content)
 
 
-@pytest.fixture
-async def engine(postgres_url):
-    engine = create_engine(postgres_url)
-    async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE spans"))
-    app.state.engine = engine
-    yield engine
-    del app.state.engine
-    await engine.dispose()
-
-
 @pytest.mark.anyio
-async def test_an_export_is_stored_and_a_retry_changes_nothing(client, engine):
+async def test_an_export_is_stored_and_a_retry_changes_nothing(collector, spans_engine):
     for _ in range(2):  # the second one is the exporter's retry
-        assert (await post(client, export())).status_code == 200
-    async with engine.connect() as conn:
+        assert (await post(collector, export())).status_code == 200
+    async with spans_engine.connect() as conn:
         rows = (await conn.execute(text("SELECT span_id, start_time, attributes FROM spans"))).all()
     # Once each, with the timestamp and the JSON as decoded.
     assert sorted(tuple(row) for row in rows) == sorted(
@@ -149,14 +129,14 @@ async def test_an_export_is_stored_and_a_retry_changes_nothing(client, engine):
 
 
 @pytest.mark.anyio
-async def test_a_store_that_fails_is_a_503_with_no_detail(client):
+async def test_a_store_that_fails_is_a_503_with_no_detail(collector):
     class Broken:
         def begin(self):
             raise RuntimeError("row content")
 
     app.state.engine = Broken()
     try:
-        response = await post(client, export())
+        response = await post(collector, export())
     finally:
         del app.state.engine
     assert response.status_code == 503

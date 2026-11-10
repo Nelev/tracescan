@@ -9,6 +9,7 @@ Run over stdio with: uv run python -m trace_store.mcp_server
 """
 
 import logging
+import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -148,11 +149,17 @@ def build_server(
 
 
 def main() -> None:
-    """Serve the fixture reader over stdio. The Postgres reader replaces it once the trace store exists."""
+    """Serve traces over stdio: from Postgres when TRACE_DATABASE_URL is set, else the fixture."""
     # The guard's audit log goes to stderr; stdout belongs to the protocol.
     logging.basicConfig(level=logging.WARNING)
     logging.getLogger("trace_store.guard").setLevel(logging.INFO)
-    build_server(FixtureTraceReader()).run()
+    reader: TraceReader = FixtureTraceReader()
+    if url := os.environ.get("TRACE_DATABASE_URL"):
+        # Imported here so the fixture server starts without loading the database driver.
+        from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
+
+        reader = PostgresTraceReader(read_only_engine(url))
+    build_server(reader).run()
 
 
 if __name__ == "__main__":

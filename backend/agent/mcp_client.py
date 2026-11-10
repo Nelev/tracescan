@@ -28,8 +28,8 @@ from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
 
 SERVER_NAME = "traces"
 REQUEST_TIMEOUT = timedelta(seconds=30)  # so a hung server cannot hang the graph
-# The stdio client passes the subprocess only a minimal environment; anything the
-# server needs later (e.g. the read-only DB URL) must be added under "env".
+# The stdio client passes the subprocess only a minimal environment; anything else the
+# server needs must be added under "env".
 TRACE_SERVER: StdioConnection = {
     "transport": "stdio",
     "command": sys.executable,
@@ -42,12 +42,18 @@ TRACE_SERVER: StdioConnection = {
 class TraceClient:
     """One open session to the trace server. Use as an async context manager."""
 
-    def __init__(self) -> None:
+    def __init__(self, database_url: str | None = None) -> None:
+        # With a URL the server reads Postgres (trace_store/postgres_reader.py), else the fixture.
+        self._server: StdioConnection = (
+            {**TRACE_SERVER, "env": {"TRACE_DATABASE_URL": database_url}}
+            if database_url
+            else TRACE_SERVER
+        )
         self._stack = AsyncExitStack()
         self._session: ClientSession | None = None
 
     async def __aenter__(self) -> "TraceClient":
-        client = MultiServerMCPClient({SERVER_NAME: TRACE_SERVER})
+        client = MultiServerMCPClient({SERVER_NAME: self._server})
         self._session = await self._stack.enter_async_context(client.session(SERVER_NAME))
         return self
 
