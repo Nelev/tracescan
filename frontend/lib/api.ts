@@ -1,5 +1,6 @@
+import { parseRuns } from "./runs";
 import { readSse, type SseMessage } from "./sse";
-import type { RunRequest } from "./types";
+import type { RunRecord, RunRequest } from "./types";
 
 /** A run that could not start. `status` is null when the backend could not be reached at all. */
 export class RunError extends Error {
@@ -43,6 +44,26 @@ export async function openRunStream(
     contentType: res.headers.get("content-type") ?? "",
     messages: readSse(res.body),
   };
+}
+
+const RUNS_PATH = "/api/runs";
+
+/** The newest recorded runs, newest first. Throws `RunError` when the list cannot be read. */
+export async function listRuns(signal: AbortSignal): Promise<RunRecord[]> {
+  let res: Response;
+  try {
+    res = await fetch(RUNS_PATH, { signal });
+  } catch (err) {
+    if (signal.aborted) throw err;
+    throw new RunError(null);
+  }
+  if (!res.ok) throw new RunError(res.status);
+  try {
+    return parseRuns(await res.json());
+  } catch (err) {
+    if (signal.aborted) throw err;
+    throw new RunError(res.status); // a 200 whose body is not JSON: not our backend
+  }
 }
 
 export async function checkHealth(signal: AbortSignal): Promise<boolean> {

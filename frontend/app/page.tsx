@@ -20,7 +20,8 @@ export default function Home() {
             <h1>Triage console</h1>
             <p className="type-body text-muted-foreground">
               Starts a triage run and shows the messages the server streams:
-              drawn under Console, and as received under Raw events.
+              drawn under Console, and as received under Raw events. Runs lists
+              the runs the server has recorded.
             </p>
           </div>
         </div>

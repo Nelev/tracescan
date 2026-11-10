@@ -1,6 +1,7 @@
 """The runs module: see runs.service. Import from here."""
 
 from agent.schemas import Decision
+from db.models import NAME_MAX
 from runs.service import (
     Ended,
     Failed,
@@ -15,16 +16,20 @@ from runs.service import (
     RunSummary,
     StartedRun,
 )
+from runs.store import PostgresRunStore, RunRecord
 
 __all__ = [
     "Decision",
     "Ended",
     "Failed",
     "IncompleteDecisions",
+    "NAME_MAX",
     "NotWaitingForReview",
+    "PostgresRunStore",
     "Progress",
     "RunFailed",
     "RunNotFound",
+    "RunRecord",
     "RunState",
     "RunStatus",
     "RunSummary",

@@ -17,11 +17,12 @@ from agent.graph import build_graph
 from agent.schemas import Proposal
 from api import ui_spec
 from main import app, dry_run_setting
-from runs import Runs
+from runs import NAME_MAX, Runs
 from tests.fakes import (
     DIAGNOSIS,
     SPEC,
     FakeTraces,
+    InMemoryRunStore,
     fake_context,
     fake_diagnoser,
     fake_model,
@@ -43,8 +44,9 @@ def use_runs(traces: FakeTraces | None = None, model=None, open_traces=None) -> 
     async def session():
         yield traces or FakeTraces()
 
+    app.state.run_store = store = InMemoryRunStore()
     app.state.runs = Runs(
-        app.state.graph, fake_context(FakeTraces(), model), open_traces or session
+        app.state.graph, fake_context(FakeTraces(), model), open_traces or session, store
     )
 
 
@@ -194,7 +196,8 @@ async def test_naive_since_is_rejected(client):
 
 @pytest.mark.anyio
 async def test_the_sync_run_endpoint_is_gone(client):
-    assert (await client.post("/v1/runs", json={"target_app": "medas"})).status_code == 404
+    # 405, not 404: the path exists again, but only to list runs with GET.
+    assert (await client.post("/v1/runs", json={"target_app": "medas"})).status_code == 405
 
 
 @pytest.mark.anyio
@@ -481,6 +484,160 @@ def test_dry_run_is_on_unless_the_environment_turns_it_off(monkeypatch, value):
 def test_dry_run_is_off_when_the_environment_says_so(monkeypatch, value):
     monkeypatch.setenv("DRY_RUN", value)
     assert dry_run_setting() is False
+
+
+# --- the record of runs: GET /v1/runs, who started and who reviewed
+
+ANA = {"X-User-Name": "ana"}
+BO = {"X-User-Name": "bo"}
+
+
+async def listed(client) -> list[dict]:
+    response = await client.get("/v1/runs")
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.mark.anyio
+async def test_runs_are_listed_newest_first_with_who_started_them_and_no_state(client):
+    use_diagnosed_run(attributes={"patient": PHI})
+    window = {"target_app": "medas", "since": "2026-11-05T09:00:00Z"}
+    first = (await client.post("/v1/runs/stream", json=window, headers=ANA)).text
+    second = (await client.post("/v1/runs/stream", json={"target_app": "medas"})).text
+    first_id, second_id = (parse_sse(text)[0][1]["run_id"] for text in (first, second))
+
+    runs = await listed(client)
+    assert [r["run_id"] for r in runs] == [second_id, first_id]
+    assert [r["started_by"] for r in runs] == ["local", "ana"]  # no header: the default name
+    assert runs[1]["status"] == "review_required" and runs[1]["ended_at"] is None
+    assert runs[1]["since"] == "2026-11-05T09:00:00Z" and runs[1]["until"] is None
+    assert (runs[1]["failed_traces"], runs[1]["clusters"], runs[1]["proposals"]) == (2, 1, 1)
+    assert set(runs[0]) == {
+        "run_id",
+        "target_app",
+        "since",
+        "until",
+        "status",
+        "started_by",
+        "created_at",
+        "ended_at",
+        "failed_traces",
+        "clusters",
+        "proposals",
+    }
+    assert [r["run_id"] for r in (await client.get("/v1/runs?limit=1")).json()] == [second_id]
+    assert (await client.get("/v1/runs?limit=0")).status_code == 422
+
+
+@pytest.mark.anyio
+async def test_a_review_is_recorded_with_its_decisions_and_the_reviewer(client):
+    use_diagnosed_run()
+    run_id = await start(client)
+    review = {"decisions": {"c0": "approve"}}
+    assert (
+        await client.post(f"/v1/runs/{run_id}/review", json=review, headers=BO)
+    ).status_code == 200
+
+    (run,) = await listed(client)
+    assert run["status"] == "completed" and run["ended_at"] is not None
+    (decided,) = await app.state.run_store.reviews(run_id)
+    assert (decided.cluster_id, decided.decision, decided.reviewer) == ("c0", "approve", "bo")
+
+
+@pytest.mark.anyio
+async def test_a_review_that_is_refused_records_no_decision(client):
+    use_diagnosed_run()
+    run_id = await start(client)
+    partial = await client.post(f"/v1/runs/{run_id}/review", json={"decisions": {}})
+    assert partial.status_code == 422
+    assert await app.state.run_store.reviews(run_id) == []
+    assert (await listed(client))[0]["status"] == "review_required"
+
+
+@pytest.mark.anyio
+async def test_a_run_another_review_holds_is_refused_and_free_again_when_that_one_fails(client):
+    use_diagnosed_run()
+    run_id = await start(client)
+    review = {"decisions": {"c0": "approve"}}
+
+    with pytest.raises(RuntimeError):
+        # A review in another process, which then dies before it is applied.
+        async with app.state.run_store.reviewing(run_id, {"c0": "reject"}, "ana"):
+            assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 409
+            assert (await client.get(f"/v1/runs/{run_id}")).json()["status"] == "review_required"
+            raise RuntimeError("that process died")
+
+    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 200
+    (decided,) = await app.state.run_store.reviews(run_id)
+    assert (decided.decision, decided.reviewer) == ("approve", "local")
+
+
+@pytest.mark.anyio
+async def test_a_failed_resume_leaves_the_run_waiting_and_forgets_its_decisions(
+    client, monkeypatch
+):
+    use_diagnosed_run()
+    run_id = await start(client)
+    monkeypatch.setattr(app.state.runs, "_context", None)  # the resume now fails inside the graph
+
+    review = {"decisions": {"c0": "approve"}}
+    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 502
+    assert await app.state.run_store.reviews(run_id) == []
+    assert (await listed(client))[0]["status"] == "review_required"
+
+
+@pytest.mark.anyio
+async def test_a_run_that_waits_for_review_but_was_never_recorded_can_still_be_reviewed(client):
+    use_diagnosed_run()
+    run_id = await start(client)
+    use_diagnosed_run()  # a new, empty run store: as for a run from before the runs table
+
+    review = {"decisions": {"c0": "reject"}}
+    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 200
+    (run,) = await listed(client)
+    assert (run["run_id"], run["status"], run["started_by"]) == (run_id, "completed", None)
+
+
+@pytest.mark.anyio
+async def test_a_failed_run_is_recorded_and_reported_as_failed(client):
+    use_runs(ExplodingTraces())
+    run_id = await start(client)
+
+    assert (await listed(client))[0]["status"] == "failed"
+    status = await client.get(f"/v1/runs/{run_id}")
+    assert status.status_code == 200 and status.json()["status"] == "failed"
+    assert PHI not in status.text
+
+
+@pytest.mark.anyio
+async def test_a_run_whose_trace_session_cannot_open_is_recorded_as_failed(client):
+    use_runs(open_traces=broken_session)
+    assert (await post_stream(client)).status_code == 502
+    (run,) = await listed(client)
+    assert run["status"] == "failed" and run["ended_at"] is not None
+    # It never reached a checkpoint, so its status comes from the record alone.
+    status = (await client.get(f"/v1/runs/{run['run_id']}")).json()
+    assert status["status"] == "failed" and status["proposals"] == []
+
+
+@pytest.mark.anyio
+async def test_a_run_whose_client_went_away_is_recorded_as_aborted(client):
+    use_runs(two_failures(), fake_diagnoser(DIAGNOSIS))
+    await run_with_a_stalled_client()
+    (run,) = await listed(client)
+    assert run["status"] == "aborted"
+    assert (await client.get(f"/v1/runs/{run['run_id']}")).json()["status"] == "aborted"
+
+
+@pytest.mark.anyio
+async def test_a_user_name_longer_than_the_column_is_422(client):
+    response = await client.post(
+        "/v1/runs/stream",
+        json={"target_app": "medas"},
+        headers={"X-User-Name": "x" * (NAME_MAX + 1)},
+    )
+    assert response.status_code == 422
+    assert await listed(client) == []
 
 
 @pytest.mark.anyio

@@ -159,13 +159,19 @@ Python is managed with [uv](https://docs.astral.sh/uv/); do not use `pip`.
 cd backend && uv sync
 ```
 
-The API checkpoints each run into Postgres. Start one (this is a throwaway database; any Postgres works):
+The API keeps two things in Postgres: the graph checkpoints of each run, and its own tables `users`, `runs` and `reviews` (who started a run, how it ended, who decided what). Start a database (any Postgres works; `docker-compose.yml` at the repo root starts one on port 5433):
 
 ```bash
-docker run -d --name tracescan-db -e POSTGRES_PASSWORD=tracescan -p 127.0.0.1:5433:5432 pgvector/pgvector:pg17
+docker compose up -d
 ```
 
-Run the API (docs at `/docs`). It fails at startup without `DATABASE_URL` and creates the checkpoint tables on first start:
+Create or update the application's tables with Alembic. Run this once, and again after pulling a new migration:
+
+```bash
+cd backend && DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres uv run alembic upgrade head
+```
+
+Run the API (docs at `/docs`). It fails at startup without `DATABASE_URL` or before the migration has run, and creates the checkpoint tables itself on first start:
 
 ```bash
 cd backend && DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgres uv run uvicorn main:app --reload
@@ -173,12 +179,20 @@ cd backend && DATABASE_URL=postgresql://postgres:tracescan@127.0.0.1:5433/postgr
 
 `POST /v1/runs/stream` with `{"target_app": "medas"}` starts a run and streams it as server-sent events. The stream ends with `review_required` when the run waits for a human review, or with `run_completed` when nothing failed. Both carry counts (failed traces, clusters, unclustered failures, diagnoses, proposals), the actions log and a `run_id`, which is the run's `thread_id`.
 
+`GET /v1/runs` lists the newest runs with who started each, its status (`in_progress`, `review_required`, `completed`, `failed` or `aborted`) and its counts. Who starts or reviews a run is recorded by name, from the `X-User-Name` header (`local` without one). There is no login, so the name is not checked.
+
 `GET /v1/runs/{run_id}` returns the run's status and proposals. `POST /v1/runs/{run_id}/review` with one decision per proposal, for example `{"decisions": {"c0": "approve"}}`, resumes the run and returns the actions log. This is a dry run: each approved proposal is written to `backend/out/issues/<cluster>.md` and its regression case is appended to `backend/out/regression_cases.jsonl`, and nothing else is written. `DRY_RUN` is on by default and only the server can set it; turning it off is refused at startup until the GitHub writer exists.
 
-Run the backend tests. Set `TEST_DATABASE_URL` to a Postgres as well to run the persistence test (see the top of `backend/tests/test_persistence.py`):
+Run the backend tests. Set `TEST_DATABASE_URL` to a Postgres as well to run the persistence test and the run store tests against it (the command that starts one is on the `postgres_url` fixture in `backend/tests/conftest.py`; the tests migrate that database and empty its `users`, `runs` and `reviews` tables):
 
 ```bash
 cd backend && uv run pytest
+```
+
+To change a table, edit `backend/db/models.py` and write a migration from the difference:
+
+```bash
+cd backend && uv run --env-file .env alembic revision --autogenerate -m "what changed"
 ```
 
 Run the graph sketch:

@@ -1,7 +1,14 @@
+import os
+from pathlib import Path
+
 import pytest
+from alembic import command
+from alembic.config import Config
 
 from agent import model_guard
 from agent.mcp_client import TraceClient
+
+BACKEND = Path(__file__).parent.parent
 
 
 @pytest.fixture(autouse=True)
@@ -15,3 +22,21 @@ async def traces():
     """One open session to the real trace server."""
     async with TraceClient() as client:
         yield client
+
+
+@pytest.fixture
+def postgres_url(monkeypatch) -> str:
+    """TEST_DATABASE_URL, migrated to the newest revision; the test is skipped without it.
+
+        docker run -d --name tracescan-test-db -e POSTGRES_PASSWORD=test \\
+            -p 127.0.0.1:25440:5432 pgvector/pgvector:pg17
+        TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:25440/postgres uv run pytest
+    """
+    url = os.environ.get("TEST_DATABASE_URL", "")
+    if not url:
+        pytest.skip("set TEST_DATABASE_URL to run against Postgres")
+    monkeypatch.setenv("DATABASE_URL", url)  # what migrations/env.py and the lifespan read
+    config = Config()  # no ini file: this path is all an upgrade needs from it
+    config.set_main_option("script_location", str(BACKEND / "migrations"))
+    command.upgrade(config, "head")
+    return url

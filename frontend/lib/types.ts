@@ -1,9 +1,32 @@
-// Mirrors RunRequest in backend/api/schemas.py and the stream in backend/api/runs.py.
+// Mirrors RunRequest in backend/api/schemas.py, the stream in backend/api/runs.py and the run list.
 
 export type RunRequest = {
   target_app: string;
   since?: string; // timezone-aware ISO 8601, inclusive
   until?: string; // timezone-aware ISO 8601, exclusive
+};
+
+/** A run's status as GET /v1/runs reports it. */
+export type RunStatus =
+  | "in_progress"
+  | "review_required"
+  | "completed"
+  | "failed"
+  | "aborted";
+
+/** One run in the list of GET /v1/runs (RunRecord in backend/runs/store.py): no state, no text. */
+export type RunRecord = {
+  run_id: string;
+  target_app: string;
+  since: string | null; // ISO 8601 with a timezone
+  until: string | null;
+  status: RunStatus;
+  started_by: string | null; // a name, unverified; null for a run first recorded at its review
+  created_at: string;
+  ended_at: string | null;
+  failed_traces: number;
+  clusters: number;
+  proposals: number;
 };
 
 /**
