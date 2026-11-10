@@ -2,18 +2,27 @@
 
 import type { RunRecord, RunStatus } from "./types.ts";
 
-export type StatusTone = "active" | "ok" | "bad" | "muted";
+/**
+ * What a status means, whatever it is the status of: nothing or stopped by choice (`neutral`),
+ * under way (`info`), waiting for a person (`warning`), ended well, ended badly.
+ */
+export type StatusTone =
+  | "neutral"
+  | "info"
+  | "warning"
+  | "success"
+  | "destructive";
 
-/** How each status reads in the list. `active` is a run that is not over yet. */
+/** How each status reads in the list. Only a run that waits for its review is a `warning`. */
 export const RUN_STATUS: Record<
   RunStatus,
   { label: string; tone: StatusTone }
 > = {
-  in_progress: { label: "In progress", tone: "active" },
-  review_required: { label: "Awaiting review", tone: "active" },
-  completed: { label: "Completed", tone: "ok" },
-  failed: { label: "Failed", tone: "bad" },
-  aborted: { label: "Aborted", tone: "muted" },
+  in_progress: { label: "In progress", tone: "info" },
+  review_required: { label: "Awaiting review", tone: "warning" },
+  completed: { label: "Completed", tone: "success" },
+  failed: { label: "Failed", tone: "destructive" },
+  aborted: { label: "Aborted", tone: "neutral" }, // stopped by its reader, not a failure
 };
 
 const isText = (v: unknown): v is string => typeof v === "string";

@@ -18,6 +18,8 @@
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -53,7 +55,11 @@
  *   foreground        primary text          muted-foreground  secondary text, overlines
  *   background < card < muted   surfaces, page to inset
  *   primary (electric blue)     the one accent: actions, focus, key metric
- *   success / destructive       status only, never decoration
+ *   info / warning / success / destructive   status only, never decoration (chip.tsx):
+ *     info         under way, nothing to do (a lighter blue than primary, so not a button)
+ *     warning      waiting for a person: the only color that asks for action
+ *     success      ended well            destructive  ended badly
+ *     a status that is nothing, or was stopped by choice, is muted-foreground
  */
 @utility type-h1 {
   font-size: 1.5rem;
@@ -94,6 +100,8 @@
    defaults, kept so its `dark:` variants keep working, and are never rendered. */
 :root {
   --success: oklch(0.55 0.15 160);
+  --info: oklch(0.55 0.16 255);
+  --warning: oklch(0.6 0.14 80);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -135,6 +143,8 @@
   --accent-foreground: oklch(0.97 0.01 265);
   --destructive: oklch(0.7 0.19 22);
   --success: oklch(0.78 0.17 160);
+  --info: oklch(0.78 0.14 255);
+  --warning: oklch(0.82 0.15 80);
   --border: oklch(0.75 0.08 265 / 16%);
   --input: oklch(0.75 0.08 265 / 20%);
   --ring: oklch(0.72 0.2 262);
