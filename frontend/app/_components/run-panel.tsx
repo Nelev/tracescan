@@ -222,7 +222,8 @@ export function RunPanel() {
       </form>
 
       <RunConsole
-        view={run.view}
+        lines={run.lines}
+        messages={run.messages}
         phase={run.phase}
         error={run.error}
         events={run.events}

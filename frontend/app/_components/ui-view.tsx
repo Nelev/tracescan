@@ -4,7 +4,7 @@ import type { Spec } from "@json-render/core";
 import { defineRegistry, JSONUIProvider, Renderer } from "@json-render/react";
 import { shadcnComponents } from "@json-render/shadcn";
 import { memo, useEffect, useMemo } from "react";
-import type { UiMessage } from "@/lib/run-view";
+import type { UiMessage } from "@/lib/events";
 import { catalog, checkUi } from "@/lib/ui-catalog";
 import {
   UiAlert,
@@ -18,7 +18,6 @@ import {
   UiTable,
   UiText,
 } from "./ui-parts";
-import type { Phase } from "./use-run-stream";
 
 // The whole catalog is drawable: the package's own components for every type, except the ten we
 // draw ourselves (ui-parts.tsx), which follow the design system. The package's are imported as a
@@ -67,25 +66,8 @@ const Message = memo(function Message({ message }: { message: UiMessage }) {
   );
 });
 
-function emptyText(phase: Phase): string {
-  if (phase === "idle") return "Run a triage to see its messages here.";
-  if (phase === "running") return "Waiting for the first message…";
-  return "The run sent no message that could be shown.";
-}
-
-/** The console: the messages the server sent, each as the UI its model laid out, and nothing else. */
-export function UiMessages({
-  messages,
-  phase,
-}: {
-  messages: UiMessage[];
-  phase: Phase;
-}) {
-  if (messages.length === 0) {
-    return (
-      <p className="type-body p-4 text-muted-foreground">{emptyText(phase)}</p>
-    );
-  }
+/** The messages the server sent, each as the UI its model laid out. */
+export function UiMessages({ messages }: { messages: UiMessage[] }) {
   return (
     <JSONUIProvider registry={registry}>
       <ol
