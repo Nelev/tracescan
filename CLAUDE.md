@@ -109,3 +109,17 @@ Planned: a ruff pre-commit hook, `langgraph dev` for Studio (compile without a l
 - Frontend design system lives in `frontend/app/globals.css` (see the comment block there): dark navy surfaces with one electric blue accent (`primary`), `success`/`destructive` for status only. Four type sizes via `type-h1` (24), `type-h2` (16), `type-h3` (14), `type-h4` (12 mono overline) plus `type-body` (14), and two weights (400, 500); do not use `text-xs`/`text-lg`/`text-3xl` or `font-semibold`. Desktop layout is a 12-column grid with body content on 9 columns (3/4).
 - Eval = fault injection in Medas (6 seeded faults, varied inputs, healthy controls). Grade on the injected cause, not just the visible symptom.
 - For parallel subagent work: contracts and fixtures first, one owner per path, stubs for neighbouring features. See `.claude/prds/tracescan.work-packages.md`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `Nelev/tracescan`, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, created when first needed. See `docs/agents/domain.md`.
