@@ -40,6 +40,8 @@ def score(result: dict[str, Any]) -> dict[str, Any]:
     seeded = Counter(kind for kind in kinds.values() if kind in FAULTS)
 
     detected = {majority[d["cluster_id"]] for d in diagnoses} & set(seeded)
+    # A diagnosis of a cluster with no fault is a false alarm, counted there and nowhere else.
+    of_faults = [d for d in diagnoses if d["cluster_id"] in expected]
     rare = {fault for fault, count in seeded.items() if count == 1}
     failing = result["failing_spans"]
     usage = result["model_usage"]
@@ -55,10 +57,15 @@ def score(result: dict[str, Any]) -> dict[str, Any]:
             len(seeded),
         ),
         "rare_recall": (len(rare & detected), len(rare)),
+        # Traces of a fault that reached a cluster at all; a failure with no error never does.
+        "trace_recall": (
+            sum(sum(n for kind, n in mix.items() if kind in FAULTS) for mix in mixes.values()),
+            seeded.total(),
+        ),
         "false_alarms": sum(any(kind not in FAULTS for kind in mix) for mix in mixes.values()),
         "category_accuracy": (
-            sum(d["category"] == expected.get(d["cluster_id"]) for d in diagnoses),
-            len(diagnoses),
+            sum(d["category"] == expected[d["cluster_id"]] for d in of_faults),
+            len(of_faults),
         ),
         "evidence_valid": (
             sum(d.get("evidence_check") == "valid" for d in diagnoses),

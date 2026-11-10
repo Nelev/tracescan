@@ -56,6 +56,7 @@ def test_a_run_that_gets_everything_right_scores_full_marks():
         "purity": (6, 6),
         "separation": (3, 3),
         "rare_recall": (1, 1),
+        "trace_recall": (6, 6),
         "false_alarms": 0,
         "category_accuracy": (3, 3),
         "evidence_valid": (3, 3),
@@ -88,10 +89,28 @@ def test_mixed_clusters_split_faults_and_wrong_answers_each_cost_their_own_score
     assert scores["purity"] == (5, 7)  # c0 2 of 3, c1 1 of 2, c2 and c3 whole
     assert scores["separation"] == (1, 3)  # only store_down sits alone in one cluster
     assert scores["rare_recall"] == (0, 1)
+    assert scores["trace_recall"] == (6, 6)  # every faulty trace is in some cluster
     assert scores["false_alarms"] == 1  # c1 holds the healthy request
     assert scores["category_accuracy"] == (2, 3)  # c1 is a timeout, not model_quality
     assert scores["evidence_valid"] == (2, 3)
     assert scores["evidence_relevant"] == (2, 3)
+
+
+def test_a_false_alarm_and_a_fault_never_collected_are_counted_apart_from_the_answers():
+    scores = score(
+        result(
+            [cluster("c0", "t1", "t2", "t3"), cluster("c1", "h1")],  # the others never collected
+            [
+                diagnosis("c0", "infra_error", ("t1", "sp_t1")),
+                diagnosis("c1", "model_quality", ("h1", "sp_h1")),  # nothing was wrong with h1
+            ],
+        )
+    )
+
+    assert scores["false_alarms"] == 1
+    assert scores["category_accuracy"] == (1, 1)  # the false alarm is not also a wrong answer
+    assert scores["detection"] == (1, 3)
+    assert scores["trace_recall"] == (3, 6)
 
 
 def test_a_judged_file_adds_the_cause_scores_and_how_often_the_judge_agrees_with_a_person():

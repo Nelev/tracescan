@@ -1,6 +1,6 @@
 """The eval runner: one seeded day of traces through the triage graph, saved as a results file.
 
-Run from backend/:  uv run --env-file .env python -m eval.run [--end 2026-01-15T12:00:00Z]
+Run from backend/:  uv run --env-file .env python -m eval.run [--end 2026-01-22T12:00:00Z]
 
 It seeds the day (scripts/seed_traces.py), runs the graph on that day's window, and writes what
 the graph found, with the answer key next to it, to out/eval/. The graph has no checkpointer
@@ -32,7 +32,9 @@ from eval.metrics import OUT_DIR
 from scripts.seed_traces import APP, DAY, export, kinds, seed
 
 # A fixed day, so every run grades the same traces, and one no other seeded day overlaps.
-DEFAULT_END = datetime(2026, 1, 15, 12, tzinfo=UTC)
+# Change it when the seeded cases change: a day already stored keeps its old traces, and a
+# trace the answer key does not know stops the scoring.
+DEFAULT_END = datetime(2026, 1, 22, 12, tzinfo=UTC)
 
 
 async def triage(
@@ -77,7 +79,7 @@ def main() -> None:
     )
     end = parser.parse_args().end
     if end.tzinfo is None:
-        parser.error("--end needs an offset, for example 2026-01-15T12:00:00Z")
+        parser.error("--end needs an offset, for example 2026-01-22T12:00:00Z")
     database_url = os.environ.get("DATABASE_URL")
     trace_database_url = os.environ.get("TRACE_DATABASE_URL")
     if not database_url or not trace_database_url:

@@ -17,7 +17,7 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | Postgres trace reader | Simplest version: used when `TRACE_DATABASE_URL` is set, the fixture otherwise. No scores, no read-only role yet |
 | Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
-| Eval on seeded traces (`backend/eval/`) | Working: ground truth, runner, coded scores and a judge for the root cause. The seeded faults are easy, so it proves the harness more than the agent |
+| Eval on seeded traces (`backend/eval/`) | Working: ground truth, runner, coded scores and a judge for the root cause, on plain faults and hard cases (look-alikes, false positives, a failure with no error). It shows the diagnoses hold up and the clustering mixes look-alike failures |
 | Fault-injection eval in Medas | Not built |
 
 `PLAN.md` holds the scope and the task order.
@@ -455,22 +455,38 @@ cd backend && uv run --env-file .env python -m eval.judge
 cd backend && uv run python -m eval.metrics
 ```
 
-The scores of one run on `anthropic/claude-sonnet-5-5`, judged by `openai/gpt-6.1-sol` (22 failed traces of five seeded faults, 8 healthy ones):
+A seeded day is 48 traces of twelve kinds (`COUNTS` in `scripts/seed_traces.py`, answers in `eval/ground_truth.py`):
+
+| Kind | Traces | What it tests |
+| --- | --- | --- |
+| `healthy` | 8 | Nothing wrong: nothing should be proposed |
+| `source_timeout`, `tool_arguments`, `context_overflow`, `store_down` | 6, 5, 5, 1 | Plain faults, each with its own exception; `store_down` happens once |
+| `model_unavailable` | 5 | One cause with two faces: the provider answers with a 5xx or does not answer at all |
+| `tight_timeout` | 3 | A look-alike: the same step and exception as `source_timeout`, another cause (the tool's own 1 second timeout) |
+| `double_failure` | 2 | Two errors in one request; the first one in the trace is not the cause |
+| `unexplained` | 3 | Only the root span fails: the right answer is `unknown`, not a guess |
+| `silent_no_hits` | 4 | A false negative: the retrieval finds nothing and no span fails |
+| `retried_ok`, `not_found` | 3, 3 | False positives: an error span in a request that worked as it should |
+
+The scores of one run on `anthropic/claude-sonnet-5-5`, judged by `openai/gpt-6.1-sol`:
 
 | Score | Meaning | Result |
 | --- | --- | --- |
-| Detection | Seeded faults that are the majority of a diagnosed cluster | 5/5 |
-| Purity | Traces that belong to their cluster's majority fault | 22/22 |
-| Separation | Faults whose traces sit in one cluster that holds nothing else | 5/5 |
+| Detection | Seeded faults that are the majority of a diagnosed cluster | 6/9 |
+| Purity | Traces that belong to their cluster's majority fault | 24/36 |
+| Separation | Faults whose traces sit in one cluster that holds nothing else | 3/9 |
 | Rare-failure recall | Faults seeded once that still got a diagnosis | 1/1 |
-| False alarms | Clusters that hold a healthy trace | 0 |
-| Category accuracy | Diagnoses with the fault's expected category | 5/5 |
-| Evidence valid | Diagnoses whose citations are all real spans | 5/5 |
-| Evidence relevant | Diagnoses that cite the span the trace failed in | 5/5 |
-| Cause accuracy | Diagnoses the judge scored 2: they name the injected cause, not the symptom | 5/5 |
-| Cost and time | One run | 5 calls, about 27,000 tokens, $0.08, 10 s |
+| Trace recall | Traces of a fault that reached a cluster at all | 30/34 |
+| False alarms | Clusters that hold a trace with no fault | 1 |
+| Category accuracy | Diagnoses of a fault with its expected category | 6/6 |
+| Evidence valid | Diagnoses whose citations are all real spans | 6/6 |
+| Evidence relevant | Diagnoses that cite the span the trace failed in | 6/6 |
+| Cause accuracy | Diagnoses of a fault the judge scored 2: they name the injected cause | 6/6 |
+| Cost and time | One run | 6 calls, about 34,000 tokens, $0.10, 11 s |
 
-Each seeded fault raises its own exception, so these are easy to tell apart: the table shows that the eval works, and says little about the agent until the faults get harder. The judge's agreement with a person's grades (`python -m eval.judge --human c0=2 c1=1 ...`) is not measured yet.
+What it shows: the diagnoser is right about every cluster it is given, and says `unknown` at low confidence for the failure with no visible cause. The clustering is where the faults are lost. One cluster of 17 traces holds the plain PubMed timeout together with its look-alike, the request with two errors and both kinds of error that are not faults, so three faults get no diagnosis of their own and six harmless requests are filed under a real one. One provider timeout landed with the context overflows. The four silent failures are never collected, since the reader only looks for error spans. A diagnosis is judged against its cluster's majority fault, so cause accuracy says nothing about the faults buried in a mixed cluster: detection, purity and separation do. The judge's agreement with a person's grades (`python -m eval.judge --human c0=2 c1=1 ...`) is not measured yet.
+
+[docs/eval-notes.md](docs/eval-notes.md) is the log of the eval experiments: the setup, both runs of the first one (plain faults, then the hard cases), the clusters it produced, the findings, the limits and what to do next.
 
 Run the graph once without the API. It stops at the review pause and cannot be resumed, because it has no checkpointer:
 

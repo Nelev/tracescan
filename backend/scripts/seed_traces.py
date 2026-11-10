@@ -8,9 +8,12 @@ attributes follow the gen_ai semantic conventions (still in development upstream
 `invoke_agent` span, `chat` spans for model calls, `execute_tool` spans, and a `retrieval` span
 under the record search. No prompt, answer or passage text: every value is made up here.
 
-One run is a day of traffic that ends at `--end` (now, by default): four kinds of failure that
-repeat, one that happens once, and healthy requests. Ids and values are drawn from `end`, so
-the same `end` twice stores nothing new and another `end` adds another day.
+One run is a day of traffic that ends at `--end` (now, by default): healthy requests, plain
+failures that repeat, one that happens once, and the hard cases of the eval (look-alikes, a
+cause with two faces, two errors in one request, a failure with no error, a failure with no
+visible cause, and errors that are not faults). COUNTS lists them; eval/ground_truth.py says
+what each one is. Ids and values are drawn from `end`, so the same `end` twice stores nothing
+new and another `end` adds another day.
 """
 
 import argparse
@@ -88,13 +91,13 @@ def tool(rng: Random, name: str, *children: Step, ms: int = 0, error: Error | No
     return Step(f"execute_tool {name}", SpanKind.INTERNAL, attributes, ms, error, children)
 
 
-def retrieval(rng: Random, error: Error | None = None) -> Step:
+def retrieval(rng: Random, error: Error | None = None, hits: int = 5) -> Step:
     attributes: dict[str, Any] = {
         "gen_ai.operation.name": "retrieval",
         "gen_ai.data_source.id": "record_chunks",
     }
     if error is None:
-        attributes["medas.retrieval.hits"] = 5
+        attributes["medas.retrieval.hits"] = hits
     return Step("retrieval record_chunks", SpanKind.CLIENT, attributes, rng.randint(80, 300), error)
 
 
@@ -140,8 +143,15 @@ def tool_arguments(rng: Random) -> Step:
 
 
 def model_unavailable(rng: Random) -> Step:
-    """The provider answers the first model call with a server error."""
-    error = ("openai.InternalServerError", f"Error code: {rng.choice([502, 503])}")
+    """The provider is down for the first model call. One cause with two faces: it answers with
+    a server error or does not answer at all, so the traces may not land in one cluster."""
+    error = rng.choice(
+        [
+            ("openai.InternalServerError", "Error code: 502"),
+            ("openai.InternalServerError", "Error code: 503"),
+            ("openai.APITimeoutError", "Request timed out."),
+        ]
+    )
     return request(rng, chat(rng, error), error=UNAVAILABLE)
 
 
@@ -162,6 +172,53 @@ def store_down(rng: Random) -> Step:
     return request(rng, chat(rng), search, error=error)
 
 
+def tight_timeout(rng: Random) -> Step:
+    """The tool's own timeout is set to one second. A look-alike of source_timeout: the same
+    step and the same exception, and only the seconds tell them apart."""
+    error = ("httpx.ReadTimeout", "search_pubmed timed out after 1.0s")
+    lookup = tool(rng, "search_pubmed", ms=1000, error=error)
+    return request(rng, chat(rng), lookup, chat(rng))
+
+
+def double_failure(rng: Random) -> Step:
+    """Two errors in one request: PubMed times out, which the request survives, then the
+    provider fails the last model call. The first error in the trace is not the cause."""
+    seconds = rng.uniform(10.0, 10.4)
+    timeout = ("httpx.ReadTimeout", f"search_pubmed timed out after {seconds:.1f}s")
+    lookup = tool(rng, "search_pubmed", ms=int(seconds * 1000), error=timeout)
+    outage = ("openai.InternalServerError", "Error code: 503")
+    return request(rng, chat(rng), lookup, chat(rng, outage), error=UNAVAILABLE)
+
+
+def silent_no_hits(rng: Random) -> Step:
+    """The record search finds nothing and the model answers anyway. No span fails, so nothing
+    that looks for errors can find it."""
+    search = tool(rng, "search_patient_record", retrieval(rng, hits=0))
+    return request(rng, chat(rng), search, chat(rng))
+
+
+def unexplained(rng: Random) -> Step:
+    """The request fails and no span under it says why."""
+    return request(rng, chat(rng), record_search(rng), chat(rng), error=UNAVAILABLE)
+
+
+def retried_ok(rng: Random) -> Step:
+    """Not a fault: a source refuses one call for its rate limit, the retry works and the
+    request succeeds."""
+    refused = ("httpx.HTTPStatusError", "429 Too Many Requests")
+    first = tool(rng, "search_medlineplus", ms=40, error=refused)
+    again = tool(rng, "search_medlineplus", ms=rng.randint(200, 900))
+    return request(rng, chat(rng), first, again, chat(rng))
+
+
+def not_found(rng: Random) -> Step:
+    """Not a fault: the user asks for a record that does not exist, the tool says so and the
+    model tells the user."""
+    error = ("medas.PatientNotFound", f"no patient record {rng.randint(10**7, 10**8 - 1)}")
+    search = tool(rng, "search_patient_record", ms=30, error=error)
+    return request(rng, chat(rng), search, chat(rng))
+
+
 # How many traces of each kind one run makes.
 COUNTS: dict[Callable[[Random], Step], int] = {
     healthy: 8,
@@ -170,6 +227,12 @@ COUNTS: dict[Callable[[Random], Step], int] = {
     model_unavailable: 5,
     context_overflow: 5,
     store_down: 1,
+    tight_timeout: 3,
+    double_failure: 2,
+    silent_no_hits: 4,
+    unexplained: 3,
+    retried_ok: 3,
+    not_found: 3,
 }
 
 
