@@ -66,6 +66,19 @@ test("every status the server can send has a label", () => {
   }
 });
 
+test("only a run that waits for its review asks for attention", () => {
+  const tones = Object.fromEntries(
+    Object.entries(RUN_STATUS).map(([status, { tone }]) => [status, tone]),
+  );
+  assert.deepEqual(tones, {
+    in_progress: "info",
+    review_required: "warning",
+    completed: "success",
+    failed: "destructive",
+    aborted: "neutral",
+  });
+});
+
 test("a run id is shortened to its first group", () => {
   assert.equal(shortId(RUN.run_id), "3f9a1c2e");
 });

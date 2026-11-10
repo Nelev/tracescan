@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { checkHealth } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { CHIP_TONE } from "./chip";
 
 type Status = "checking" | "online" | "offline";
 
@@ -11,17 +12,17 @@ const POLL_MS = 15_000;
 const STATUS: Record<Status, { label: string; box: string; dot: string }> = {
   checking: {
     label: "Checking backend…",
-    box: "bg-muted text-muted-foreground",
+    box: CHIP_TONE.neutral,
     dot: "animate-pulse bg-muted-foreground",
   },
   online: {
     label: "Backend online",
-    box: "border-success/30 bg-success/10 text-success",
+    box: CHIP_TONE.success,
     dot: "bg-success",
   },
   offline: {
     label: "Backend offline",
-    box: "border-destructive/40 bg-destructive/10 text-destructive",
+    box: CHIP_TONE.destructive,
     dot: "bg-destructive",
   },
 };

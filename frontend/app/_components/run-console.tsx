@@ -1,19 +1,15 @@
 "use client";
 
-import { Check, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { UiMessage } from "@/lib/events";
+import type { StatusTone } from "@/lib/runs";
 import { RUN_EVENTS } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import {
-  CHIP_ACTIVE,
-  CHIP_DESTRUCTIVE,
-  CHIP_SUCCESS,
-  PANE_HEIGHT,
-} from "./console-styles";
+import { Chip } from "./chip";
+import { PANE_HEIGHT } from "./console-styles";
 import { RunsTable } from "./runs-table";
 import type { ConsoleLine, Phase, Tone } from "./use-run-stream";
 import { type RunsState, useRuns } from "./use-runs";
@@ -44,28 +40,28 @@ const channel = (state: string) => (events: number) =>
 /** What each phase shows: the status chip and the footer line. */
 const PHASE: Record<
   Phase,
-  { label: string; className: string; footer: (events: number) => string }
+  { label: string; tone: StatusTone; footer: (events: number) => string }
 > = {
   idle: {
     label: "Idle",
-    className: "text-muted-foreground",
+    tone: "neutral",
     footer: () => "Not connected",
   },
   running: {
     label: "Streaming",
-    className: CHIP_ACTIVE,
+    tone: "info",
     footer: channel("Connected"),
   },
-  done: { label: "Done", className: CHIP_SUCCESS, footer: channel("Closed") },
+  done: { label: "Done", tone: "success", footer: channel("Closed") },
   // The stream is over, the run is not: it waits for the review.
   review: {
     label: "Awaiting review",
-    className: CHIP_ACTIVE,
+    tone: "warning",
     footer: channel(`Closed by ${RUN_EVENTS.reviewRequired}`),
   },
   failed: {
     label: "Failed",
-    className: CHIP_DESTRUCTIVE,
+    tone: "destructive",
     // run_started always comes first, so no events means the run never started.
     footer: (events) =>
       events === 0
@@ -74,12 +70,12 @@ const PHASE: Record<
   },
   lost: {
     label: "Connection lost",
-    className: CHIP_DESTRUCTIVE,
+    tone: "destructive",
     footer: channel("Closed early"),
   },
   cancelled: {
     label: "Cancelled",
-    className: "text-muted-foreground",
+    tone: "neutral",
     footer: channel("Cancelled by you"),
   },
 };
@@ -126,25 +122,12 @@ function Elapsed({
 
 /** An <output> is a live region, so a screen reader announces each phase change. */
 function StatusChip({ phase }: { phase: Phase }) {
-  const { label, className } = PHASE[phase];
+  const { label, tone } = PHASE[phase];
   return (
-    <output
-      className={cn(
-        "inline-flex h-7 items-center gap-2 rounded-full border px-3",
-        className,
-      )}
-    >
-      {phase === "running" && (
-        <span
-          className="size-2 rounded-full bg-ring motion-safe:animate-pulse"
-          aria-hidden="true"
-        />
-      )}
-      {phase === "done" && <Check className="size-4" aria-hidden="true" />}
-      {(phase === "failed" || phase === "lost") && (
-        <X className="size-4" aria-hidden="true" />
-      )}
-      <span className="type-h4 text-current">{label}</span>
+    <output className="inline-flex">
+      <Chip tone={tone} live={phase === "running"}>
+        {label}
+      </Chip>
     </output>
   );
 }

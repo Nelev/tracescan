@@ -1,26 +1,9 @@
-import {
-  formatWhen,
-  formatWindow,
-  RUN_STATUS,
-  type StatusTone,
-  shortId,
-} from "@/lib/runs";
+import { formatWhen, formatWindow, RUN_STATUS, shortId } from "@/lib/runs";
 import type { RunRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import {
-  CHIP_ACTIVE,
-  CHIP_DESTRUCTIVE,
-  CHIP_SUCCESS,
-  PANE_HEIGHT,
-} from "./console-styles";
+import { Chip } from "./chip";
+import { PANE_HEIGHT } from "./console-styles";
 import type { RunsState } from "./use-runs";
-
-const TONE: Record<StatusTone, string> = {
-  active: CHIP_ACTIVE,
-  ok: CHIP_SUCCESS,
-  bad: CHIP_DESTRUCTIVE,
-  muted: "text-muted-foreground",
-};
 
 const COLUMNS = [
   { label: "Started" },
@@ -49,14 +32,9 @@ function Row({ run }: { run: RunRecord }) {
         {formatWindow(run.since, run.until)}
       </td>
       <td className={CELL}>
-        <span
-          className={cn(
-            "type-h4 inline-flex h-6 items-center rounded-full border px-2",
-            TONE[tone],
-          )}
-        >
+        <Chip tone={tone} size="sm">
           {label}
-        </span>
+        </Chip>
       </td>
       <td className={cn(CELL, NUMERIC)}>{run.failed_traces}</td>
       <td className={cn(CELL, NUMERIC)}>{run.clusters}</td>
