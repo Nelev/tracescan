@@ -200,7 +200,7 @@ The stack is Python with LangGraph 1.x for orchestration and its own OpenTelemet
 | Persistence | Postgres checkpointer and store | Paused runs and known issues in deployment |
 | Issue tracker | GitHub API | Draft and update issues |
 | Dev UI | LangGraph Studio (`langgraph dev`) | Step through nodes, inspect state, approve at the pause |
-| Review UI | Next.js (App Router, TypeScript) + LangGraph JS SDK | Runs list, run detail, approve or reject proposals, eval results |
+| Review UI | Next.js (App Router, TypeScript) over the FastAPI backend | Runs list, run detail, approve or reject proposals, eval results |
 | Diagnoser | One structured-output call per cluster through OpenRouter (`langchain-openrouter`) | Diagnoses each cluster from its exemplar span trees |
 
 To run the sketch locally: install LangGraph in a virtual environment and run `python tracedoctor_graph.py` (the file can be renamed). The script runs until the review pause, prints the proposals, then resumes with decisions; the same `thread_id` links the two calls.
@@ -217,7 +217,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 - [ ] Minimal trace collector, Postgres store, heuristic scoring and read-only MCP server
 - [x] Clustering of failures with embeddings and HDBSCAN, isolated failures kept for individual diagnosis
 - [ ] Diagnoser with structured output and the failure taxonomy
-- [ ] Human review gate with approve or reject per proposal
+- [x] Human review gate with approve or reject per proposal
 - [x] Draft issues written to markdown files (dry run)
 - [ ] Fault-injection eval with six seeded bugs, varied inputs, healthy control runs and the metrics table; proposals marked unverified
 - [ ] Minimal trace viewer in Next.js: plain trace list and span tree
@@ -229,7 +229,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 - [ ] Real GitHub issue creation
 - [ ] MAST-Data agreement study
 - [ ] Scheduled daily triage run and a deployed demo
-- [ ] Next.js review dashboard in front of the LangGraph server
+- [ ] Next.js review dashboard over the FastAPI backend (runs list and review screen built; run detail and results pages open)
 - [ ] LLM judge for groundedness in the scoring job
 
 The phases below are in working days, since no start date is fixed yet.
@@ -293,10 +293,10 @@ Do these in order and stop where time runs out; each one is useful on its own.
 - [ ] **Connect GitHub.** A fine-grained token scoped to a test repo; create issues and add comments for updates. Done when an approved proposal opens a real issue in the test repo.
 - [ ] **Run the MAST-Data study.** Write an adapter from MAST-Data traces to `TraceSummary`, run the diagnoser on the 21 MAST-Data-human traces, and compute accuracy and Cohen's kappa. Done when the numbers are in the results table next to the paper's.
 
-**Review UI (Next.js).** Not yet scheduled: about 2–3 days, which would come out of the tasks above.
+**Review UI (Next.js).** Built ahead of the stretch phase as one run-console page; the run detail and results pages are not scheduled yet.
 
-- [ ] **Scaffold the app.** Next.js with the App Router and TypeScript in `frontend/` (the app exists there as a single run-console page that streams a run from the FastAPI backend), talking to the LangGraph server through `@langchain/langgraph-sdk`; server keys stay in server-side route handlers. Done when the home page lists existing threads.
-- [ ] **Runs page.** Each triage run with its window, status (running, waiting for review, done) and number of clusters. Done when a new run appears without a restart.
+- [x] **Scaffold the app.** Next.js with the App Router and TypeScript in `frontend/`: a single run-console page that streams a run from the FastAPI backend through a `/api` rewrite. It does not use `@langchain/langgraph-sdk` or a LangGraph server, and holds no server keys. Done when the home page lists existing runs (each run is a graph thread).
+- [x] **Runs page.** Each triage run with its window, status (running, waiting for review, done, failed, aborted) and number of clusters. It is the Runs tab of the run console (`frontend/app/_components/runs-table.tsx`), over `GET /v1/runs`. Done when a new run appears without a restart.
 - [ ] **Run detail page.** Clusters with trace counts, each diagnosis with category, confidence and cited spans linked to the trace in the trace viewer, plus verification status. Done when every field in the state shows up somewhere.
 - [x] **Review screen.** Approve or reject per proposal, then resume the paused thread with the decisions. It is the Review tab of the run console (`frontend/app/_components/review-pane.tsx`), over `GET /v1/runs/{run_id}` and `POST /v1/runs/{run_id}/review`. Done when approving in the UI produces the same actions as the review API (there is no CLI).
 - [ ] **Results page.** The fault-injection metrics table and a chart per metric. Done when it reads the saved eval results file.

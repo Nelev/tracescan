@@ -76,7 +76,7 @@ const PHASE: Record<
   },
   cancelled: {
     label: "Cancelled",
-    tone: "neutral",
+    tone: "stopped",
     footer: channel("Cancelled by you"),
   },
 };

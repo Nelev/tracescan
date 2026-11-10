@@ -75,7 +75,7 @@ test("only a run that waits for its review asks for attention", () => {
     review_required: "warning",
     completed: "success",
     failed: "destructive",
-    aborted: "neutral",
+    aborted: "stopped",
   });
 });
 
