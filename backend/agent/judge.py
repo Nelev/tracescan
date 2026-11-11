@@ -82,14 +82,11 @@ def retry_message(blamed: str | None, valid: set[str]) -> str:
     )
 
 
-async def judge_trace(
-    tree: SpanNode, model: BaseChatModel, run: Spent, before: Spent | None = None
-) -> dict:
+async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
     """Judge one trace; returns the verdict as a plain dict. Every call is added to `run`.
 
-    `before` is what earlier runs for this trace spent: the re-ask runs only while both together
-    are within the trace budget, as diagnose_cluster checks a cluster's. A model error is raised
-    for the caller to handle.
+    The re-ask runs only while `run` is within the trace budget. A model error is raised for the
+    caller to handle.
     """
     ask = structured_asker(model, TraceVerdict, run)
     messages: list[BaseMessage] = [
@@ -102,7 +99,7 @@ async def judge_trace(
     if (
         verdict.score <= JUDGE_FAILED_MAX_SCORE
         and verdict.blamed_span_id not in valid
-        and ((before or Spent()) + run).ok(trace_budget())
+        and run.ok(trace_budget())
     ):
         messages = [
             *messages,

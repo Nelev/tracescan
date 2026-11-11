@@ -640,15 +640,13 @@ async def test_a_failed_resume_leaves_the_run_waiting_and_forgets_its_decisions(
 
 
 @pytest.mark.anyio
-async def test_a_run_that_waits_for_review_but_was_never_recorded_can_still_be_reviewed(client):
+async def test_a_run_that_waits_for_review_but_has_no_row_is_refused(client):
     use_diagnosed_run()
     run_id = await start(client)
-    use_diagnosed_run()  # a new, empty run store: as for a run from before the runs table
+    use_diagnosed_run()  # a new, empty run store: the run's row is gone
 
     review = {"decisions": {"c0": "reject"}}
-    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 200
-    (run,) = await listed(client)
-    assert (run["run_id"], run["status"], run["started_by"]) == (run_id, "completed", None)
+    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 409
 
 
 @pytest.mark.anyio

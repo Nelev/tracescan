@@ -1,20 +1,15 @@
 """
-TraceScan graph. collect_traces, score_trace, cluster_failures, diagnose_cluster and
-draft_proposals are real, human_review pauses the run with interrupt(), and apply_actions writes
-the approved proposals as a dry run; reproduce_failure and match_known_issues are placeholders.
+TraceScan graph. Every node is real: human_review pauses the run with interrupt(), and
+apply_actions writes the approved proposals as a dry run. The reproducer and the known-issues
+match are not built, so they are not in the graph yet.
 
 Flow (score_trace runs once per trace and diagnose_cluster once per cluster, in parallel,
-through Send):
+through Send; the node after each fan-out runs once, when every branch is done):
   collect_traces -> score_trace x T -> join_scores -> cluster_failures
-    -> diagnose_cluster x N -> join_diagnoses
-    -> reproduce_failure -> match_known_issues -> draft_proposals
-    -> human_review -> apply_actions -> END
+    -> diagnose_cluster x N -> draft_proposals -> human_review -> apply_actions -> END
 
 The trace judge (score_trace) decides which traces failed; join_scores turns its failed verdicts
-into `failed_traces` for clustering.
-
-A transient model error leaves a cluster unfinished: join_diagnoses then sends it back to
-diagnose_cluster, which checks the cluster's budget in `model_usage` before and after each run.
+into `failed_traces` for clustering. diagnose_cluster retries transient model errors itself.
 
 Conditional edges end the run early when the window has no traces, when none failed, when no
 clusters were found, or when no proposal was approved.
@@ -58,21 +53,6 @@ def join_scores(state: TriageState) -> dict:
     return {"failed_traces": failed}
 
 
-def join_diagnoses(state: TriageState) -> dict:
-    """Barrier after each round of diagnose branches; the router after it may start another."""
-    return {}
-
-
-def reproduce_failure(state: TriageState) -> dict:
-    """Replay exemplar inputs against the target app."""
-    return {"reproductions": [{"cluster_id": "c0", "status": "unverified"}]}
-
-
-def match_known_issues(state: TriageState) -> dict:
-    """Compare clusters with issues seen in earlier runs."""
-    return {"known_matches": {}}
-
-
 def human_review(state: TriageState) -> dict:
     """Pause until the reviewer has approved or rejected each proposal.
 
@@ -94,40 +74,11 @@ def route_after_scores(state: TriageState) -> str:
     return "cluster_failures" if state.get("failed_traces") else END
 
 
-def diagnose_sends(state: TriageState) -> list[Send]:
-    """One diagnose branch per cluster that has neither a diagnosis nor a recorded failure.
-
-    A branch sees only its payload, so each carries the cluster's `model_usage` entries: the
-    budget the node checks before and after its run.
-    """
-    done = {d["cluster_id"] for d in state.get("diagnoses", [])}
-    done |= set(state.get("diagnosis_failures", []))
-    usage = state.get("model_usage", [])
-    return [
-        Send(
-            "diagnose_cluster",
-            ClusterTask(
-                cluster=c,
-                model_usage=[u for u in usage if u["cluster_id"] == c["cluster_id"]],
-            ),
-        )
-        for c in state.get("clusters", [])
-        if c["cluster_id"] not in done
-    ]
-
-
 def route_after_cluster(state: TriageState) -> list[Send] | str:
     """One parallel diagnose branch per cluster; no clusters (e.g. all noise): end the run."""
-    return diagnose_sends(state) or END
-
-
-def route_after_join(state: TriageState) -> list[Send] | str:
-    """Run the diagnose branch again for each cluster a transient error left unfinished.
-
-    The node leaves a cluster unfinished only while it has budget, and every run uses up at
-    least one attempt, so the loop ends. Nothing left to diagnose: carry on.
-    """
-    return diagnose_sends(state) or "reproduce_failure"
+    return [
+        Send("diagnose_cluster", ClusterTask(cluster=c)) for c in state.get("clusters", [])
+    ] or END
 
 
 def route_after_review(state: TriageState) -> str:
@@ -147,9 +98,6 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_node("join_scores", join_scores)
     g.add_node("cluster_failures", cluster_failures)
     g.add_node("diagnose_cluster", diagnose_cluster)
-    g.add_node("join_diagnoses", join_diagnoses)
-    g.add_node("reproduce_failure", reproduce_failure)
-    g.add_node("match_known_issues", match_known_issues)
     g.add_node("draft_proposals", draft_proposals)
     g.add_node("human_review", human_review)
     g.add_node("apply_actions", apply_actions)
@@ -159,12 +107,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_edge("score_trace", "join_scores")
     g.add_conditional_edges("join_scores", route_after_scores, ["cluster_failures", END])
     g.add_conditional_edges("cluster_failures", route_after_cluster, ["diagnose_cluster", END])
-    g.add_edge("diagnose_cluster", "join_diagnoses")
-    g.add_conditional_edges(
-        "join_diagnoses", route_after_join, ["diagnose_cluster", "reproduce_failure"]
-    )
-    g.add_edge("reproduce_failure", "match_known_issues")
-    g.add_edge("match_known_issues", "draft_proposals")
+    g.add_edge("diagnose_cluster", "draft_proposals")
     g.add_edge("draft_proposals", "human_review")
     g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)

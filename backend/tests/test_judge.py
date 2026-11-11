@@ -156,13 +156,3 @@ async def test_the_re_ask_keeps_to_the_trace_budget_not_the_clusters(monkeypatch
     verdict = await judge_trace(TREE, model, Spent())
     assert len(model.seen) == 1
     assert verdict["blame_check"] == "fallback"
-
-
-@pytest.mark.anyio
-async def test_the_re_ask_counts_what_earlier_runs_spent():
-    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
-    model, run = scripted(wrong, FAILED), Spent()
-    verdict = await judge_trace(TREE, model, run, before=Spent(calls=MAX_MODEL_ATTEMPTS - 1))
-    assert len(model.seen) == 1  # the earlier attempts and this one use up the budget
-    assert run == Spent(calls=1, tokens=150, cost_usd=0.001)  # only this run is counted in `run`
-    assert verdict["blame_check"] == "fallback"

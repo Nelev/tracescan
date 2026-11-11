@@ -25,7 +25,6 @@ COUNTED_KEYS = (
     "unclustered",
     "diagnoses",
     "diagnosis_failures",
-    "reproductions",
     "proposals",
     "actions_log",
 )

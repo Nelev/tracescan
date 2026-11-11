@@ -9,10 +9,10 @@ from agent.const import MAX_MODEL_ATTEMPTS
 from agent.model_guard import (
     Spent,
     backoff_delay,
+    cluster_budget,
     guarded,
     retryable,
     spent_by,
-    spent_for,
     trace_budget,
 )
 from tests.fakes import FakeApiError
@@ -77,12 +77,14 @@ async def test_an_answer_that_does_not_fit_the_schema_raises_its_parsing_error()
 
 
 def test_the_budget_runs_out_of_attempts_tokens_and_cost(monkeypatch):
-    assert Spent(calls=MAX_MODEL_ATTEMPTS - 1).ok()
-    assert not Spent(calls=MAX_MODEL_ATTEMPTS).ok()
+    assert Spent(calls=MAX_MODEL_ATTEMPTS - 1).ok(cluster_budget())
+    assert not Spent(calls=MAX_MODEL_ATTEMPTS).ok(cluster_budget())
     monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 200)
-    assert not Spent(tokens=200).ok() and Spent(tokens=199).ok()
+    assert not Spent(tokens=200).ok(cluster_budget()) and Spent(tokens=199).ok(cluster_budget())
     monkeypatch.setattr(model_guard, "MAX_CLUSTER_COST_USD", 0.0015)
-    assert not Spent(cost_usd=0.0015).ok() and Spent(cost_usd=0.001).ok()
+    assert not Spent(cost_usd=0.0015).ok(cluster_budget()) and Spent(cost_usd=0.001).ok(
+        cluster_budget()
+    )
 
 
 def test_spent_adds_up():
@@ -95,8 +97,8 @@ def test_a_cluster_spent_is_the_sum_of_its_own_usage_entries():
         {"cluster_id": "c1", "calls": 1, "tokens": 150, "cost_usd": 0.001},
         {"cluster_id": "c0", "calls": 2, "tokens": 300, "cost_usd": 0.002},
     ]
-    assert spent_for(usage, "c0") == Spent(3, 300, 0.002)
-    assert spent_for(usage, "c9") == Spent()
+    totals = spent_by(usage)
+    assert totals["c0"] == Spent(3, 300, 0.002) and "c9" not in totals
 
 
 def test_a_trace_spent_sums_its_judge_usage_entries_by_trace_id():
@@ -105,7 +107,6 @@ def test_a_trace_spent_sums_its_judge_usage_entries_by_trace_id():
         {"trace_id": "t2", "calls": 1, "tokens": 100, "cost_usd": 0.0},
         {"trace_id": "t1", "calls": 1, "tokens": 50, "cost_usd": 0.001},
     ]
-    assert spent_for(usage, "t1", key="trace_id") == Spent(2, 200, 0.002)
     assert spent_by(usage, key="trace_id") == {"t1": Spent(2, 200, 0.002), "t2": Spent(1, 100, 0.0)}
 
 
@@ -113,7 +114,7 @@ def test_a_trace_has_its_own_smaller_budget(monkeypatch):
     monkeypatch.setattr(model_guard, "MAX_TRACE_TOKENS", 200)
     monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 1_000)
     assert not Spent(tokens=200).ok(trace_budget())
-    assert Spent(tokens=200).ok()  # the cluster budget, by default
+    assert Spent(tokens=200).ok(cluster_budget())  # the cluster's is larger
     assert not Spent(calls=MAX_MODEL_ATTEMPTS).ok(trace_budget())
     monkeypatch.setattr(model_guard, "MAX_TRACE_COST_USD", 0.0015)
     assert not Spent(cost_usd=0.0015).ok(trace_budget()) and Spent(cost_usd=0.001).ok(

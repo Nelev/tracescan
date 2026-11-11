@@ -21,12 +21,12 @@ async def store(request):
         return
     engine = create_engine(request.getfixturevalue("postgres_url"))
     async with engine.begin() as conn:  # the test database's own tables, emptied for each test
-        await conn.execute(text("TRUNCATE reviews, runs, users"))
+        await conn.execute(text("TRUNCATE reviews, runs"))
     yield PostgresRunStore(engine)
     await engine.dispose()
 
 
-async def new_run(store, status="review_required", user: str | None = "ana") -> str:
+async def new_run(store, status="review_required", user: str = "ana") -> str:
     run_id = str(uuid4())
     await store.create_run(run_id, "medas", SINCE, None, status, user)
     return run_id
@@ -62,14 +62,14 @@ async def test_recording_a_run_again_leaves_it_as_it_is(store):
 
 
 @pytest.mark.anyio
-async def test_runs_are_listed_newest_first_and_two_runs_share_one_user(store):
+async def test_runs_are_listed_newest_first_with_who_started_each(store):
     first = await new_run(store)
     second = await new_run(store)
-    nameless = await new_run(store, user=None)
+    third = await new_run(store, user="bo")
     runs = await store.list_runs(10)
-    assert [r.run_id for r in runs] == [nameless, second, first]
-    assert [r.started_by for r in runs] == [None, "ana", "ana"]
-    assert [r.run_id for r in await store.list_runs(2)] == [nameless, second]
+    assert [r.run_id for r in runs] == [third, second, first]
+    assert [r.started_by for r in runs] == ["bo", "ana", "ana"]
+    assert [r.run_id for r in await store.list_runs(2)] == [third, second]
 
 
 @pytest.mark.anyio
