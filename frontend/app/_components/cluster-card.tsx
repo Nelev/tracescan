@@ -2,7 +2,7 @@
 
 import { Check, ChevronDown, type LucideIcon, X } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatPercent } from "@/lib/format";
 import { issueSections, type Proposal } from "@/lib/review";
@@ -203,6 +203,7 @@ function ExemplarTrees({ cluster }: { cluster: ClusterDetail }) {
  */
 export function ClusterCard({
   cluster,
+  focused,
   live,
   proposal,
   decision,
@@ -210,6 +211,8 @@ export function ClusterCard({
   deciding,
 }: {
   cluster: ClusterDetail;
+  /** The page was opened on this cluster: it starts open, scrolled into view and marked. */
+  focused: boolean;
   live: LiveDiagnosis;
   /** The drafted issue, once the proposals are loaded for review. */
   proposal: Proposal | null;
@@ -220,7 +223,11 @@ export function ClusterCard({
   /** The decisions are being sent. */
   deciding: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(focused);
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focused) ref.current?.scrollIntoView({ block: "start" });
+  }, [focused]);
   const { diagnosis } = cluster;
   const exemplars = new Set(cluster.exemplar_trace_ids);
   const shown = cluster.trace_ids.slice(0, MAX_TRACE_CHIPS);
@@ -229,9 +236,12 @@ export function ClusterCard({
 
   return (
     <article
+      ref={ref}
       aria-labelledby={`cluster-${cluster.cluster_id}`}
+      aria-current={focused ? "true" : undefined}
       className={cn(
-        "type-body flex flex-col gap-3 rounded-xl border bg-card p-4",
+        "type-body flex scroll-mt-20 flex-col gap-3 rounded-xl border bg-card p-4",
+        focused && "ring-2 ring-primary/60",
         expanded && "border-foreground/20",
         onDecide && decision === undefined && "border-warning/40",
       )}

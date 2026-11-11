@@ -66,6 +66,7 @@ class TraceRow(BaseModel):
     """
 
     trace_id: str
+    app: str  # the target app that sent it
     start_time: AwareDatetime
     duration_ms: float
     status: SpanStatus  # the root span's
@@ -96,6 +97,7 @@ class TraceDetail(BaseModel):
     """One trace for the trace viewer: its span tree and every score it got."""
 
     trace_id: str
+    app: str  # the target app that sent it
     tree: SpanNode
     scores: list[TraceScore]
     min_score: float | None  # None: not scored yet

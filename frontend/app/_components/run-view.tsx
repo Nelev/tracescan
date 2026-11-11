@@ -84,7 +84,14 @@ function noClusters(overview: RunOverview, streaming: boolean): string {
  * agent console beside it. The checkpoint is read again whenever this window's stream says a node
  * ended, when the stream ends, after a review, and on Refresh.
  */
-export function RunView({ runId }: { runId: string }) {
+export function RunView({
+  runId,
+  focusCluster,
+}: {
+  runId: string;
+  /** A cluster to open and scroll to, when the page was linked to it (a trace's cluster). */
+  focusCluster: string | null;
+}) {
   const run = useRun();
   const stream = run.runId === runId ? run : null;
   // This window's stream, while it is still running: the stepper and the cards follow it.
@@ -252,6 +259,7 @@ export function RunView({ runId }: { runId: string }) {
                   <ClusterCard
                     key={cluster.cluster_id}
                     cluster={cluster}
+                    focused={cluster.cluster_id === focusCluster}
                     live={liveDiagnosis(cluster.cluster_id)}
                     proposal={proposals.get(cluster.cluster_id) ?? null}
                     decision={
