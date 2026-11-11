@@ -15,7 +15,7 @@ import {
   outcomes,
   runStats,
 } from "@/lib/dashboard";
-import { formatAge, formatPercent } from "@/lib/format";
+import { formatAge, formatCategory, formatPercent } from "@/lib/format";
 import { formatUsage, type RunOverview, totalUsage } from "@/lib/run-overview";
 import { formatWhen, plural, RUN_STATUS, runPath, shortId } from "@/lib/runs";
 import type { RunRecord, RunStatus } from "@/lib/types";
@@ -50,7 +50,7 @@ function NeedsReview({ runs }: { runs: RunRecord[] }) {
           · {plural(proposals, "proposal")}
         </span>
       </h2>
-      <ul className="flex flex-wrap items-center gap-1.5">
+      <ul className="hidden flex-wrap items-center gap-1.5 xl:flex">
         {shown.map((run) => (
           <li key={run.run_id}>
             <Link
@@ -129,14 +129,16 @@ function Categories({ shares }: { shares: CategoryShare[] }) {
   return (
     <ul className="type-body flex flex-col gap-3">
       {shares.map((s) => (
-        <li
-          key={s.category}
-          className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-3"
-        >
-          <span className="truncate font-mono" title={s.category}>
-            {s.category}
+        <li key={s.category} className="flex flex-col gap-1.5">
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="truncate" title={s.category}>
+              {formatCategory(s.category)}
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {plural(s.traces, "trace")} · {plural(s.clusters, "cluster")}
+            </span>
           </span>
-          <span className="h-2.5 rounded-full bg-foreground/5">
+          <span className="h-2 rounded-full bg-foreground/5">
             <span
               className={cn(
                 "block h-full rounded-full",
@@ -146,9 +148,6 @@ function Categories({ shares }: { shares: CategoryShare[] }) {
               )}
               style={{ width: `${(s.traces / max) * 100}%` }}
             />
-          </span>
-          <span className="text-right tabular-nums text-muted-foreground">
-            {plural(s.traces, "trace")} · {plural(s.clusters, "cluster")}
           </span>
         </li>
       ))}
@@ -177,8 +176,8 @@ function Trend({ runs }: { runs: RunRecord[] }) {
               }}
             />
             <span
-              role="tooltip"
-              className="type-body pointer-events-none absolute bottom-full z-10 mb-2 hidden w-max flex-col rounded-md border bg-popover px-2 py-1 shadow-md group-hover:flex group-focus-visible:flex"
+              aria-hidden="true"
+              className="type-body pointer-events-none absolute bottom-full z-10 mb-2 flex w-max translate-y-1 flex-col rounded-md border bg-popover px-2 py-1 tabular-nums opacity-0 shadow-md transition-[opacity,translate] duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100"
             >
               <span className="font-mono">{shortId(r.run_id)}</span>
               <span className="text-muted-foreground">
@@ -278,31 +277,30 @@ function Latest({ run, overview }: { run: RunRecord; overview: RunOverview }) {
         <Categories shares={shares} />
       </Panel>
       <Panel title="Largest clusters" note={note}>
-        <ol className="type-body flex flex-col divide-y">
+        <ol className="type-body flex flex-col">
           {largest.map((c) => (
-            <li
-              key={c.cluster_id}
-              className="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
-            >
-              <span className="w-10 shrink-0 text-right font-mono tabular-nums">
-                {c.trace_ids.length}
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate font-mono" title={c.signature}>
-                  {c.signature}
-                </span>
-                <span className="text-muted-foreground">
-                  {c.diagnosis?.category ?? "undiagnosed"}
-                  {c.diagnosis &&
-                    ` · ${formatPercent(c.diagnosis.confidence)} confidence`}
-                </span>
-              </span>
+            <li key={c.cluster_id}>
               <Link
-                href={runPath(run.run_id)}
-                aria-label={`Open cluster ${c.cluster_id} in its run`}
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                href={runPath(run.run_id, c.cluster_id)}
+                className="group -mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <ArrowRight aria-hidden="true" />
+                <span className="w-10 shrink-0 text-right font-mono tabular-nums">
+                  {c.trace_ids.length}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-mono" title={c.signature}>
+                    {c.signature}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {c.diagnosis?.category ?? "undiagnosed"}
+                    {c.diagnosis &&
+                      ` · ${formatPercent(c.diagnosis.confidence)} confidence`}
+                  </span>
+                </span>
+                <ArrowRight
+                  className="size-4 shrink-0 text-muted-foreground transition-[translate,color] group-hover:translate-x-0.5 group-hover:text-foreground"
+                  aria-hidden="true"
+                />
               </Link>
             </li>
           ))}

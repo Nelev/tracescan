@@ -125,6 +125,7 @@ export function AgentConsole({ runId }: { runId: string }) {
             size="sm"
             aria-pressed={raw}
             onClick={() => setRaw((on) => !on)}
+            className="relative after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-['']"
           >
             Raw events
           </Button>

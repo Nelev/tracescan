@@ -165,7 +165,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground type-body;
     /* A faint accent glow from the top edge and a barely visible dot grid, fixed so cards
        scroll over them: texture, not decoration. */
     background-image:
@@ -180,8 +180,23 @@
       22px 22px;
     background-attachment: fixed;
   }
+  /* The body text style goes on <body>, not <html>: on <html> its 0.875rem would become the
+     root size, so every rem (type sizes, spacing, control heights) would shrink by 1/8. */
   html {
-    @apply font-sans type-body;
+    @apply font-sans;
+  }
+  /* Titles balance their lines; short text avoids a lone last word. Longhands, so a
+     `whitespace-pre-wrap` block keeps wrapping as it does. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5 {
+    text-wrap-style: balance;
+  }
+  p,
+  li {
+    text-wrap-style: pretty;
   }
   h1 {
     @apply type-h1;

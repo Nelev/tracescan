@@ -13,5 +13,6 @@ export const LINK =
 
 /** A segmented control: the list, and one of its options (a label around a radio). */
 export const SEGMENT_LIST = "flex gap-1 rounded-lg border bg-muted p-1";
+// The options' radius is the list's less its padding (10px - 4px), so the corners nest.
 export const SEGMENT_ITEM =
-  "type-body cursor-pointer rounded-md px-3 py-1 text-center text-muted-foreground transition-colors select-none hover:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring";
+  "type-body cursor-pointer rounded-[calc(var(--radius)-4px)] px-3 py-1.5 text-center text-muted-foreground transition-colors select-none hover:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring";

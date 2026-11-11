@@ -78,7 +78,7 @@ export function PipelineStepper({ stages }: { stages: Stage[] }) {
                 </Chip>
               )}
             </span>
-            <span className="type-body truncate text-muted-foreground">
+            <span className="type-body truncate text-muted-foreground tabular-nums">
               {stage.detail}
             </span>
           </li>

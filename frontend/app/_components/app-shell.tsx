@@ -36,7 +36,7 @@ function NavLink({
       aria-current={active ? "page" : undefined}
       title={label}
       className={cn(
-        "type-body flex h-9 items-center gap-3 rounded-md px-2.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "type-body flex h-10 items-center gap-3 rounded-md px-2.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active && "bg-primary/10 text-foreground hover:bg-primary/15",
       )}
     >

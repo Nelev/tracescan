@@ -331,7 +331,7 @@ function ReviewBar({
             aria-hidden="true"
           />
           Review
-          <span className="font-normal text-muted-foreground">
+          <span className="font-normal text-muted-foreground tabular-nums">
             {tallyText(progress)}
           </span>
         </span>

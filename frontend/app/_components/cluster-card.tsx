@@ -204,7 +204,7 @@ function Evidence({ cluster }: { cluster: ClusterDetail }) {
               variant={traceId === open.traceId ? "secondary" : "ghost"}
               aria-pressed={traceId === open.traceId}
               onClick={() => setOpen({ traceId, spanId: null })}
-              className="font-mono"
+              className="font-mono relative after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-['']"
               title={traceId}
             >
               {shortId(traceId)}
@@ -254,7 +254,9 @@ function More({
         />
         <span className="type-h3">{title}</span>
       </summary>
-      <div className="border-t p-3">{children}</div>
+      <div className="border-t p-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
+        {children}
+      </div>
     </details>
   );
 }
@@ -387,7 +389,7 @@ export function ClusterCard({
         </header>
 
         {diagnosis ? (
-          <p className={cn(!expanded && "line-clamp-2")}>
+          <p className={cn("text-pretty", !expanded && "line-clamp-2")}>
             {diagnosis.root_cause}
           </p>
         ) : (
@@ -451,7 +453,7 @@ export function ClusterCard({
       {expanded && (
         <div
           id={detailsId}
-          className="flex flex-col gap-5 border-t bg-background/20 p-4"
+          className="flex flex-col gap-5 border-t bg-background/20 p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200"
         >
           {diagnosis && (
             <section
