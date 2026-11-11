@@ -3,5 +3,6 @@
   "exclude": ["**/.venv", "**/node_modules", "**/__pycache__"],
   "venvPath": "backend",
   "venv": ".venv",
-  "extraPaths": ["backend"]
+  "extraPaths": ["backend"],
+  "reportDeprecated": "error"
 }

@@ -6,7 +6,9 @@ The same database holds LangGraph's checkpoint tables, which the checkpointer cr
 """
 
 import os
+from collections.abc import MutableMapping
 from logging.config import fileConfig
+from typing import Any
 
 from alembic import context
 from sqlalchemy import create_engine
@@ -22,7 +24,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def include_name(name: str | None, type_: str, parent_names: dict) -> bool:
+def include_name(name: str | None, type_: str, parent_names: MutableMapping[Any, Any]) -> bool:
     return type_ != "table" or name in target_metadata.tables
 
 

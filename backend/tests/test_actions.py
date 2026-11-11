@@ -8,8 +8,10 @@ import pytest
 from langgraph.runtime import Runtime
 
 from agent.actions import REGRESSION_FILE, require_dry_run, write_dry_run
+from agent.context import TraceContext
 from agent.nodes.apply_actions import apply_actions
-from agent.schemas import Proposal, RegressionCase
+from agent.schemas import Proposal, RegressionCase, SpanRef
+from agent.state import TriageState
 from tests.fakes import FakeTraces, fake_context, files_under
 
 
@@ -21,7 +23,7 @@ def proposal(cluster_id: str = "c0", *, diagnosed: bool = True) -> Proposal:
             signature="retrieve: empty result",
             category="retrieval_miss",
             exemplar_trace_ids=["tr_1"],
-            failing_spans=[{"trace_id": "tr_1", "span_id": "tr_1_root"}],
+            failing_spans=[SpanRef(trace_id="tr_1", span_id="tr_1_root")],
         )
     return Proposal(
         cluster_id=cluster_id,
@@ -81,12 +83,12 @@ def test_only_a_dry_run_is_allowed_until_the_real_writers_exist():
         require_dry_run(False)
 
 
-def runtime(tmp_path: Path, *, dry_run: bool = True) -> Runtime:
+def runtime(tmp_path: Path, *, dry_run: bool = True) -> Runtime[TraceContext]:
     context = replace(fake_context(FakeTraces()), dry_run=dry_run, out_dir=tmp_path)
     return Runtime(context=context)
 
 
-def state(decisions: dict) -> dict:
+def state(decisions: dict) -> TriageState:
     proposals = [proposal("c0"), proposal("c1")]
     return {
         "target_app": "medas",

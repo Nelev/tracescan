@@ -41,7 +41,8 @@ class HashingEmbedder:
         )
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        return self._vectorizer.transform(texts).toarray()
+        # scikit-learn's stubs miss that transform returns a sparse matrix.
+        return self._vectorizer.transform(texts).toarray()  # pyright: ignore[reportAttributeAccessIssue]
 
 
 class FakeTraces:

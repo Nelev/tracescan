@@ -2,6 +2,7 @@
 
 import json
 import warnings
+from typing import Any
 
 import pytest
 
@@ -32,7 +33,11 @@ TREES = {
 }
 
 
-async def stream_progress(model, traces=None) -> tuple[list[ProgressEvent], dict]:
+# Plain dicts: ProgressEvent's keys are all optional, so the tests index them without narrowing.
+Event = dict[str, Any]
+
+
+async def stream_progress(model, traces=None) -> tuple[list[Event], dict[str, Any]]:
     """Run the graph through the v3 event stream; return its progress events and final state."""
     context = fake_context(traces or FakeTraces(FAILURES, TREES), model)
     with warnings.catch_warnings():
@@ -40,11 +45,13 @@ async def stream_progress(model, traces=None) -> tuple[list[ProgressEvent], dict
         stream = await build_graph().astream_events(
             {"target_app": "medas"}, version="v3", context=context
         )
-        events = [e async for e in progress_events(stream)]
-        return events, await stream.output()
+        events: list[Event] = [dict(e) async for e in progress_events(stream)]
+        final = await stream.output()
+        assert final is not None
+        return events, final
 
 
-def of(events: list[ProgressEvent], kind: str, node: str) -> list[ProgressEvent]:
+def of(events: list[Event], kind: str, node: str) -> list[Event]:
     return [e for e in events if e["event"] == kind and e["node"] == node]
 
 

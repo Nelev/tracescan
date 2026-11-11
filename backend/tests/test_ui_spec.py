@@ -25,6 +25,7 @@ class FailingModel(FakeListChatModel):
 class SlowModel(FakeListChatModel):
     async def ainvoke(self, *args, **kwargs):
         await asyncio.sleep(5)
+        raise AssertionError("the call should have timed out")
 
 
 @pytest.mark.anyio

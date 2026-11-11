@@ -6,7 +6,7 @@ Tests use the in-memory one in tests/fakes.py, so they need no database.
 Rows hold ids, counts and decisions, never issue text or span content.
 """
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -179,7 +179,7 @@ class PostgresRunStore:
     @asynccontextmanager
     async def reviewing(
         self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
-    ) -> AsyncIterator[Finish]:
+    ) -> AsyncGenerator[Finish]:
         # One transaction for the whole review. It holds a row lock on the run, so a second
         # review skips the row and is refused; a failure or a dead process rolls it all back.
         async with self._engine.begin() as conn:

@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "backend/**"
+      - "pyrightconfig.json"
       - ".github/workflows/backend.yml"
   pull_request:
     paths:
       - "backend/**"
+      - "pyrightconfig.json"
       - ".github/workflows/backend.yml"
 
 concurrency:
@@ -56,6 +58,10 @@ jobs:
 
       - name: Check formatting
         run: uv run ruff format --check .
+
+      # The config is pyrightconfig.json at the repo root, the one the editor uses too.
+      - name: Typecheck
+        run: uv run pyright -p ..
 
       - name: Test
         run: uv run pytest

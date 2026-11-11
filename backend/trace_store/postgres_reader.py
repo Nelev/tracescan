@@ -9,11 +9,10 @@ removed, so new traces read as unscored.
 Give it TRACE_DATABASE_URL; the session is opened read-only, whatever the role may do.
 """
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 from datetime import datetime
-from typing import Any
 
-from sqlalchemy import and_, func, literal_column, select
+from sqlalchemy import RowMapping, and_, func, literal_column, select
 from sqlalchemy.dialects.postgresql import JSONB, distinct_on
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.orm import aliased
@@ -48,7 +47,7 @@ _EXCEPTION_TYPE = func.coalesce(
 
 async def _blamed(
     conn: AsyncConnection, trace_ids: list[str], max_score: float
-) -> dict[str, Mapping[str, Any]]:
+) -> dict[str, RowMapping]:
     """Per trace, the span its lowest score blames (of several, the first check by name).
 
     Only traces with a score at most `max_score` appear; every such score blames a span.
@@ -176,10 +175,10 @@ class PostgresTraceReader:
                     spans=trace["spans"],
                     min_score=trace["low"],
                     failed=is_failed(trace["low"]),
-                    failing_span_id=failing and failing["span_id"],
-                    failing_span_name=failing and failing["name"],
-                    failing_check=failing and failing["evaluator"],
-                    error_type=failing and failing["exception_type"],
+                    failing_span_id=failing["span_id"] if failing else None,
+                    failing_span_name=failing["name"] if failing else None,
+                    failing_check=failing["evaluator"] if failing else None,
+                    error_type=failing["exception_type"] if failing else None,
                 )
             )
         return rows
