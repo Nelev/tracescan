@@ -10,7 +10,7 @@ from api.traces import decode, store_spans
 from eval.ground_truth import FAULTS
 from scripts.seed_traces import export, kinds
 from tests.test_seed_traces import END
-from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
+from trace_store.models import FailedTraceQuery, SpanNode, TraceQuery, TraceSummary
 
 EVERYTHING = FailedTraceQuery(app="medas", limit=200)
 
@@ -29,6 +29,15 @@ async def test_search_returns_typed_summaries_newest_first(traces):
 
     assert all(isinstance(t, TraceSummary) for t in found)
     assert {t.trace_id for t in found} == {t for t, kind in kinds(END).items() if kind in FAULTS}
+    assert [t.start_time for t in found] == sorted((t.start_time for t in found), reverse=True)
+
+
+@pytest.mark.anyio
+async def test_search_traces_returns_every_seeded_trace(traces):
+    found = await traces.search_traces(TraceQuery(app="medas", limit=200))
+
+    # Faults, healthy requests and harmless errors alike: the judge decides which failed.
+    assert {t.trace_id for t in found} == set(kinds(END))
     assert [t.start_time for t in found] == sorted((t.start_time for t in found), reverse=True)
 
 

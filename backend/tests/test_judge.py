@@ -1,0 +1,168 @@
+"""judge_trace against a fake chat model, so no model is ever called."""
+
+import json
+
+import pytest
+
+from agent import model_guard
+from agent.const import MAX_MODEL_ATTEMPTS
+from agent.judge import JUDGE_PROMPT, fallback_span, judge_trace
+from agent.model_guard import Spent
+from agent.schemas import TraceVerdict
+from tests.fakes import FakeApiError, span_tree
+from tests.fakes import scripted_model as scripted
+
+# A root that failed because the tool below it failed; a retrieval that worked.
+TREE = span_tree(
+    "t1",
+    span_id="root",
+    name="invoke_agent medas",
+    children=[
+        span_tree("t1", span_id="tool", parent_span_id="root", name="execute_tool lookup"),
+        span_tree(
+            "t1",
+            span_id="search",
+            parent_span_id="root",
+            name="retrieval record_chunks",
+            status="ok",
+            start_time="2026-11-05T10:00:00.5Z",
+        ),
+    ],
+)
+FAILED = TraceVerdict(
+    reason="The lookup tool failed.", score=0.1, blamed_span_id="tool", attribution="app"
+)
+FINE = TraceVerdict(reason="Every step worked.", score=0.9)
+
+
+@pytest.mark.anyio
+async def test_a_failed_trace_blames_the_span_the_model_named():
+    model, spent = scripted(FAILED), Spent()
+    verdict = await judge_trace(TREE, model, spent)
+    json.dumps(verdict)  # plain JSON, ready for graph state
+    assert verdict == {
+        "trace_id": "t1",
+        "failed": True,
+        "score": 0.1,
+        "reason": "The lookup tool failed.",
+        "blamed_span_id": "tool",
+        "blame_check": "valid",
+        "attribution": "app",
+    }
+    assert spent == Spent(calls=1, tokens=150, cost_usd=0.001)
+
+
+@pytest.mark.anyio
+async def test_the_model_sees_the_prompt_and_the_tree():
+    model = scripted(FINE)
+    await judge_trace(TREE, model, Spent())
+    (messages,) = model.seen
+    assert messages[0].content == JUDGE_PROMPT
+    assert '"span_id":"search"' in str(messages[1].content)
+
+
+@pytest.mark.anyio
+async def test_a_trace_that_went_fine_blames_nothing_even_if_the_model_names_a_span():
+    verdict = await judge_trace(
+        TREE, scripted(FINE.model_copy(update={"blamed_span_id": "tool"})), Spent()
+    )
+    assert (verdict["failed"], verdict["blamed_span_id"], verdict["blame_check"]) == (
+        False,
+        None,
+        None,
+    )
+
+
+@pytest.mark.anyio
+async def test_an_unknown_span_is_asked_again_with_the_valid_ids():
+    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
+    model, spent = scripted(wrong, FAILED), Spent()
+    verdict = await judge_trace(TREE, model, spent)
+    assert (verdict["blamed_span_id"], verdict["blame_check"]) == ("tool", "corrected")
+    assert spent.calls == 2
+    retry = str(model.seen[1][-1].content)
+    assert "made-up" in retry and "root, search, tool" in retry
+
+
+@pytest.mark.anyio
+async def test_still_unknown_after_the_retry_blames_the_deepest_error_span():
+    wrong = FAILED.model_copy(update={"blamed_span_id": None})
+    verdict = await judge_trace(TREE, scripted(wrong), Spent())
+    assert (verdict["blamed_span_id"], verdict["blame_check"]) == ("tool", "fallback")
+
+
+@pytest.mark.anyio
+async def test_no_retry_without_budget():
+    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
+    model, spent = scripted(wrong), Spent(calls=MAX_MODEL_ATTEMPTS - 1)
+    verdict = await judge_trace(TREE, model, spent)
+    assert len(model.seen) == 1
+    assert (verdict["blamed_span_id"], verdict["blame_check"]) == ("tool", "fallback")
+
+
+@pytest.mark.anyio
+async def test_a_retry_that_changes_its_mind_counts_as_not_failed():
+    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
+    verdict = await judge_trace(TREE, scripted(wrong, FINE), Spent())
+    assert (verdict["failed"], verdict["blamed_span_id"], verdict["blame_check"]) == (
+        False,
+        None,
+        None,
+    )
+
+
+@pytest.mark.anyio
+async def test_a_model_error_is_raised_and_still_counted():
+    spent = Spent()
+    with pytest.raises(FakeApiError):
+        await judge_trace(TREE, scripted(FakeApiError(503)), spent)
+    assert spent.calls == 1
+
+
+def test_fallback_span_is_the_deepest_error_or_the_root():
+    assert fallback_span(TREE) == "tool"
+    healthy = span_tree("t2", span_id="only", status="ok")
+    assert fallback_span(healthy) == "only"
+
+
+@pytest.mark.anyio
+async def test_a_failed_trace_keeps_the_models_attribution():
+    external = FAILED.model_copy(update={"attribution": "external"})
+    verdict = await judge_trace(TREE, scripted(external), Spent())
+    assert verdict["attribution"] == "external"
+
+
+@pytest.mark.anyio
+async def test_a_failed_trace_with_no_attribution_is_unclear():
+    verdict = await judge_trace(
+        TREE, scripted(FAILED.model_copy(update={"attribution": None})), Spent()
+    )
+    assert verdict["attribution"] == "unclear"
+
+
+@pytest.mark.anyio
+async def test_a_trace_that_went_fine_has_no_attribution_even_if_the_model_gives_one():
+    verdict = await judge_trace(
+        TREE, scripted(FINE.model_copy(update={"attribution": "app"})), Spent()
+    )
+    assert verdict["attribution"] is None
+
+
+@pytest.mark.anyio
+async def test_the_re_ask_keeps_to_the_trace_budget_not_the_clusters(monkeypatch):
+    monkeypatch.setattr(model_guard, "MAX_TRACE_TOKENS", 100)  # the first call alone costs 150
+    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
+    model = scripted(wrong, FAILED)
+    verdict = await judge_trace(TREE, model, Spent())
+    assert len(model.seen) == 1
+    assert verdict["blame_check"] == "fallback"
+
+
+@pytest.mark.anyio
+async def test_the_re_ask_counts_what_earlier_runs_spent():
+    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
+    model, run = scripted(wrong, FAILED), Spent()
+    verdict = await judge_trace(TREE, model, run, before=Spent(calls=MAX_MODEL_ATTEMPTS - 1))
+    assert len(model.seen) == 1  # the earlier attempts and this one use up the budget
+    assert run == Spent(calls=1, tokens=150, cost_usd=0.001)  # only this run is counted in `run`
+    assert verdict["blame_check"] == "fallback"

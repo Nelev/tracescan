@@ -8,6 +8,15 @@ class TriageState(TypedDict, total=False):
     target_app: Required[str]
     since: str  # ISO 8601 with timezone, inclusive; optional
     until: str  # ISO 8601 with timezone, exclusive; optional
+    # Every trace in the window (TraceSummary dicts), for the trace judge to decide which failed.
+    traces: list[dict]
+    # Appended to by the parallel judge branches, one verdict per judged trace (agent.judge).
+    verdicts: Annotated[list[dict], operator.add]
+    # Ids of traces whose judging failed. Kept, never dropped, so the run can report them.
+    judge_failures: Annotated[list[str], operator.add]
+    # One entry per judge run, failed or not: {trace_id, calls, tokens, cost_usd}. Numbers only,
+    # kept apart from `model_usage` so every reader of that list can rely on a cluster id.
+    judge_usage: Annotated[list[dict], operator.add]
     failed_traces: list[dict]
     clusters: list[Cluster]
     # Trace ids that fit no cluster, even after regrouping the noise. Kept, but not diagnosed.

@@ -36,6 +36,17 @@ class ClusterTask(TypedDict):
     model_usage: NotRequired[list[dict]]
 
 
+class TraceTask(TypedDict):
+    """Private input of one judge branch: its trace's summary, not the whole state.
+
+    Like ClusterTask, it carries the trace's own `judge_usage` entries (numbers only), the budget
+    the node checks before and after its run.
+    """
+
+    trace: dict  # a TraceSummary as plain JSON, as collect_traces stores it
+    judge_usage: NotRequired[list[dict]]
+
+
 FailureCategory = Literal[
     # single-agent causes
     "retrieval_miss",
@@ -92,6 +103,48 @@ class StoredDiagnosis(Diagnosis):
     """A diagnosis as diagnose_cluster stores it: the model's answer plus the code's evidence check."""
 
     evidence_check: EvidenceCheck
+
+
+# Whose fault a failure is. app: the application's prompts, tools, retrieval, limits or error
+# handling (a provider error with no retry is app). external: a cause outside the application that
+# it handled as well as it could. Not used to decide whether a trace failed: an outage still hurts
+# users, so it is a label later steps can sort and filter on.
+Attribution = Literal["app", "external", "unclear"]
+
+
+class TraceVerdict(BaseModel):
+    """The judge's answer for one trace: how well the request went, and the span to blame.
+
+    agent.judge stores it as a plain dict with the trace id, `failed` (decided by the code from
+    the score) and `blame_check`; the model fills none of those. Field order is answer order:
+    the reason first, so the score and the attribution follow from it.
+    """
+
+    reason: str = Field(
+        min_length=1, description="One or two sentences on why the request went well or badly."
+    )
+    score: float = Field(
+        ge=0, le=1, description="0.0: the request failed its user. 1.0: it went fine."
+    )
+    blamed_span_id: str | None = Field(
+        default=None,
+        description="For a failed request, the span where the failure started; null otherwise.",
+    )
+    attribution: Attribution | None = Field(
+        default=None,
+        description=(
+            "For a failed request: app if the cause is the application's own behaviour, "
+            "including an outside error it did not handle well; external if the cause is "
+            "outside it and it handled that as well as it reasonably could; unclear if the "
+            "trace does not show which. Null for a request that went fine."
+        ),
+    )
+
+
+# How a failed trace's blamed span fared against the tree the judge was shown: valid at the first
+# answer, corrected by one retry, or fallback (the code picked the span). None for a trace that
+# did not fail, like its blamed span and attribution.
+BlameCheck = Literal["valid", "corrected", "fallback"]
 
 
 class RegressionCase(BaseModel):

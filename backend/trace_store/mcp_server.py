@@ -1,7 +1,7 @@
 """
 Read-only FastMCP server over a TraceReader.
 
-Exposes exactly three tools: search_failed_traces, get_trace_tree, get_span.
+Exposes exactly four tools: search_traces, search_failed_traces, get_trace_tree, get_span.
 Everything is sanitized here (trace_store/sanitize.py) so clinical text does not leave the MCP
 boundary in bulk: span and event attributes outside an allowlist are redacted, and free text is
 truncated.
@@ -23,7 +23,7 @@ from trace_store.const import (
     MAX_TOOL_CALLS,
 )
 from trace_store.guard import TraceGuard
-from trace_store.models import FailedTraceQuery, SpanNode, TraceId, TraceSummary
+from trace_store.models import FailedTraceQuery, SpanNode, TraceId, TraceQuery, TraceSummary
 from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
 from trace_store.reader import TraceReader
 from trace_store.sanitize import sanitize_span, sanitize_summary
@@ -35,11 +35,11 @@ def build_server(
     allowed_apps: Iterable[str] = ALLOWED_APPS,
     max_calls: int = MAX_TOOL_CALLS,
 ) -> FastMCP:
-    """Build the MCP server with its three read-only tools, all reading through `reader`.
+    """Build the MCP server with its four read-only tools, all reading through `reader`.
 
     Any TraceReader works (Postgres in the app, a small one in tests); the server never touches the data store itself.
     Every tool call passes through TraceGuard (a budget of `max_calls` per server process, so per
-    graph run, plus an audit log). search_failed_traces serves only `allowed_apps`, and trace and
+    graph run, plus an audit log). The two searches serve only `allowed_apps`, and trace and
     span ids must match TraceId.
     """
     mcp = FastMCP(
@@ -52,6 +52,13 @@ def build_server(
 
     # The docstrings below are sent to the agent as the tool descriptions, so they
     # describe the tool for the agent; the comments describe the code for us.
+
+    @mcp.tool(annotations=read_only)
+    async def search_traces(query: TraceQuery) -> list[TraceSummary]:
+        """List every trace of an app, failed or not, newest first, as short summaries."""
+        if query.app not in allowed:
+            raise ToolError("app not allowed")
+        return [sanitize_summary(s) for s in await reader.search_traces(query)]
 
     @mcp.tool(annotations=read_only)
     async def search_failed_traces(query: FailedTraceQuery) -> list[TraceSummary]:

@@ -23,6 +23,7 @@ from trace_store.models import (
     FailedTraceQuery,
     SpanNode,
     TraceDetail,
+    TraceQuery,
     TraceRow,
     TraceScore,
     TraceSummary,
@@ -128,6 +129,38 @@ class PostgresTraceReader:
                 )
             )
         return summaries
+
+    async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
+        """Every trace of the app with a root span in the window, newest first, failed or not.
+
+        Reads the root spans only, and no scores, attributes or events: the summary holds ids,
+        timing, the root's status and its name as the signature. Which traces failed is the
+        agent's call (agent/judge.py), from the tree it fetches.
+        """
+        if query.app not in self._apps:
+            return []
+        roots = select(Span.trace_id, Span.name, Span.start_time, Span.end_time, Span.status).where(
+            Span.parent_span_id.is_(None), Span.app == query.app
+        )
+        if query.since is not None:
+            roots = roots.where(Span.start_time >= query.since)
+        if query.until is not None:
+            roots = roots.where(Span.start_time < query.until)
+        roots = roots.order_by(Span.start_time.desc(), Span.trace_id).limit(query.limit)
+
+        async with self._engine.connect() as conn:
+            rows = (await conn.execute(roots)).mappings().all()
+        return [
+            TraceSummary(
+                trace_id=row["trace_id"],
+                app=query.app,
+                start_time=row["start_time"],
+                duration_ms=(row["end_time"] - row["start_time"]).total_seconds() * 1000,
+                status=row["status"],
+                signature=row["name"],
+            )
+            for row in rows
+        ]
 
     async def list_traces(
         self,

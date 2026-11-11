@@ -19,11 +19,13 @@ from langchain_core.language_models import BaseChatModel
 
 from agent.actions import OUT_DIR
 from agent.embeddings import Embedder
-from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
+from trace_store.models import FailedTraceQuery, SpanNode, TraceQuery, TraceSummary
 
 
 class TraceAccess(Protocol):
     """The slice of TraceClient the nodes need, so tests can pass a fake."""
+
+    async def search_traces(self, query: TraceQuery) -> list[TraceSummary]: ...
 
     async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]: ...
 
@@ -32,6 +34,9 @@ class TraceAccess(Protocol):
 
 class ClosedTraces:
     """Trace access for a run segment that must not read traces: every call fails."""
+
+    async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
+        raise RuntimeError("this run segment has no trace session")
 
     async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
         raise RuntimeError("this run segment has no trace session")

@@ -30,7 +30,7 @@ from agent.evidence import (
     retry_message,
     span_index,
 )
-from agent.model_guard import Spent, backoff_delay, guarded, retryable, spent_for
+from agent.model_guard import Spent, backoff_delay, retryable, spent_for, structured_asker
 from agent.schemas import Cluster, ClusterTask, Diagnosis, EvidenceCheck
 
 logger = logging.getLogger(__name__)
@@ -84,18 +84,7 @@ async def _diagnose(cluster: Cluster, context: TraceContext, before: Spent, run:
         "Cite only trace ids and span ids that appear in the exemplar traces below.\n"
         + "\n".join(tree.model_dump_json(exclude_defaults=True) for tree in trees)
     )
-    # json_schema, not the default function_calling: that forces a tool_choice, which some models
-    # (Claude through OpenRouter) reject with a 400. include_raw keeps the raw message, which
-    # carries the tokens and cost that `guarded` adds up.
-    # One structured answer per call, so nobody reads tokens. Without this, a v3 event stream
-    # routes the call through LangChain's token-streaming path; this keeps any injected model on
-    # the same path as ainvoke.
-    model = context.model.model_copy(update={"disable_streaming": True})
-    structured = model.with_structured_output(Diagnosis, method="json_schema", include_raw=True)
-
-    async def ask(messages: list[BaseMessage]) -> Diagnosis:
-        return Diagnosis.model_validate(await guarded(lambda: structured.ainvoke(messages), run))
-
+    ask = structured_asker(context.model, Diagnosis, run)
     messages: list[BaseMessage] = [SystemMessage(TAXONOMY), HumanMessage(prompt)]
     diagnosis = await ask(messages)
     index = span_index(trees)

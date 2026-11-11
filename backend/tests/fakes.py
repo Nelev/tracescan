@@ -26,7 +26,7 @@ from runs.store import (
     RunRecord,
     StoredStatus,
 )
-from trace_store.models import FailedTraceQuery, SpanNode, TraceSummary
+from trace_store.models import FailedTraceQuery, SpanNode, TraceQuery, TraceSummary
 from trace_store.reader import build_tree
 
 
@@ -48,7 +48,11 @@ class FakeTraces:
     ) -> None:
         self.found = found or []
         self.trees = trees or {}
-        self.queries: list[FailedTraceQuery] = []
+        self.queries: list[TraceQuery] = []
+
+    async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
+        self.queries.append(query)
+        return self.found
 
     async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
         self.queries.append(query)
@@ -91,15 +95,15 @@ class FakeApiError(Exception):
         self.message = message
 
 
-class FakeDiagnoserModel(GenericFakeChatModel):
-    """Answers `with_structured_output(Diagnosis)` with `answer(messages)`, recording the calls.
+class FakeStructuredModel(GenericFakeChatModel):
+    """Answers `with_structured_output(<schema>)` with `answer(messages)`, recording the calls.
 
-    `answer` returns a Diagnosis, or raises to make a failing call. Every answer reports 150 tokens
-    and a cost of $0.001, as the real model does.
+    `answer` returns an instance of the schema (a Diagnosis, a TraceVerdict), or raises to make a
+    failing call. Every answer reports 150 tokens and a cost of $0.001, as the real model does.
     """
 
     seen: list[list[BaseMessage]] = Field(default_factory=list)
-    answer: Callable[[list[BaseMessage]], Diagnosis]
+    answer: Callable[[list[BaseMessage]], BaseModel]
 
     def with_structured_output(self, schema, *, method=None, **kwargs):
         # Accepts `method` like ChatOpenRouter does, but the fake only ever answers with a tool call.
@@ -110,8 +114,9 @@ class FakeDiagnoserModel(GenericFakeChatModel):
 
     def _generate(self, messages, *args, **kwargs):
         self.seen.append(messages)
-        args = self.answer(messages).model_dump(mode="json")
-        call = {"name": "Diagnosis", "args": args, "id": "call_1"}
+        reply = self.answer(messages)
+        # The parser matches the tool call to the schema by name.
+        call = {"name": type(reply).__name__, "args": reply.model_dump(mode="json"), "id": "call_1"}
         message = AIMessage(
             "",
             tool_calls=[call],
@@ -131,9 +136,9 @@ def first_span_shown(messages: list[BaseMessage]) -> Evidence:
     return Evidence(trace_id=trace_id, span_id=span_id, note="retrieve returned nothing")
 
 
-def fake_diagnoser(diagnosis: Diagnosis) -> FakeDiagnoserModel:
+def fake_diagnoser(diagnosis: Diagnosis) -> FakeStructuredModel:
     """A well-behaved model: every cluster gets `diagnosis`, citing a span it was really shown."""
-    return FakeDiagnoserModel(
+    return FakeStructuredModel(
         messages=iter(()),
         answer=lambda messages: diagnosis.model_copy(
             update={"evidence": [first_span_shown(messages)]}
@@ -141,20 +146,20 @@ def fake_diagnoser(diagnosis: Diagnosis) -> FakeDiagnoserModel:
     )
 
 
-def scripted_diagnoser(*answers: Diagnosis | Exception) -> FakeDiagnoserModel:
+def scripted_model(*answers: BaseModel | Exception) -> FakeStructuredModel:
     """Gives each call the next answer, verbatim (citations included), then repeats the last.
 
     An Exception in the script is raised instead of answered.
     """
     remaining = list(answers)
 
-    def answer(_: list[BaseMessage]) -> Diagnosis:
+    def answer(_: list[BaseMessage]) -> BaseModel:
         item = remaining.pop(0) if len(remaining) > 1 else remaining[0]
         if isinstance(item, Exception):
             raise item
         return item
 
-    return FakeDiagnoserModel(messages=iter(()), answer=answer)
+    return FakeStructuredModel(messages=iter(()), answer=answer)
 
 
 def files_under(path: Path) -> list[str]:
@@ -332,17 +337,23 @@ class FixtureTraceReader:
             self._trees[trace_id] = tree
             self._spans[trace_id] = {s.span_id: s for s in trace.spans}
 
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
+    def _search(self, query: TraceQuery, keep) -> list[TraceSummary]:
         matches = [
             s
             for s in self._summaries.values()
             if s.app == query.app
             and (query.since is None or s.start_time >= query.since)
             and (query.until is None or s.start_time < query.until)
-            and _fixture_failed(s, query.max_score)
+            and keep(s)
         ]
         matches.sort(key=lambda s: s.start_time, reverse=True)
         return matches[: query.limit]
+
+    async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
+        return self._search(query, lambda _: True)
+
+    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
+        return self._search(query, lambda s: _fixture_failed(s, query.max_score))
 
     async def get_trace_tree(self, trace_id: str) -> SpanNode | None:
         return self._trees.get(trace_id)

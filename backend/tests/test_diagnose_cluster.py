@@ -15,12 +15,12 @@ from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence
 from tests.fakes import (
     DIAGNOSIS,
     FakeApiError,
-    FakeDiagnoserModel,
+    FakeStructuredModel,
     FakeTraces,
     fake_context,
     fake_diagnoser,
     first_span_shown,
-    scripted_diagnoser,
+    scripted_model,
     span_tree,
     summary,
 )
@@ -123,7 +123,7 @@ GOOD = citing(("t1", "s1"))  # TREE is trace t1 with the failing span s1
 
 @pytest.mark.anyio
 async def test_a_valid_citation_costs_one_model_call():
-    model = scripted_diagnoser(GOOD)
+    model = scripted_model(GOOD)
     (diagnosis,) = (await diagnose(model))["diagnoses"]
     assert len(model.seen) == 1
     assert diagnosis["evidence_check"] == "valid"
@@ -136,7 +136,7 @@ async def test_a_valid_citation_costs_one_model_call():
     ids=["unknown trace", "unknown span", "a trace of the cluster that was not shown"],
 )
 async def test_a_fake_citation_is_retried_once_with_the_valid_spans_listed(fake):
-    model = scripted_diagnoser(citing(fake), GOOD)
+    model = scripted_model(citing(fake), GOOD)
     (diagnosis,) = (await diagnose(model))["diagnoses"]
 
     assert len(model.seen) == 2
@@ -152,7 +152,7 @@ async def test_a_fake_citation_is_retried_once_with_the_valid_spans_listed(fake)
 @pytest.mark.anyio
 async def test_a_citation_that_stays_fake_is_dropped_and_the_confidence_capped():
     mixed = citing(("t1", "s1"), ("t9", "s9"))
-    model = scripted_diagnoser(mixed)  # answers the same after the correction
+    model = scripted_model(mixed)  # answers the same after the correction
     result = await diagnose(model)
 
     (diagnosis,) = result["diagnoses"]  # not a failed cluster
@@ -165,7 +165,7 @@ async def test_a_citation_that_stays_fake_is_dropped_and_the_confidence_capped()
 
 @pytest.mark.anyio
 async def test_with_no_valid_citation_left_the_clusters_own_failing_span_is_cited():
-    (diagnosis,) = (await diagnose(scripted_diagnoser(citing(("t9", "s9")))))["diagnoses"]
+    (diagnosis,) = (await diagnose(scripted_model(citing(("t9", "s9")))))["diagnoses"]
     assert diagnosis["evidence_check"] == "unsupported"
     (evidence,) = diagnosis["evidence"]
     assert (evidence["trace_id"], evidence["span_id"]) == ("t1", "s1")
@@ -183,7 +183,7 @@ async def test_a_failing_retry_is_a_failed_cluster_not_a_dropped_one():
             raise RuntimeError("model down")
         return citing(("t9", "s9"))
 
-    result = await diagnose(FakeDiagnoserModel(messages=iter(()), answer=answer))
+    result = await diagnose(FakeStructuredModel(messages=iter(()), answer=answer))
     assert result["diagnosis_failures"] == ["c0"]
     assert "diagnoses" not in result
     # The failed cluster still reports what it spent: both calls, the first one answered.
@@ -194,7 +194,7 @@ async def test_a_failing_retry_is_a_failed_cluster_not_a_dropped_one():
 
 @pytest.mark.anyio
 async def test_a_cluster_puts_what_its_model_calls_cost_in_state():
-    result = await diagnose(scripted_diagnoser(GOOD))
+    result = await diagnose(scripted_model(GOOD))
     (usage,) = result["model_usage"]
     json.dumps(usage)  # plain numbers and strings: nothing for the checkpoint serializer to warn on
     assert usage == {"cluster_id": "c0", "calls": 1, "tokens": 150, "cost_usd": 0.001}
@@ -214,7 +214,7 @@ def earlier_runs(calls: int, tokens: int = 0) -> list[dict]:
 
 @pytest.mark.anyio
 async def test_a_transient_error_with_budget_left_leaves_the_cluster_unfinished():
-    model = scripted_diagnoser(FakeApiError(503))
+    model = scripted_model(FakeApiError(503))
     result = await diagnose(model)
 
     # No verdict: the graph runs the node again. Only the spend is reported.
@@ -223,7 +223,7 @@ async def test_a_transient_error_with_budget_left_leaves_the_cluster_unfinished(
 
 @pytest.mark.anyio
 async def test_a_transient_error_with_no_budget_left_fails_the_cluster():
-    model = scripted_diagnoser(FakeApiError(503))
+    model = scripted_model(FakeApiError(503))
     result = await diagnose(model, earlier_runs(MAX_MODEL_ATTEMPTS - 1))
 
     assert result["diagnosis_failures"] == ["c0"]
@@ -232,14 +232,14 @@ async def test_a_transient_error_with_no_budget_left_fails_the_cluster():
 
 @pytest.mark.anyio
 async def test_an_error_that_asking_again_cannot_fix_fails_the_cluster_at_once():
-    result = await diagnose(scripted_diagnoser(FakeApiError(401)))
+    result = await diagnose(scripted_model(FakeApiError(401)))
     assert result["diagnosis_failures"] == ["c0"]
     assert "diagnoses" not in result
 
 
 @pytest.mark.anyio
 async def test_the_budget_is_checked_before_the_run_and_the_model_is_not_called():
-    model = scripted_diagnoser(GOOD)
+    model = scripted_model(GOOD)
     result = await diagnose(model, earlier_runs(MAX_MODEL_ATTEMPTS))
 
     assert result == {"diagnosis_failures": ["c0"]}
@@ -248,7 +248,7 @@ async def test_the_budget_is_checked_before_the_run_and_the_model_is_not_called(
 
 @pytest.mark.anyio
 async def test_a_re_run_waits_and_then_diagnoses_like_a_first_run():
-    result = await diagnose(scripted_diagnoser(GOOD), earlier_runs(1))
+    result = await diagnose(scripted_model(GOOD), earlier_runs(1))
     (diagnosis,) = result["diagnoses"]
     assert diagnosis["evidence_check"] == "valid"
     assert result["model_usage"][0]["calls"] == 1
@@ -257,7 +257,7 @@ async def test_a_re_run_waits_and_then_diagnoses_like_a_first_run():
 @pytest.mark.anyio
 async def test_earlier_spend_counts_against_the_evidence_re_ask(monkeypatch):
     monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 200)
-    model = scripted_diagnoser(citing(("t9", "s9")))  # this run alone costs 150, under the cap
+    model = scripted_model(citing(("t9", "s9")))  # this run alone costs 150, under the cap
     result = await diagnose(model, earlier_runs(1, tokens=100))
 
     assert len(model.seen) == 1  # 100 earlier + 150 now is over: no re-ask
@@ -272,7 +272,7 @@ class FailingTraces(FakeTraces):
 @pytest.mark.anyio
 async def test_a_failure_before_any_model_call_is_a_failure_not_a_retry():
     # Left unfinished it would never use up the budget, and the graph would loop for ever.
-    model = scripted_diagnoser(GOOD)
+    model = scripted_model(GOOD)
     context = fake_context(FailingTraces(), model)
     result = await diagnose_cluster(ClusterTask(cluster=CLUSTER), Runtime(context=context))
 
@@ -289,7 +289,7 @@ async def run_one_cluster(model) -> dict:
 
 @pytest.mark.anyio
 async def test_the_graph_runs_the_node_again_after_a_transient_error():
-    model = scripted_diagnoser(FakeApiError(503), FakeApiError(429), GOOD)
+    model = scripted_model(FakeApiError(503), FakeApiError(429), GOOD)
     result = await run_one_cluster(model)
 
     (diagnosis,) = result["diagnoses"]
@@ -302,7 +302,7 @@ async def test_the_graph_runs_the_node_again_after_a_transient_error():
 
 @pytest.mark.anyio
 async def test_the_graph_stops_when_errors_never_clear_and_records_the_failure():
-    model = scripted_diagnoser(FakeApiError(429))  # repeats for ever
+    model = scripted_model(FakeApiError(429))  # repeats for ever
     result = await run_one_cluster(model)
 
     assert result["diagnosis_failures"] == ["c0"]
@@ -313,7 +313,7 @@ async def test_the_graph_stops_when_errors_never_clear_and_records_the_failure()
 
 @pytest.mark.anyio
 async def test_the_graph_does_not_run_the_node_again_after_a_fatal_error():
-    model = scripted_diagnoser(FakeApiError(401))
+    model = scripted_model(FakeApiError(401))
     result = await run_one_cluster(model)
 
     assert result["diagnosis_failures"] == ["c0"]
@@ -330,7 +330,7 @@ async def test_one_cluster_running_again_does_not_hold_back_or_repeat_the_others
             raise FakeApiError(503)  # whichever cluster calls first
         return DIAGNOSIS.model_copy(update={"evidence": [first_span_shown(messages)]})
 
-    model = FakeDiagnoserModel(messages=iter(()), answer=answer)
+    model = FakeStructuredModel(messages=iter(()), answer=answer)
     result = await run_graph({t: span_tree(t) for t in ("t1", "t2")}, model)
 
     assert sorted(d["cluster_id"] for d in result["diagnoses"]) == ["c0", "c1"]  # each only once
@@ -343,7 +343,7 @@ async def test_a_spent_budget_keeps_the_diagnosis_as_unsupported_instead_of_aski
     monkeypatch,
 ):
     monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 100)  # the first call alone costs 150
-    model = scripted_diagnoser(citing(("t9", "s9")))
+    model = scripted_model(citing(("t9", "s9")))
     result = await diagnose(model)
 
     assert len(model.seen) == 1  # the evidence re-ask was refused

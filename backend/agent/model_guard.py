@@ -1,9 +1,10 @@
-"""Budget and retry building blocks for the diagnoser's model call.
+"""Budget and retry building blocks for the model calls of the diagnoser and the trace judge.
 
 The budget lives in graph state. Every diagnose_cluster run appends one usage entry to
-`model_usage`, and a cluster's spend is the sum of its entries (`spent_for`). The router puts the
-cluster's entries in the `Send` payload, so the node can check the budget before and after its
-run (`Spent.ok`). `guarded` makes one structured call (`include_raw=True`: the raw message carries
+`model_usage`, keyed by `cluster_id`, and every judge run one to `judge_usage`, keyed by
+`trace_id`; an item's spend is the sum of its entries (`spent_for`). The router puts the item's
+entries in the `Send` payload, so the node can check the budget before and after its run
+(`Spent.ok`, against the cluster or the trace `Budget`). `guarded` makes one structured call (`include_raw=True`: the raw message carries
 tokens and cost) and adds it to a `Spent`; whether to run again is the graph's decision.
 """
 
@@ -12,13 +13,36 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
+from pydantic import BaseModel
 
 from agent.const import (
     MAX_CLUSTER_COST_USD,
     MAX_CLUSTER_TOKENS,
     MAX_MODEL_ATTEMPTS,
+    MAX_TRACE_COST_USD,
+    MAX_TRACE_TOKENS,
     RETRY_DELAY_S,
 )
+
+
+@dataclass(frozen=True)
+class Budget:
+    """How much one item (a cluster, a trace) may spend: calls, tokens and cost."""
+
+    calls: int
+    tokens: int
+    cost_usd: float
+
+
+# Functions, not constants: the limits are read when checked, so tests can patch them.
+def cluster_budget() -> Budget:
+    return Budget(MAX_MODEL_ATTEMPTS, MAX_CLUSTER_TOKENS, MAX_CLUSTER_COST_USD)
+
+
+def trace_budget() -> Budget:
+    return Budget(MAX_MODEL_ATTEMPTS, MAX_TRACE_TOKENS, MAX_TRACE_COST_USD)
 
 
 @dataclass
@@ -32,31 +56,31 @@ class Spent:
             self.calls + other.calls, self.tokens + other.tokens, self.cost_usd + other.cost_usd
         )
 
-    def ok(self) -> bool:
-        """Whether another call is allowed."""
+    def ok(self, budget: Budget | None = None) -> bool:
+        """Whether another call is allowed within `budget` (a cluster's, by default)."""
+        limit = budget or cluster_budget()
         return (
-            self.calls < MAX_MODEL_ATTEMPTS
-            and self.tokens < MAX_CLUSTER_TOKENS
-            and self.cost_usd < MAX_CLUSTER_COST_USD
+            self.calls < limit.calls
+            and self.tokens < limit.tokens
+            and self.cost_usd < limit.cost_usd
         )
 
 
-def spent_by_cluster(usage: list[dict]) -> dict[str, Spent]:
-    """Every cluster's spend so far, in one pass over the `model_usage` entries."""
+def _spent(entry: dict) -> Spent:
+    return Spent(entry["calls"], entry["tokens"], entry["cost_usd"])
+
+
+def spent_by(usage: list[dict], key: str = "cluster_id") -> dict[str, Spent]:
+    """Every item's spend so far, in one pass over its usage entries, by `key`."""
     totals: dict[str, Spent] = {}
     for entry in usage:
-        spent = Spent(entry["calls"], entry["tokens"], entry["cost_usd"])
-        totals[entry["cluster_id"]] = totals.get(entry["cluster_id"], Spent()) + spent
+        totals[entry[key]] = totals.get(entry[key], Spent()) + _spent(entry)
     return totals
 
 
-def spent_for(usage: list[dict], cluster_id: str) -> Spent:
-    """What a cluster has spent so far: the sum of its `model_usage` entries."""
-    total = Spent()
-    for entry in usage:
-        if entry["cluster_id"] == cluster_id:
-            total += Spent(entry["calls"], entry["tokens"], entry["cost_usd"])
-    return total
+def spent_for(usage: list[dict], item_id: str, key: str = "cluster_id") -> Spent:
+    """What one item has spent so far: the sum of its usage entries."""
+    return spent_by(usage, key).get(item_id, Spent())
 
 
 def retryable(exc: Exception) -> bool:
@@ -86,3 +110,24 @@ async def guarded(ask: Callable[[], Awaitable[Any]], spent: Spent):
     if out["parsed"] is None:
         raise out["parsing_error"]
     return out["parsed"]
+
+
+def structured_asker[M: BaseModel](
+    model: BaseChatModel, schema: type[M], spent: Spent
+) -> Callable[[list[BaseMessage]], Awaitable[M]]:
+    """One guarded structured call per use: messages in, a validated `schema` out.
+
+    json_schema, not the default function_calling: that forces a tool_choice, which some models
+    (Claude through OpenRouter) reject with a 400. include_raw keeps the raw message, which carries
+    the tokens and cost that `guarded` adds up. Streaming is off because nobody reads tokens:
+    without it, a v3 event stream routes the call through LangChain's token-streaming path; this
+    keeps any injected model on the same path as ainvoke.
+    """
+    structured = model.model_copy(update={"disable_streaming": True}).with_structured_output(
+        schema, method="json_schema", include_raw=True
+    )
+
+    async def ask(messages: list[BaseMessage]) -> M:
+        return schema.model_validate(await guarded(lambda: structured.ainvoke(messages), spent))
+
+    return ask
