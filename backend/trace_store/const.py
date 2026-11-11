@@ -1,14 +1,16 @@
 """Shared constants."""
 
-MAX_LIMIT = 200  # hard cap on rows returned by search_failed_traces and list_traces
-# A trace is failed when its lowest score (trace_store/scoring.py) is at most this.
+MAX_LIMIT = 200  # hard cap on rows returned by search_traces and list_traces
+# A trace is failed when its lowest score in `scores` is at most this (the trace browser's verdict).
 FAILED_MAX_SCORE = 0.5
 
-# The apps whose spans the collector stores (api/traces.py) and search_failed_traces serves.
+# The apps whose spans the collector stores (api/traces.py) and the reader serves.
 ALLOWED_APPS = frozenset({"medas"})
 # Per-call limits in the MCP server.
 ID_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"  # trace and span ids (models.TraceId): fixture ids, 32/16-hex OTel ids
-MAX_TOOL_CALLS = 300  # per server process, which is one graph run (trace_store/guard.py)
+# Per server process, which is one graph run (trace_store/guard.py): one search, one tree per
+# judged trace (up to MAX_LIMIT) and the diagnoser's exemplar trees (3 per cluster per attempt).
+MAX_TOOL_CALLS = 500
 
 # Sanitizing in the MCP server (clinical text must not leave in bulk).
 MAX_ATTR_CHARS_TREE = 200  # per string attribute in get_trace_tree

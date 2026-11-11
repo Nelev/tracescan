@@ -7,6 +7,9 @@ DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"
 # The small, cheap model for generated UI, which only arranges text it is given. The UI_SPEC_MODEL
 # environment variable overrides it.
 DEFAULT_UI_SPEC_MODEL = "anthropic/claude-haiku-5.5"
+# The trace judge (agent.judge): one call per trace in a run's window, so a small, cheap model.
+# The TRACE_JUDGE_MODEL environment variable overrides it (JUDGE_MODEL is the eval's grader).
+DEFAULT_TRACE_JUDGE_MODEL = "anthropic/claude-haiku-5.5"
 
 # Parallel branches within one run (the graph's max_concurrency): N clusters would otherwise
 # mean N model calls at once. It does not limit several runs at the same time.
@@ -49,6 +52,9 @@ JUDGE_FAILED_MAX_SCORE = 0.5
 # the judge sees one tree and runs once per trace in the window. Starting values; tune with the eval.
 MAX_TRACE_TOKENS = 20_000
 MAX_TRACE_COST_USD = 0.05
+# Traces one run judges at most, newest first: one judge call and one tree fetch each. The trace
+# server's own cap on a search is 200 (trace_store.const.MAX_LIMIT).
+MAX_JUDGED_TRACES = 200
 
 # HDBSCAN fails when it gets fewer traces than either of its size settings.
 assert max(MIN_CLUSTER_SIZE, MIN_SAMPLES) <= MIN_TRACES_FOR_HDBSCAN

@@ -5,7 +5,7 @@ TraceClient starts trace_store.mcp_server as a stdio subprocess once and keeps
 the session open, so many calls cost one server start:
 
     async with TraceClient(trace_database_url) as traces:
-        failed = await traces.search_failed_traces(FailedTraceQuery(app="medas"))
+        found = await traces.search_traces(TraceQuery(app="medas"))
 
 Open and close it in the same async task. It cannot span the human-review pause
 (that ends the graph invocation), so it lives for one graph invocation. The server's
@@ -24,7 +24,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import StdioConnection
 from mcp import ClientSession
 
-from trace_store.models import FailedTraceQuery, SpanNode, TraceQuery, TraceSummary
+from trace_store.models import SpanNode, TraceQuery, TraceSummary
 
 SERVER_NAME = "traces"
 REQUEST_TIMEOUT = timedelta(seconds=30)  # so a hung server cannot hang the graph
@@ -74,18 +74,11 @@ class TraceClient:
             raise RuntimeError(f"{tool} returned no structured content: {result.content}")
         return result.structuredContent
 
-    async def _search(self, tool: str, query: TraceQuery) -> list[TraceSummary]:
-        args = {"query": query.model_dump(mode="json", exclude_none=True)}
-        rows = (await self._call(tool, args))["result"]
-        return [TraceSummary.model_validate(row) for row in rows]
-
     async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
         """Every trace matching the query, failed or not, newest first."""
-        return await self._search("search_traces", query)
-
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
-        """Failed traces matching the query, newest first."""
-        return await self._search("search_failed_traces", query)
+        args = {"query": query.model_dump(mode="json", exclude_none=True)}
+        rows = (await self._call("search_traces", args))["result"]
+        return [TraceSummary.model_validate(row) for row in rows]
 
     async def get_trace_tree(self, trace_id: str) -> SpanNode:
         """One trace's span tree, redacted and truncated by the server."""

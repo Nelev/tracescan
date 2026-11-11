@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field
 from sklearn.feature_extraction.text import HashingVectorizer
 
 from agent.context import TraceAccess, TraceContext
-from agent.schemas import Decision, Diagnosis, Evidence
+from agent.evidence import walk
+from agent.judge import fallback_span
+from agent.schemas import Decision, Diagnosis, Evidence, TraceVerdict
 from runs.store import (
     CLAIMABLE,
     ENDED,
@@ -26,7 +28,7 @@ from runs.store import (
     RunRecord,
     StoredStatus,
 )
-from trace_store.models import FailedTraceQuery, SpanNode, TraceQuery, TraceSummary
+from trace_store.models import SpanNode, TraceQuery, TraceSummary
 from trace_store.reader import build_tree
 
 
@@ -54,12 +56,20 @@ class FakeTraces:
         self.queries.append(query)
         return self.found
 
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
-        self.queries.append(query)
-        return self.found
-
     async def get_trace_tree(self, trace_id: str) -> SpanNode:
-        return self.trees[trace_id]
+        """The tree given for the trace (a one-span tree when none is), its root carrying the
+        status, failing step and error its summary names: the fake judge blames the root of a one-span
+        tree, so clustering sees the failure the test describes in the summary."""
+        tree = self.trees.get(trace_id) or span_tree(trace_id)
+        found = next((s for s in self.found if s.trace_id == trace_id), None)
+        if found is None:
+            return tree
+        named = {
+            "name": found.failing_span_name,
+            "status": found.status,
+            "status_message": found.error_message,
+        }
+        return tree.model_copy(update={k: v for k, v in named.items() if v is not None})
 
 
 class ScriptedModel(FakeListChatModel):
@@ -167,9 +177,29 @@ def files_under(path: Path) -> list[str]:
     return sorted(str(f.relative_to(path)) for f in path.rglob("*") if f.is_file())
 
 
-def fake_context(traces: TraceAccess, model: BaseChatModel | None = None) -> TraceContext:
-    """A run context whose embedder is an offline stand-in and whose chat model is a fake."""
-    return TraceContext(traces, HashingEmbedder(), model or fake_model())
+def fake_judge() -> FakeStructuredModel:
+    """A trace judge that fails every trace with an error span, blaming the deepest one, the way
+    the real judge's fallback does; a trace with no error span went fine."""
+
+    def answer(messages: list[BaseMessage]) -> TraceVerdict:
+        tree = SpanNode.model_validate_json(str(messages[1].content))
+        if not any(span.status == "error" for _, span in walk(tree)):
+            return TraceVerdict(reason="Every step worked.", score=0.9)
+        return TraceVerdict(
+            reason="A step failed.",
+            score=0.1,
+            blamed_span_id=fallback_span(tree),
+            attribution="app",
+        )
+
+    return FakeStructuredModel(messages=iter(()), answer=answer)
+
+
+def fake_context(
+    traces: TraceAccess, model: BaseChatModel | None = None, judge: BaseChatModel | None = None
+) -> TraceContext:
+    """A run context whose embedder is an offline stand-in and whose chat models are fakes."""
+    return TraceContext(traces, HashingEmbedder(), model or fake_model(), judge or fake_judge())
 
 
 def span_tree(trace_id: str, **overrides) -> SpanNode:
@@ -303,14 +333,6 @@ class InMemoryRunStore:
 FIXTURE = Path(__file__).parent / "fixtures" / "medas_traces.json"
 
 
-def _fixture_failed(summary: TraceSummary, max_score: float) -> bool:
-    """Its lowest score is low. A summary with no score counts a status of error as 0."""
-    score = summary.min_score
-    if score is None:
-        score = 0.0 if summary.status == "error" else 1.0
-    return score <= max_score
-
-
 class _FixtureTrace(BaseModel):
     summary: TraceSummary
     spans: list[SpanNode]
@@ -337,23 +359,16 @@ class FixtureTraceReader:
             self._trees[trace_id] = tree
             self._spans[trace_id] = {s.span_id: s for s in trace.spans}
 
-    def _search(self, query: TraceQuery, keep) -> list[TraceSummary]:
+    async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
         matches = [
             s
             for s in self._summaries.values()
             if s.app == query.app
             and (query.since is None or s.start_time >= query.since)
             and (query.until is None or s.start_time < query.until)
-            and keep(s)
         ]
         matches.sort(key=lambda s: s.start_time, reverse=True)
         return matches[: query.limit]
-
-    async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
-        return self._search(query, lambda _: True)
-
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
-        return self._search(query, lambda s: _fixture_failed(s, query.max_score))
 
     async def get_trace_tree(self, trace_id: str) -> SpanNode | None:
         return self._trees.get(trace_id)

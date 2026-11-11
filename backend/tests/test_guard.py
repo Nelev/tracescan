@@ -19,7 +19,7 @@ async def client():
 
 @pytest.mark.anyio
 async def test_allowed_app_and_ids_pass(client):
-    await client.call_tool("search_failed_traces", SEARCH)
+    await client.call_tool("search_traces", SEARCH)
     await client.call_tool("get_trace_tree", {"trace_id": "tr_retrieval_miss"})
     await client.call_tool(
         "get_span", {"trace_id": "tr_retrieval_miss", "span_id": "sp_rm_retrieve"}
@@ -29,14 +29,14 @@ async def test_allowed_app_and_ids_pass(client):
 @pytest.mark.anyio
 async def test_other_app_is_rejected(client):
     with pytest.raises(ToolError, match="app not allowed"):
-        await client.call_tool("search_failed_traces", OTHER_APP)
+        await client.call_tool("search_traces", OTHER_APP)
 
 
 @pytest.mark.anyio
 async def test_custom_allowed_apps():
     async with Client(build_server(FixtureTraceReader(), allowed_apps={"other"})) as c:
         with pytest.raises(ToolError, match="app not allowed"):
-            await c.call_tool("search_failed_traces", SEARCH)
+            await c.call_tool("search_traces", SEARCH)
 
 
 @pytest.mark.anyio
@@ -62,18 +62,18 @@ async def test_id_pattern_is_in_the_tool_schema(client):
 @pytest.mark.anyio
 async def test_call_budget_counts_allowed_and_rejected_calls():
     async with Client(build_server(FixtureTraceReader(), max_calls=2)) as c:
-        await c.call_tool("search_failed_traces", SEARCH)
+        await c.call_tool("search_traces", SEARCH)
         with pytest.raises(ToolError, match="app not allowed"):
-            await c.call_tool("search_failed_traces", OTHER_APP)
+            await c.call_tool("search_traces", OTHER_APP)
         with pytest.raises(ToolError, match="call budget exhausted"):
-            await c.call_tool("search_failed_traces", SEARCH)
+            await c.call_tool("search_traces", SEARCH)
 
 
 @pytest.mark.anyio
 async def test_audit_log_has_outcomes_but_not_arguments(caplog):
     caplog.set_level(logging.INFO, logger="trace_store.guard")
     async with Client(build_server(FixtureTraceReader(), max_calls=2)) as c:
-        await c.call_tool("search_failed_traces", SEARCH)
+        await c.call_tool("search_traces", SEARCH)
         with pytest.raises(ToolError):
             await c.call_tool("get_trace_tree", {"trace_id": "patient secret"})
         with pytest.raises(ToolError):
@@ -81,7 +81,7 @@ async def test_audit_log_has_outcomes_but_not_arguments(caplog):
 
     # Only the guard's own records: FastMCP logs the rejected id itself (see guard.py).
     log = "\n".join(r.getMessage() for r in caplog.records if r.name == "trace_store.guard")
-    assert "tool call ok: tool=search_failed_traces" in log
+    assert "tool call ok: tool=search_traces" in log
     assert "tool call error: tool=get_trace_tree" in log
     assert "tool call denied: tool=get_trace_tree" in log
     assert "patient secret" not in log

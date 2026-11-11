@@ -112,7 +112,9 @@ class Span(Base):
 
 
 class Score(Base):
-    """What one heuristic check says about one stored trace (trace_store/scoring.py).
+    """What a check says about one stored trace; read by the trace browser.
+
+    The heuristic scoring job that wrote these rows is removed; nothing writes them for now.
 
     0.0 is bad and 1.0 is fine. A trace counts as failed when its lowest score is low. `span_id`
     is the span the check blames, when it blames one. Ids and numbers only, no span content.

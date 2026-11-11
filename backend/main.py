@@ -12,7 +12,7 @@ from agent.context import ClosedTraces, TraceContext
 from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
 from agent.mcp_client import TraceClient
-from agent.model import build_diagnoser_model, build_ui_spec_model
+from agent.model import build_diagnoser_model, build_trace_judge_model, build_ui_spec_model
 from api.runs import router as runs_router
 from api.trace_browser import router as trace_browser_router
 from api.traces import router as traces_router
@@ -44,10 +44,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await store.check()  # refuses to start until `alembic upgrade head` has run
         await checkpointer.setup()  # creates the checkpoint tables when missing
         app.state.graph = build_graph(checkpointer, InMemoryStore())
-        # One embedder per process (it loads its model on first use); the diagnoser's chat model
-        # needs OPENROUTER_API_KEY, like DATABASE_URL. Each run opens its own trace session.
+        # One embedder per process (it loads its model on first use); the diagnoser's and the
+        # trace judge's chat models need OPENROUTER_API_KEY, like DATABASE_URL. Each run opens its
+        # own trace session.
         context = TraceContext(
-            ClosedTraces(), FastEmbedEmbedder(), build_diagnoser_model(), dry_run=dry_run
+            ClosedTraces(),
+            FastEmbedEmbedder(),
+            build_diagnoser_model(),
+            build_trace_judge_model(),
+            dry_run=dry_run,
         )
         # Where each run's trace server reads spans and scores: meant for a read-only role.
         trace_database_url = os.environ["TRACE_DATABASE_URL"]

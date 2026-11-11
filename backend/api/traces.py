@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from db.models import Span
 from trace_store.const import ALLOWED_APPS
-from trace_store.scoring import score_unscored
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
@@ -104,22 +103,14 @@ def decode(body: bytes) -> list[dict[str, Any]]:
 async def store_spans(engine: AsyncEngine, rows: list[dict[str, Any]]) -> int:
     """Insert the rows into `spans`; returns how many were new.
 
-    A span already stored is left alone, so an exporter's retry changes nothing. The traces in
-    `rows` whose root span is now stored are then scored, once (trace_store/scoring.py). That
-    is a step of its own: if it fails the spans stay stored and the failure is logged, by type
-    only, and `python -m trace_store.scoring` scores what was left.
+    A span already stored is left alone, so an exporter's retry changes nothing. Nothing else
+    happens on the way in: which traces failed is decided by the trace judge, in a run.
     """
     async with engine.begin() as conn:
         new = await conn.execute(
             insert(Span).on_conflict_do_nothing().returning(Span.span_id), rows
         )
-        stored = len(new.all())
-    try:
-        async with engine.begin() as conn:
-            await score_unscored(conn, {row["trace_id"] for row in rows})
-    except Exception as exc:
-        logger.error("scoring stored traces failed: %s", type(exc).__name__)
-    return stored
+        return len(new.all())
 
 
 @router.post("/traces")

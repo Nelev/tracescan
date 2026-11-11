@@ -1,6 +1,5 @@
 """The seed script: its export is whole traces the collector decodes and the reader can serve."""
 
-from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -8,7 +7,7 @@ import pytest
 from api.traces import decode, store_spans
 from scripts import seed_traces as seed
 from scripts.seed_traces import COUNTS, DAY, export
-from trace_store.models import FailedTraceQuery
+from trace_store.models import TraceQuery
 
 END = datetime(2026, 11, 10, 12, tzinfo=UTC)
 # Traces with an error span: all but the healthy ones and the failure that raises no error.
@@ -57,31 +56,13 @@ def test_the_same_end_gives_the_same_export_and_another_end_other_traces():
 
 
 @pytest.mark.anyio
-async def test_seeded_failures_are_what_the_reader_finds(spans_engine, reader):
+async def test_a_seeded_day_is_stored_once_and_served_whole(spans_engine, reader):
     rows = decode(export(END))
     assert await store_spans(spans_engine, rows) == len(rows)
     assert await store_spans(spans_engine, rows) == 0  # a second run stores nothing new
 
-    found = await reader.search_failed_traces(FailedTraceQuery(app="medas", limit=100))
+    found = await reader.search_traces(TraceQuery(app="medas", limit=100))
 
-    signatures = Counter(summary.signature for summary in found)
-    # One cause with two faces: the provider answers with an error, or not at all.
-    down = "chat openai/gpt-4.1-mini openai.InternalServerError"
-    silent = "chat openai/gpt-4.1-mini openai.APITimeoutError"
-    assert signatures.pop(down, 0) + signatures.pop(silent, 0) == COUNTS[seed.model_unavailable]
-    assert signatures == {
-        # The look-alike and the request with two errors read exactly like the plain timeout.
-        "execute_tool search_pubmed httpx.ReadTimeout": COUNTS[seed.source_timeout]
-        + COUNTS[seed.tight_timeout]
-        + COUNTS[seed.double_failure],
-        "execute_tool export_conversation pydantic_core._pydantic_core.ValidationError": COUNTS[
-            seed.tool_arguments
-        ],
-        "chat openai/gpt-4.1-mini openai.BadRequestError": COUNTS[seed.context_overflow],
-        "retrieval record_chunks sqlalchemy.exc.OperationalError": COUNTS[seed.store_down],
-        "invoke_agent medas schema.AgentUnavailable": COUNTS[seed.unexplained],
-        # Found by its score: no span failed, the retrieval came back empty.
-        "retrieval record_chunks empty_retrieval": COUNTS[seed.silent_no_hits],
-        # The errors that are not faults (a retried call, a record that does not exist) score
-        # fine, so they are not found.
-    }
+    # Every request of the day, failed or not: which failed is the trace judge's call.
+    assert len(found) == sum(COUNTS.values())
+    assert {s.signature for s in found} == {"invoke_agent medas"}

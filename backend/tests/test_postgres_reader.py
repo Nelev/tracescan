@@ -9,9 +9,9 @@ from agent.mcp_client import TraceClient
 from api.traces import decode
 from api.traces import store_spans as store
 from tests.test_traces_api import CHILD_ID, ROOT_ID, START, TRACE_ID, export, post
-from trace_store.models import FailedTraceQuery, TraceQuery
+from trace_store.models import TraceQuery
 
-MEDAS = FailedTraceQuery(app="medas")
+MEDAS = TraceQuery(app="medas")
 
 
 def later_copy(span: dict, trace_id: str, **overrides) -> dict:
@@ -34,29 +34,25 @@ async def test_a_posted_trace_comes_back_through_the_trace_server(
     assert (await post(collector, export())).status_code == 200
 
     async with TraceClient(postgres_url) as traces:
-        (summary,) = await traces.search_failed_traces(MEDAS)
+        (summary,) = await traces.search_traces(MEDAS)
         tree = await traces.get_trace_tree(summary.trace_id)
 
     assert summary.trace_id == TRACE_ID.hex()
-    # The request went on after the failed tool call: the root is not an error, the score is low.
+    # The request went on after the failed tool call: the root is not an error.
     assert (summary.status, summary.start_time, summary.duration_ms) == ("unset", START, 2000.0)
-    assert summary.min_score == 0.0
-    assert (summary.failing_span_id, summary.failing_span_name) == (CHILD_ID.hex(), "retrieval")
-    assert summary.error_message == "no documents"
-    assert summary.signature == "retrieval EmptyRetrieval"
+    assert summary.signature == "request"
     assert (tree.span_id, tree.name) == (ROOT_ID.hex(), "request")
     assert [child.span_id for child in tree.children] == [CHILD_ID.hex()]
 
 
 @pytest.mark.anyio
-async def test_only_failed_traces_of_an_allowed_app_are_served(spans_engine, reader):
+async def test_only_traces_of_an_allowed_app_are_served(spans_engine, reader):
     root, child = decode(export())
-    healthy = {**root, "trace_id": "a" * 32}
     other_app = [{**span, "trace_id": "b" * 32, "app": "someone-else"} for span in (root, child)]
-    await store(spans_engine, [root, child, healthy, *other_app])
+    await store(spans_engine, [root, child, *other_app])
 
-    assert [s.trace_id for s in await reader.search_failed_traces(MEDAS)] == [TRACE_ID.hex()]
-    assert await reader.search_failed_traces(FailedTraceQuery(app="someone-else")) == []
+    assert [s.trace_id for s in await reader.search_traces(MEDAS)] == [TRACE_ID.hex()]
+    assert await reader.search_traces(TraceQuery(app="someone-else")) == []
     assert await reader.get_trace_tree("b" * 32) is None
     assert await reader.get_span("b" * 32, ROOT_ID.hex()) is None
     span = await reader.get_span(TRACE_ID.hex(), CHILD_ID.hex())
@@ -68,7 +64,7 @@ async def test_a_trace_whose_root_has_not_arrived_is_not_served(spans_engine, re
     _, child = decode(export())
     await store(spans_engine, [child])
 
-    assert await reader.search_failed_traces(MEDAS) == []
+    assert await reader.search_traces(MEDAS) == []
     assert await reader.get_trace_tree(TRACE_ID.hex()) is None
 
 

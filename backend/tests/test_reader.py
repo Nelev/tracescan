@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from trace_store.models import FailedTraceQuery, SpanNode
+from trace_store.models import SpanNode, TraceQuery
 from trace_store.reader import build_tree
 
 T0 = datetime(2026, 11, 5, 9, tzinfo=UTC)
@@ -22,9 +22,9 @@ def span(span_id: str, parent: str | None, trace_id: str = "t") -> SpanNode:
 
 def test_query_rejects_limit_over_cap_and_naive_datetimes():
     with pytest.raises(ValidationError):
-        FailedTraceQuery(app="medas", limit=500)
+        TraceQuery(app="medas", limit=500)
     with pytest.raises(ValidationError):
-        FailedTraceQuery(app="medas", since=datetime(2026, 11, 5))
+        TraceQuery(app="medas", since=datetime(2026, 11, 5))
 
 
 def test_build_tree_rejects_two_roots_orphans_and_mixed_traces():

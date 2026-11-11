@@ -15,7 +15,7 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | Trace MCP server (read-only, sanitized, budgeted) | Working, over the Postgres reader |
 | OTLP collector (`POST /v1/traces` into the `spans` table) | Working, minimal: localhost and synthetic traffic only |
 | Postgres trace reader | The only trace source. A trace is failed when its lowest score is low. No read-only role yet |
-| Scoring job (`trace_store/scoring.py`) | Working: five heuristic checks score each trace when its root span is stored. No model judge |
+| Trace judge (`agent/judge.py`, `agent/nodes/score_trace.py`) | Working: in each run, a small model judges every trace in the window and says which failed (it replaced the heuristic scoring job). Not yet measured with the eval |
 | Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
 | Eval on seeded traces (`backend/eval/`) | Working: ground truth, runner, coded scores and a judge for the root cause, on plain faults and hard cases (look-alikes, false positives, a failure with no error). It shows the diagnoses hold up and the clustering mixes look-alike failures |
@@ -69,7 +69,7 @@ The dotted arrow is the missing piece: the collector stores spans, but the reade
 The parts and what each one owns:
 
 - **`backend/agent/`** is the graph. It reaches traces only through the MCP client. It imports `trace_store.models` and nothing else from the server side, and no database driver; `tests/test_boundaries.py` enforces this.
-- **`backend/trace_store/`** is the server side of trace access: the contracts (`models.py`), the `TraceReader` protocol, the Postgres reader, the scoring job, the MCP server and its guard.
+- **`backend/trace_store/`** is the server side of trace access: the contracts (`models.py`), the `TraceReader` protocol, the Postgres reader, the MCP server and its guard.
 - **`backend/runs/`** is the only code that knows a run is a graph thread. It starts runs, reads their status from the checkpoint, and resumes them at the review. Callers never get raw graph state.
 - **`backend/api/`** is HTTP and server-sent events over the runs module, plus the collector.
 - **`backend/db/`** and **`backend/migrations/`** hold the application's own tables (SQLAlchemy and Alembic). LangGraph's checkpointer creates and owns its own tables in the same database.
@@ -98,7 +98,7 @@ One row per failed trace, small enough to cluster without fetching the tree:
 }
 ```
 
-A trace counts as **failed** when its lowest score is at or below `max_score` (default 0.5). An error span alone does not make it failed, since an error can be harmless (see the scoring job below). `signature` is a short text written by the producer, with no clinical content, and is what the clustering embeds.
+`search_traces` returns every trace in the window, failed or not: which ones failed is the trace judge's call (see below). A failed trace's summary then gets its failing span, error and `signature` (the blamed step and its error type) from the judge's verdict. `signature` has no clinical content and is what the clustering embeds.
 
 ### SpanNode
 
@@ -129,7 +129,7 @@ invoke_agent medas                      [error]  connection to the record store 
 ### Where traces are stored
 
 - **The `spans` table**, written by the collector: one row per span, keyed by `trace_id` and `span_id`, with `app`, `name`, `kind`, timing, status, and `attributes` and `events` as JSONB. There is no `traces` table: a trace is the spans that share a `trace_id`.
-- **The `scores` table**, written by the scoring job: one row per trace and check, with a value (0.0 bad, 1.0 fine) and the span the check blames, if any. Ids and numbers only.
+- **The `scores` table**: one row per trace and check, with a value (0.0 bad, 1.0 fine) and the span the check blames, if any. Ids and numbers only. The trace browser reads it; nothing writes it since the heuristic scoring job was removed, so new traces show as unscored.
 
 ## How traces get in: the collector
 
@@ -171,11 +171,11 @@ sequenceDiagram
     participant R as TraceReader
 
     Note over C,S: one subprocess and one session per run
-    G->>C: search_failed_traces(app, since, until)
+    G->>C: search_traces(app, since, until)
     C->>S: tools/call
     S->>S: TraceGuard counts the call, logs tool and argument hash
     S->>S: validate arguments, check app allowlist
-    S->>R: search_failed_traces(query)
+    S->>R: search_traces(query)
     R-->>S: TraceSummary rows
     S->>S: truncate free text
     S-->>C: structured result
@@ -195,7 +195,7 @@ sequenceDiagram
 
 | Tool | Input | Returns |
 | --- | --- | --- |
-| `search_failed_traces` | `FailedTraceQuery`: `app`, optional `since` (inclusive) and `until` (exclusive), `max_score`, `limit` (default 50, at most 200) | Failed traces as `TraceSummary` rows, newest first |
+| `search_traces` | `TraceQuery`: `app`, optional `since` (inclusive) and `until` (exclusive), `limit` (default 50, at most 200) | Every trace with a root span, as `TraceSummary` rows, newest first |
 | `get_trace_tree` | `trace_id` | The whole span tree, string attributes cut to 200 characters |
 | `get_span` | `trace_id`, `span_id` | One span without children, string attributes cut to 2,000 characters |
 
@@ -203,28 +203,18 @@ The graph uses the first two. `get_span` is served but `TraceClient` does not ca
 
 ### The reader
 
-The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. The one implementation in the app is `PostgresTraceReader`, over `spans` and `scores`; the server's own tests use a small in-memory one. It derives every summary field from what is stored: a failed trace is one whose lowest score is low, the failing span is the one that score blames, and the signature is that span's name and its exception type or, without one, the name of the check. Its session is read-only, but a dedicated read-only role does not exist yet.
+The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. The one implementation in the app is `PostgresTraceReader`, over `spans` (and `scores`, for the trace browser only); the server's own tests use a small in-memory one. `search_traces` reads root spans only: ids, timing, the root's status, and its name as the signature. Its session is read-only, but a dedicated read-only role does not exist yet.
 
-### The scoring job
+### Which traces failed: the trace judge
 
-A request can fail without an error (a retrieval that finds nothing) and an error can be harmless (a call that was retried and worked), so "has an error span" is the wrong test for failed. `trace_store/scoring.py` scores each trace with plain code, no model: 0.0 is bad, 1.0 is fine, and a check that does not apply gives no score.
-
-| Check | Scores 0.0 when |
-| --- | --- |
-| `request_failed` | The root span has status `error`. Every trace gets this score. It blames the deepest error span, the earliest of several |
-| `timeout` | A tool call failed with a timeout and was not recovered |
-| `tool_schema_error` | A tool call failed with a validation error and was not recovered |
-| `tool_error` | A tool call failed with anything else that is not an expected error, and was not recovered |
-| `empty_retrieval` | A retrieval ran without an error and reports 0 hits |
-
-Recovered means a later call of the same tool in the trace succeeded. Expected errors are a short list in the code (`EXPECTED_ERRORS`, starting with a record that does not exist). Every bad score names the span it blames. A trace is scored once, right after its root span is stored, by the collector and by the seed script; spans that arrive later do not change its scores, and a trace with no scores is not served. Scoring is a step of its own: if it fails, the spans stay stored and the failure is logged. `uv run --env-file .env python -m trace_store.scoring` scores every trace that has no scores.
+A request can fail without an error (a retrieval that finds nothing) and an error can be harmless (a call that was retried and worked), so "has an error span" is the wrong test for failed. Each run asks a small model (`TRACE_JUDGE_MODEL`, Haiku by default) about every trace in its window, one call per trace, in parallel branches (`score_trace`). The judge sees the sanitized span tree and answers with a reason, a score (0.0 failed its user, 1.0 went fine; failed at 0.5 or below, decided by the code), the span where the failure started (checked against the tree: asked once more, then the deepest error span), and whether the fault is the app's, external, or unclear. The verdicts stay in the run's state; nothing is written back to the trace store. This replaced a heuristic scoring job that scored each trace with fixed checks when it was stored.
 
 ### What the server enforces
 
 - **Read-only.** There are no write tools.
 - **Sanitizing.** Only allowlisted attribute keys leave the server with their value: `gen_ai.request.*`, `gen_ai.response.*`, `gen_ai.usage.*`, and a few structural keys such as `retrieval.hits` and `exception.type`. Every other key keeps its name but its value becomes `[redacted]`, so a new Medas attribute is hidden until someone allows it. For example, `app.question` always reaches the agent as `[redacted]`. Status messages are the diagnoser's evidence, so they are truncated, not redacted.
-- **Argument checks.** `search_failed_traces` serves only `ALLOWED_APPS`. Trace and span ids must match `^[A-Za-z0-9_.-]{1,64}$`, checked by pydantic before the tool runs.
-- **Budget.** `TraceGuard` allows 300 tool calls per server process. `TraceClient` starts a fresh subprocess for each run, so that is a per-run budget. Rejected calls count too.
+- **Argument checks.** `search_traces` serves only `ALLOWED_APPS`. Trace and span ids must match `^[A-Za-z0-9_.-]{1,64}$`, checked by pydantic before the tool runs.
+- **Budget.** `TraceGuard` allows 500 tool calls per server process (one search, a tree per judged trace, and the diagnoser's). `TraceClient` starts a fresh subprocess for each run, so that is a per-run budget. Rejected calls count too.
 - **Audit log.** Every call is logged to stderr with the tool, the outcome and a hash of the arguments. Raw arguments, results and exception messages are never logged.
 
 Two known limits: FastMCP's own "Invalid arguments" warning repeats a rejected id on stderr, and `get_trace_tree` and `get_span` take only ids, so only the Postgres reader scopes them to an app.
@@ -507,7 +497,7 @@ Tests never call a model and never download the embedding model: they use a fake
 
 | Setting | Runs |
 | --- | --- |
-| `TEST_DATABASE_URL=...` | The Postgres tests: persistence, the run store, the collector, the reader, the scoring job, the trace client and the eval runner. CI sets it, with a Postgres service |
+| `TEST_DATABASE_URL=...` | The Postgres tests: persistence, the run store, the collector, the reader, the trace browser, the trace client and the eval runner. CI sets it, with a Postgres service |
 | `RUN_SLOW=1 uv run pytest -k fastembed` | Clustering with the real embedding model (downloads it once) |
 
 Frontend:
@@ -521,7 +511,7 @@ cd frontend && npm run lint && npx tsc --noEmit && npm test && npm run build
 | Path | Content |
 | --- | --- |
 | `backend/agent/` | The graph, its nodes, clustering, the diagnoser's guards, the MCP client |
-| `backend/trace_store/` | Trace contracts, Postgres reader, scoring job, MCP server, guard |
+| `backend/trace_store/` | Trace contracts, Postgres reader, MCP server, guard |
 | `backend/runs/` | Run lifecycle and the run store |
 | `backend/api/` | Runs API, the SSE stream, the UI spec call, the collector |
 | `backend/db/`, `backend/migrations/` | Tables and Alembic migrations |

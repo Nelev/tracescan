@@ -13,8 +13,13 @@ from langgraph.stream import AsyncGraphRunStream, ProtocolEvent, StreamChannel, 
 
 CHANNEL = "progress"
 
+# Nodes that run once per trace: up to MAX_JUDGED_TRACES of them, so they report nothing of their
+# own (each progress event costs the API a UI-spec call); join_scores after them reports the count.
+SILENT_NODES = frozenset({"score_trace"})
+
 # Result keys whose length is reported. Only lengths leave the graph, never the values.
 COUNTED_KEYS = (
+    "traces",
     "failed_traces",
     "clusters",
     "unclustered",
@@ -56,6 +61,8 @@ class ProgressTransformer(StreamTransformer):
         if event["method"] != "tasks" or tuple(params["namespace"]) != self.scope:
             return True
         data = params["data"]
+        if data["name"] in SILENT_NODES:
+            return True
         progress: ProgressEvent = {"node": data["name"], "task_id": data["id"]}
         # Same discriminator as LangGraph's own lifecycle transformer: only results carry `result`.
         if "result" in data:

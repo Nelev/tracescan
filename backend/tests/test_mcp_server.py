@@ -70,9 +70,6 @@ class StubReader:
     async def search_traces(self, query):
         return [SUMMARY]
 
-    async def search_failed_traces(self, query):
-        return [SUMMARY]
-
     async def get_trace_tree(self, trace_id):
         return SPAN if trace_id == "t1" else None
 
@@ -98,22 +95,10 @@ async def stub_client():
 
 
 @pytest.mark.anyio
-async def test_exposes_exactly_the_four_read_only_tools(client):
+async def test_exposes_exactly_the_three_read_only_tools(client):
     tools = await client.list_tools()
-    assert {t.name for t in tools} == {
-        "search_traces",
-        "search_failed_traces",
-        "get_trace_tree",
-        "get_span",
-    }
+    assert {t.name for t in tools} == {"search_traces", "get_trace_tree", "get_span"}
     assert all(t.annotations.readOnlyHint for t in tools)
-
-
-@pytest.mark.anyio
-async def test_search_failed_traces_returns_summaries(client):
-    result = await client.call_tool("search_failed_traces", {"query": {"app": "medas"}})
-    ids = [t["trace_id"] for t in result.structured_content["result"]]
-    assert ids == ["tr_tool_schema", "tr_retrieval_miss"]
 
 
 @pytest.mark.anyio
@@ -132,7 +117,7 @@ async def test_search_traces_serves_only_allowed_apps(client):
 @pytest.mark.anyio
 async def test_search_rejects_limit_over_cap(client):
     with pytest.raises(ToolError):
-        await client.call_tool("search_failed_traces", {"query": {"app": "medas", "limit": 500}})
+        await client.call_tool("search_traces", {"query": {"app": "medas", "limit": 500}})
 
 
 @pytest.mark.anyio
@@ -194,7 +179,7 @@ def test_sanitize_summary_truncates_free_text_only():
 
 @pytest.mark.anyio
 async def test_summaries_are_truncated_by_the_tool(stub_client):
-    result = await stub_client.call_tool("search_failed_traces", {"query": {"app": "medas"}})
+    result = await stub_client.call_tool("search_traces", {"query": {"app": "medas"}})
     summary = result.structured_content["result"][0]
     assert summary["error_message"] == "e" * MAX_SUMMARY_CHARS + TRUNCATION_SUFFIX
     assert summary["signature"] == "s" * MAX_SUMMARY_CHARS + TRUNCATION_SUFFIX

@@ -25,7 +25,7 @@ from agent.context import TraceAccess, TraceContext
 from agent.embeddings import Embedder, FastEmbedEmbedder
 from agent.graph import build_graph
 from agent.mcp_client import TraceClient
-from agent.model import build_diagnoser_model
+from agent.model import build_diagnoser_model, build_trace_judge_model
 from agent.state import TriageState
 from api.traces import decode
 from eval.metrics import OUT_DIR
@@ -38,12 +38,21 @@ DEFAULT_END = datetime(2026, 1, 29, 12, tzinfo=UTC)
 
 
 async def triage(
-    end: datetime, traces: TraceAccess, embedder: Embedder, model: BaseChatModel
+    end: datetime,
+    traces: TraceAccess,
+    embedder: Embedder,
+    model: BaseChatModel,
+    judge_model: BaseChatModel | None = None,
 ) -> dict[str, Any]:
-    """Run the graph on the day that ends at `end`; what it found, next to the answer key."""
+    """Run the graph on the day that ends at `end`; what it found, next to the answer key.
+
+    `judge_model` judges the traces; None uses the diagnoser's `model`.
+    """
     state = TriageState(target_app=APP, since=(end - DAY).isoformat(), until=end.isoformat())
     started = time.perf_counter()
-    found = await build_graph().ainvoke(state, context=TraceContext(traces, embedder, model))
+    found = await build_graph().ainvoke(
+        state, context=TraceContext(traces, embedder, model, judge_model)
+    )
     return {
         "end": end.isoformat(),
         "seconds": round(time.perf_counter() - started, 1),
@@ -57,16 +66,22 @@ async def triage(
         "diagnoses": found.get("diagnoses", []),
         "diagnosis_failures": found.get("diagnosis_failures", []),
         "model_usage": found.get("model_usage", []),
+        # The trace judge's verdicts (reasons are the model's own text), failures and spend. Not
+        # `verdicts`: eval.judge writes the grader's verdicts of the diagnoses under that key.
+        "trace_verdicts": found.get("verdicts", []),
+        "judge_failures": found.get("judge_failures", []),
+        "judge_usage": found.get("judge_usage", []),
     }
 
 
 async def run(end: datetime, database_url: str, trace_database_url: str) -> dict[str, Any]:
     await seed(database_url, decode(export(end)))
     async with TraceClient(trace_database_url) as traces:
-        model = build_diagnoser_model()
-        return {"model": getattr(model, "model_name", "unknown")} | await triage(
-            end, traces, FastEmbedEmbedder(), model
-        )
+        model, judge = build_diagnoser_model(), build_trace_judge_model()
+        return {
+            "model": getattr(model, "model_name", "unknown"),
+            "judge_model": getattr(judge, "model_name", "unknown"),
+        } | await triage(end, traces, FastEmbedEmbedder(), model, judge)
 
 
 def main() -> None:

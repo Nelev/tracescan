@@ -105,7 +105,7 @@ Three nodes touch the outside world: one reads traces, one replays inputs in a s
 | Eval dataset (add regression case) | Write | apply\_actions | Approved proposals only |
 | Known-issues store | Write | apply\_actions | Updated after an approved action |
 
-The trace reader is a small MCP server built with FastMCP on top of the trace store. It offers three tools (`search_failed_traces`, `get_trace_tree`, `get_span`) and connects to Postgres with a read-only database role, so it cannot change data whatever the agent asks. Both the collector node and the diagnoser node use it, and the model itself never calls it. Until the Postgres store exists, the server reads the synthetic fixture.
+The trace reader is a small MCP server built with FastMCP on top of the trace store. It offers three tools (`search_traces`, `get_trace_tree`, `get_span`) and connects to Postgres with a read-only database role, so it cannot change data whatever the agent asks. Both the collector node and the diagnoser node use it, and the model itself never calls it. Until the Postgres store exists, the server reads the synthetic fixture.
 
 The human gate is LangGraph's `interrupt()` in the `human_review` node. The graph pauses with the list of proposals, the reviewer resumes it with an approve or reject per cluster, and only approved items reach `apply_actions`. If nothing is approved, the graph ends without writing anything.
 
@@ -137,7 +137,7 @@ Medas sends spans over the standard OTLP protocol to a FastAPI collector, which 
 | Trace collector | Receives OTLP over HTTP, decodes it and writes spans | FastAPI, `opentelemetry-proto` |
 | Trace store | Two tables: spans (ids, parent id, app, name, kind, timing, status, attributes and events as JSONB; a trace is the spans that share a trace id) and scores (trace, evaluator, value, blamed span) | Postgres, the same instance as checkpoints and memory |
 | Scoring job | Marks bad answers that raised no error: heuristic checks on every trace (MVP), and as a stretch an LLM judge for groundedness on every failure and a 10% sample of successes | Python worker, structured output |
-| MCP server | `search_failed_traces`, `get_trace_tree`, `get_span` for the agent | FastMCP, read-only database role |
+| MCP server | `search_traces`, `get_trace_tree`, `get_span` for the agent | FastMCP, read-only database role |
 | UI | Trace list with a span-tree view, and an error feed of TraceScan's clusters | Next.js |
 
 The sampling rule (all failures, about 10% of successes) follows Comet's guidance on agent tracing ([Comet blog](https://www.comet.com/site/blog/ai-agent-tracing/)). Because Medas handles clinical questions, the collector can also strip personal data from span attributes before storing them. During the first days, the same OTLP traces can go to a local Jaeger container to inspect them before the own viewer exists.
@@ -271,7 +271,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 - [x] **Diagnose unclustered failures individually.** `cluster_failures` turns each id in `unclustered` into a one-trace cluster (`method` `isolated`) numbered after the real clusters, so the existing fan-out, retries and early exit handle it unchanged. No cap yet: add one (and list the skipped ids in the run summary) if a real run shows too many isolated failures. Done when a fixture run with isolated failures returns a diagnosis for each.
 - [x] **Validate evidence.** Check that every cited trace id and span exists in the cluster; retry once if not, otherwise lower confidence. Done when a test with a fake citation is caught.
 - [ ] **Trace TraceScan itself.** Send its own runs to the same collector under a separate service name. Done when one triage run shows cost and latency per node.
-- [x] **Build the scoring job.** Heuristic checks on every trace (empty retrieval, schema errors, timeouts, other tool errors, a failed request), written to the scores table when a trace's root span is stored (`trace_store/scoring.py`); the LLM judge is a stretch goal. The Postgres reader now calls a trace failed when its lowest score is low, not when it has an error span, so a recovered or expected error is left out. Done when every fixture trace has a score: every seeded trace gets at least `request_failed`.
+- [x] **Build the scoring job.** Heuristic checks on every trace (empty retrieval, schema errors, timeouts, other tool errors, a failed request), written to the scores table when a trace's root span is stored (`trace_store/scoring.py`); the LLM judge is a stretch goal. The Postgres reader now calls a trace failed when its lowest score is low, not when it has an error span, so a recovered or expected error is left out. Done when every fixture trace has a score: every seeded trace gets at least `request_failed`. Since replaced by the trace judge in the agent (`agent/judge.py`, `nodes/score_trace.py`): the heuristic checks, the scoring at insert and `search_failed_traces` are removed.
 
 ### Phase 3 · Loop and eval (days 6–10)
 

@@ -1,19 +1,17 @@
 """
 Trace reader: the single seam between the MCP tools and the trace data.
 
-The MCP server only calls the four TraceReader methods. The one implementation is the
+The MCP server only calls the three TraceReader methods. The one implementation is the
 Postgres reader (trace_store/postgres_reader.py); tests have their own small ones.
 """
 
 from typing import Protocol
 
-from trace_store.models import FailedTraceQuery, SpanNode, TraceQuery, TraceSummary
+from trace_store.models import SpanNode, TraceQuery, TraceSummary
 
 
 class TraceReader(Protocol):
     """Read-only access to traces. Returns None when an id is unknown."""
-
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]: ...
 
     async def search_traces(self, query: TraceQuery) -> list[TraceSummary]: ...
 
