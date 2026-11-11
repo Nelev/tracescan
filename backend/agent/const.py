@@ -32,6 +32,15 @@ MIN_CLUSTER_SIZE = 3  # also the size a step-and-error group needs to rescue noi
 MIN_SAMPLES = 4
 MAX_EXEMPLARS = 3  # traces per cluster the diagnoser looks at first
 
+# The cluster map (agent.clustering.cluster_map): the embeddings projected to 3D for the run page.
+# PCA is always tried; from this many distinct embeddings t-SNE is tried too, and the map keeps the
+# more trustworthy of the two. On the 26-trace test fixture t-SNE's trustworthiness swung from 0.61
+# to 0.99 with its settings while PCA's was 0.997, so t-SNE waits for more points.
+TSNE_MIN_POINTS = 30
+TSNE_PERPLEXITY = 30.0  # capped below a third of the points, as t-SNE needs perplexity < n
+MAP_SEED = 0  # t-SNE's random state, so the same run draws the same map
+TRUST_NEIGHBORS = 5  # neighbours trustworthiness checks per point
+
 # A diagnosis still citing spans it was not shown after one retry is capped at this confidence.
 # A starting value; tune it with the fault-injection eval.
 UNSUPPORTED_CONFIDENCE_CAP = 0.3

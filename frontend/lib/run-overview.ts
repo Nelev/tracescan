@@ -2,6 +2,8 @@
 // stepper of the run page drawn from them (and from the run's own stream while it
 // runs). Mirrors runs.RunDetail (backend/runs/service.py) by hand.
 
+import { type ClusterMap, isClusterMap } from "./cluster-map.ts";
+import { formatCategory } from "./format.ts";
 import { isRecord as isObj } from "./guards.ts";
 import { diagnosesIn, type LiveProgress } from "./progress.ts";
 import { isCount, isRunStatus, isText, plural } from "./runs.ts";
@@ -56,11 +58,31 @@ export type RunOverview = {
   status: RunStatus;
   summary: RunCounts;
   clusters: ClusterDetail[];
+  /** The failures in 3D: null before clustering, for a run too small to embed, or an older run. */
+  cluster_map: ClusterMap | null;
 };
 
 const isTexts = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every(isText);
 const METHODS = new Set(["hdbscan", "step_error", "isolated"]);
+export const isClusterMethod = (v: unknown): v is ClusterMethod =>
+  METHODS.has(v as string);
+
+/** How a cluster was formed, in words: the cards, the map's legend and its table say the same. */
+export const METHOD_LABEL: Record<ClusterMethod, string> = {
+  hdbscan: "similar failures",
+  step_error: "same step and error",
+  isolated: "isolated failure",
+};
+
+/** A cluster's title: its diagnosed category, or that it has none. */
+export function clusterTitle(
+  cluster: Pick<ClusterDetail, "diagnosis"> | undefined,
+): string {
+  return cluster?.diagnosis
+    ? formatCategory(cluster.diagnosis.category)
+    : "Undiagnosed failure";
+}
 const CHECKS = new Set(["valid", "corrected", "unsupported"]);
 
 function isEvidence(v: unknown): v is Evidence {
@@ -89,7 +111,7 @@ function isCluster(v: unknown): v is ClusterDetail {
     isObj(v) &&
     isText(v.cluster_id) &&
     isText(v.signature) &&
-    METHODS.has(v.method as string) &&
+    isClusterMethod(v.method) &&
     isTexts(v.trace_ids) &&
     isTexts(v.exemplar_trace_ids) &&
     (v.diagnosis === null || isDiagnosis(v.diagnosis)) &&
@@ -117,15 +139,22 @@ function isCounts(v: unknown): v is RunCounts {
   );
 }
 
-/** The whole run, or null when any part is off contract: never half a run. */
+/**
+ * The whole run, or null when any part is off contract: never half a run. A missing
+ * `cluster_map` (a backend from before the map) reads as null; a malformed one is off contract.
+ */
 export function parseRunOverview(body: unknown): RunOverview | null {
-  return isObj(body) &&
-    isRunStatus(body.status) &&
-    isCounts(body.summary) &&
-    Array.isArray(body.clusters) &&
-    body.clusters.every(isCluster)
-    ? (body as RunOverview)
-    : null;
+  if (
+    !isObj(body) ||
+    !isRunStatus(body.status) ||
+    !isCounts(body.summary) ||
+    !Array.isArray(body.clusters) ||
+    !body.clusters.every(isCluster)
+  )
+    return null;
+  const map = body.cluster_map ?? null;
+  if (map !== null && !isClusterMap(map)) return null;
+  return { ...(body as Omit<RunOverview, "cluster_map">), cluster_map: map };
 }
 
 /**
@@ -194,6 +223,7 @@ export function emptyOverview(runId: string): RunOverview {
       actions_log: [],
     },
     clusters: [],
+    cluster_map: null,
   };
 }
 

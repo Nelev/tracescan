@@ -389,8 +389,9 @@ async def test_the_detail_of_a_paused_run_shows_each_cluster_and_its_diagnosis(c
     response = await client.get(f"/v1/runs/{run_id}/detail")
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"status", "summary", "clusters"}
+    assert set(body) == {"status", "summary", "clusters", "cluster_map"}
     assert body["status"] == "review_required" and body["summary"]["clusters"] == 1
+    assert body["cluster_map"] is None  # two failures: too few to embed, so no map
     (cluster,) = body["clusters"]
     assert cluster["cluster_id"] == "c0"
     assert sorted(cluster["trace_ids"]) == ["tr_1", "tr_2"]

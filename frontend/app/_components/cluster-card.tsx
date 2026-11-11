@@ -12,12 +12,14 @@ import {
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { formatCategory, formatPercent } from "@/lib/format";
+import { formatPercent } from "@/lib/format";
 import { issueSections, type Proposal } from "@/lib/review";
 import {
   type ClusterDetail,
+  clusterTitle,
   type EvidenceCheck,
   formatUsage,
+  METHOD_LABEL,
 } from "@/lib/run-overview";
 import { plural, type StatusTone, shortId } from "@/lib/runs";
 import { tracePath } from "@/lib/traces";
@@ -32,12 +34,6 @@ const CHECK: Record<EvidenceCheck, { label: string; tone: StatusTone }> = {
   valid: { label: "Evidence valid", tone: "success" },
   corrected: { label: "Evidence corrected", tone: "neutral" },
   unsupported: { label: "Evidence unsupported", tone: "destructive" },
-};
-
-const METHOD: Record<ClusterDetail["method"], string> = {
-  hdbscan: "similar failures",
-  step_error: "same step and error",
-  isolated: "isolated failure",
 };
 
 /** Where a cluster's diagnosis stands while the run streams. */
@@ -303,7 +299,7 @@ function NoDiagnosis({
  */
 export function ClusterCard({
   cluster,
-  focused,
+  focus,
   live,
   proposal,
   decision,
@@ -311,8 +307,11 @@ export function ClusterCard({
   deciding,
 }: {
   cluster: ClusterDetail;
-  /** The page was opened on this cluster: it starts open, scrolled into view and marked. */
-  focused: boolean;
+  /**
+   * Set when the page was opened on this cluster or the map asked for it: the card opens, scrolls
+   * into view and is marked. A new number for each ask, so asking again shows it again.
+   */
+  focus: number | null;
   live: LiveDiagnosis;
   /** The drafted issue, once the proposals are loaded for review. */
   proposal: Proposal | null;
@@ -323,11 +322,14 @@ export function ClusterCard({
   /** The decisions are being sent. */
   deciding: boolean;
 }) {
+  const focused = focus !== null;
   const [expanded, setExpanded] = useState(focused);
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (focused) ref.current?.scrollIntoView({ block: "start" });
-  }, [focused]);
+    if (focus === null) return;
+    setExpanded(true);
+    ref.current?.scrollIntoView({ block: "start" });
+  }, [focus]);
   const { diagnosis } = cluster;
   const exemplars = new Set(cluster.exemplar_trace_ids);
   const shown = cluster.trace_ids.slice(0, MAX_TRACE_CHIPS);
@@ -358,9 +360,7 @@ export function ClusterCard({
               id={`cluster-${cluster.cluster_id}`}
               className="type-h2 flex flex-wrap items-baseline gap-x-2"
             >
-              {diagnosis
-                ? formatCategory(diagnosis.category)
-                : "Undiagnosed failure"}
+              {clusterTitle(cluster)}
               <span className="type-body font-normal text-muted-foreground">
                 {plural(cluster.trace_ids.length, "failed trace")}
               </span>
@@ -418,7 +418,7 @@ export function ClusterCard({
               </Chip>
             </li>
           )}
-          <li>{METHOD[cluster.method]}</li>
+          <li>{METHOD_LABEL[cluster.method]}</li>
           <li className="font-mono">{cluster.cluster_id}</li>
         </ul>
       </div>

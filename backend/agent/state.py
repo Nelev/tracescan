@@ -21,6 +21,9 @@ class TriageState(TypedDict, total=False):
     clusters: list[Cluster]
     # Trace ids that fit no cluster, even after regrouping the noise. Kept, but not diagnosed.
     unclustered: list[str]
+    # The failures projected to 3D for the run page (a ClusterMap dict: ids, coordinates and
+    # labels, no text), or None when the run was too small to embed.
+    cluster_map: dict | None
     # Appended to by the parallel diagnose branches, one entry per diagnosed cluster.
     diagnoses: Annotated[list[dict], operator.add]
     # Ids of clusters whose diagnosis failed. Kept, never dropped, so the run can report them.

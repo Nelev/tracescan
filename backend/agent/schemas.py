@@ -95,6 +95,39 @@ class StoredDiagnosis(Diagnosis):
     evidence_check: EvidenceCheck
 
 
+# How the failure embeddings were flattened to 3D for the cluster map: t-SNE, or PCA for few points.
+Projection = Literal["tsne", "pca"]
+
+
+class MapPoint(BaseModel):
+    """One dot of the cluster map: traces with the same embedding that landed in the same cluster.
+
+    Ids, coordinates and labels only, never the failure text it was embedded from.
+    """
+
+    trace_ids: list[str] = Field(min_length=1)  # sorted; more than one when embeddings coincide
+    x: float  # each axis scaled into [-1, 1]
+    y: float
+    z: float
+    cluster_id: str  # the final cluster, c0, c1, ...
+    stage: ClusterMethod  # which clustering stage put the traces there
+    hdbscan_label: int  # HDBSCAN's own label, -1 for noise (before the step-and-error pass)
+    # HDBSCAN's membership strength, 0 to 1: 0 for noise, and for a member at its group's edge.
+    membership: float
+
+
+class ClusterMap(BaseModel):
+    """The failed traces of a run in 3D, for the run page's cluster map.
+
+    HDBSCAN ran on the full embeddings with cosine distance; this is a projection of them, so
+    `trust` (scikit-learn's trustworthiness, 0 to 1) says how well near neighbours stayed near.
+    """
+
+    projection: Projection
+    trust: float | None  # None when there are too few distinct points to measure it
+    points: list[MapPoint]
+
+
 # Whose fault a failure is. app: the application's prompts, tools, retrieval, limits or error
 # handling (a provider error with no retry is app). external: a cause outside the application that
 # it handled as well as it could. Not used to decide whether a trace failed: an outage still hurts
