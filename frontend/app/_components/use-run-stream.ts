@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { openRunStream, RUN_STREAM_PATH, RunError } from "@/lib/api";
 import {
   foldEvent,
@@ -11,6 +11,7 @@ import {
   type RunEvent,
   type UiMessage,
 } from "@/lib/events";
+import { foldProgress, type LiveProgress, NO_PROGRESS } from "@/lib/progress";
 import type { SseMessage } from "@/lib/sse";
 import { RUN_EVENTS, type RunRequest } from "@/lib/types";
 
@@ -48,6 +49,8 @@ type State = {
   endedAt: number | null;
   /** What the console draws: the UI spec the server sent for each message (lib/events.ts). */
   messages: UiMessage[];
+  /** Where the run stands, from its progress events: drives the run page's stepper. */
+  live: LiveProgress;
 };
 
 type Action =
@@ -59,8 +62,7 @@ type Action =
   | { type: "batch"; actions: Action[] }
   | { type: "end"; phase: Ending; at: number; error?: string }
   /** The run was reviewed: if it is this page's run, it no longer waits. */
-  | { type: "reviewed"; runId: string }
-  | { type: "clear" };
+  | { type: "reviewed"; runId: string };
 
 const IDLE: State = {
   phase: "idle",
@@ -72,6 +74,7 @@ const IDLE: State = {
   startedAt: null,
   endedAt: null,
   messages: [],
+  live: NO_PROGRESS,
 };
 
 function eventTone(event: RunEvent): Tone {
@@ -104,6 +107,10 @@ function reduce(state: State, action: Action): State {
         }),
         events: state.events + 1,
         messages: foldEvent(state.messages, action.event),
+        live:
+          action.event.kind === "progress"
+            ? foldProgress(state.live, action.event.progress)
+            : state.live,
         runId:
           action.event.kind === "started" ? action.event.runId : state.runId,
       };
@@ -121,8 +128,6 @@ function reduce(state: State, action: Action): State {
         endedAt: action.at,
         error: action.error ?? null,
       };
-    case "clear":
-      return IDLE;
   }
 }
 
@@ -161,7 +166,9 @@ export function useRunStream() {
   // Aborting ends the run through the catch below, which flushes the batch.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  async function start(body: RunRequest) {
+  // Stable for the hook's life (they read only the dispatcher and a ref), so the provider's
+  // run-status context changes only when the status does.
+  const start = useCallback(async (body: RunRequest) => {
     const controller = new AbortController();
     abortRef.current = controller;
     const batch = createBatcher(dispatch);
@@ -223,7 +230,13 @@ export function useRunStream() {
         lost("the connection was interrupted");
       }
     }
-  }
+  }, []);
+
+  const cancel = useCallback(() => abortRef.current?.abort(), []);
+  const markReviewed = useCallback(
+    (runId: string) => dispatch({ type: "reviewed", runId }),
+    [],
+  );
 
   return {
     phase: state.phase,
@@ -234,9 +247,9 @@ export function useRunStream() {
     startedAt: state.startedAt,
     endedAt: state.endedAt,
     messages: state.messages,
+    live: state.live,
     start,
-    cancel: () => abortRef.current?.abort(),
-    clear: () => dispatch({ type: "clear" }),
-    markReviewed: (runId: string) => dispatch({ type: "reviewed", runId }),
+    cancel,
+    markReviewed,
   };
 }

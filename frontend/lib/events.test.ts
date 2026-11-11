@@ -28,18 +28,38 @@ test("run_started names the run, and the other lifecycle events carry no payload
   });
 });
 
-test("a progress event is read only for whether its step failed", () => {
+test("a progress event keeps its node, cluster and counts, never its result", () => {
   const extra = { node: "a", task_id: "b", result: { secret: "span data" } };
-  assert.deepEqual(progress({ event: "node_failed", ...extra }), {
+  const read = (event: string, more = {}) =>
+    progress({ event, ...extra, ...more });
+  assert.deepEqual(read("node_failed"), {
     kind: "progress",
-    failed: true,
+    progress: {
+      event: "node_failed",
+      node: "a",
+      clusterId: null,
+      ok: true,
+      counts: {},
+    },
   });
   for (const event of ["node_started", "node_finished"]) {
-    assert.deepEqual(progress({ event, ...extra }), {
-      kind: "progress",
-      failed: false,
-    });
+    const parsed = read(event);
+    assert.equal(isFailure(parsed), false);
   }
+  const branch = read("node_finished", {
+    cluster_id: "c1",
+    ok: false,
+    counts: { diagnoses: 0, junk: "x" },
+  });
+  assert.ok(branch.kind === "progress");
+  assert.deepEqual(branch.progress, {
+    event: "node_finished",
+    node: "a",
+    clusterId: "c1",
+    ok: false,
+    counts: { diagnoses: 0 },
+  });
+  assert.deepEqual(read("node_exploded"), { kind: "unknown" });
 });
 
 test("a ui_spec payload is the message it is for and its spec", () => {
@@ -71,8 +91,11 @@ test("anything off-contract is unknown, never a throw", () => {
 
 test("isFailure is run_failed or a failed step", () => {
   assert.equal(isFailure({ kind: "failed" }), true);
-  assert.equal(isFailure(progress({ event: "node_failed" })), true);
-  assert.equal(isFailure(progress({ event: "node_started" })), false);
+  assert.equal(isFailure(progress({ event: "node_failed", node: "a" })), true);
+  assert.equal(
+    isFailure(progress({ event: "node_started", node: "a" })),
+    false,
+  );
   assert.equal(isFailure({ kind: "unknown" }), false);
 });
 

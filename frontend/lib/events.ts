@@ -1,15 +1,18 @@
+import { isRecord } from "./guards.ts";
+import { type ProgressData, parseProgress } from "./progress.ts";
 import type { SseMessage } from "./sse.ts";
 import { RUN_EVENTS } from "./types.ts";
 
 /**
  * One stream message, parsed once at the edge. Anything that does not match the contract becomes
  * `unknown`: the raw log still prints it, and the console draws nothing for it. A progress event
- * is read only for whether its step failed, which tints its line in the raw log. `run_started`
+ * carries its parsed data (lib/progress.ts), which drives the run page's stepper and tints a
+ * failed step's line in the raw log. `run_started`
  * names the run, which is how its review is sent later; null when the id is missing.
  */
 export type RunEvent =
   | { kind: "started"; runId: string | null }
-  | { kind: "progress"; failed: boolean }
+  | { kind: "progress"; progress: ProgressData }
   | { kind: "review" }
   | { kind: "completed" }
   | { kind: "failed" }
@@ -28,10 +31,6 @@ export type UiSpecEvent = { event: string; spec: Record<string, unknown> };
 export type UiMessage = UiSpecEvent & { id: number };
 
 const UNKNOWN: RunEvent = { kind: "unknown" };
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** A message's data as JSON, or undefined when it is not: the callers refuse non-objects anyway. */
 function parseData(text: string): unknown {
@@ -59,10 +58,8 @@ export function parseRunEvent(message: SseMessage): RunEvent {
     case RUN_EVENTS.failed:
       return { kind: "failed" };
     case RUN_EVENTS.progress: {
-      const data = parseData(message.data);
-      return isRecord(data)
-        ? { kind: "progress", failed: data.event === "node_failed" }
-        : UNKNOWN;
+      const progress = parseProgress(parseData(message.data));
+      return progress ? { kind: "progress", progress } : UNKNOWN;
     }
     case RUN_EVENTS.uiSpec: {
       const data = parseData(message.data);
@@ -89,7 +86,10 @@ export function outcomeOf(event: RunEvent): Outcome | null {
 
 /** True for run_failed and for a progress event that reports a failed step. */
 export function isFailure(event: RunEvent): boolean {
-  return event.kind === "failed" || (event.kind === "progress" && event.failed);
+  return (
+    event.kind === "failed" ||
+    (event.kind === "progress" && event.progress.event === "node_failed")
+  );
 }
 
 /**

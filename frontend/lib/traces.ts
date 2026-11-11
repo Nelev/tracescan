@@ -1,7 +1,7 @@
 // The stored traces of GET /v1/traces and GET /v1/traces/{id}: read once into typed values, and
-// what the Traces tab draws from them. Mirrors api/schemas.py and trace_store/models.py by hand.
+// what the trace pages draw from them. Mirrors api/schemas.py and trace_store/models.py by hand.
 
-import { isRecord as isObj } from "./events.ts";
+import { isRecord as isObj } from "./guards.ts";
 import { isText, isTextOrNull, type StatusTone } from "./runs.ts";
 
 /** What the server puts in place of an attribute outside its allowlist (trace_store/const.py). */
@@ -150,6 +150,10 @@ export function parseTraceDetail(body: unknown): TraceDetail | null {
   };
 }
 
+/** A trace's page, opened on `spanId` when one is given. */
+export const tracePath = (traceId: string, spanId: string | null = null) =>
+  `/traces/${encodeURIComponent(traceId)}${spanId ? `?span=${encodeURIComponent(spanId)}` : ""}`;
+
 /** A trace's verdict in the list and the viewer: its scores decide, not its error spans. */
 export function traceVerdict(t: {
   failed: boolean;
@@ -210,17 +214,6 @@ export function blamedBy(scores: TraceScore[]): Map<string, string[]> {
   return blamed;
 }
 
-/** A duration as "840 ms", "2.4 s" or "1 min 5 s". */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) {
-    const s = ms / 1000;
-    return `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
-  }
-  const total = Math.round(ms / 1000);
-  return `${Math.floor(total / 60)} min ${total % 60} s`;
-}
-
 /** A score as shown: two decimals, or a dash when there is none. */
 export function formatScore(score: number | null): string {
   return score === null ? "—" : score.toFixed(2);
@@ -231,4 +224,19 @@ export function formatValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (value === null || value === undefined) return "null";
   return JSON.stringify(value);
+}
+
+/** What a span does, from its name (the gen_ai span names Medas emits). */
+export type SpanKind = "agent" | "chat" | "tool" | "retrieval" | "other";
+
+const KIND_PREFIX: [string, SpanKind][] = [
+  ["invoke_agent", "agent"],
+  ["chat", "chat"],
+  ["execute_tool", "tool"],
+  ["retrieval", "retrieval"],
+];
+
+export function spanKind(name: string): SpanKind {
+  const first = name.split(" ", 1)[0];
+  return KIND_PREFIX.find(([prefix]) => first === prefix)?.[1] ?? "other";
 }

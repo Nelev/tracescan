@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { formatDuration } from "./format.ts";
 import {
   blamedBy,
-  formatDuration,
   formatScore,
   formatValue,
   parseTraceDetail,
   parseTraces,
+  spanKind,
   traceVerdict,
   waterfall,
 } from "./traces.ts";
@@ -169,4 +170,13 @@ test("durations, scores and values read short", () => {
   assert.equal(formatValue("a"), "a");
   assert.equal(formatValue(3), "3");
   assert.equal(formatValue(["a", true]), '["a",true]');
+});
+
+test("a span's kind comes from the first word of its name", () => {
+  assert.equal(spanKind("invoke_agent medas"), "agent");
+  assert.equal(spanKind("chat claude-sonnet"), "chat");
+  assert.equal(spanKind("execute_tool search_records"), "tool");
+  assert.equal(spanKind("retrieval record_chunks"), "retrieval");
+  assert.equal(spanKind("chatter"), "other");
+  assert.equal(spanKind(""), "other");
 });
