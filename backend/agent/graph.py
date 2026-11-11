@@ -112,8 +112,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStor
     g.add_conditional_edges("human_review", route_after_review, ["apply_actions", END])
     g.add_edge("apply_actions", END)
 
-    # The cap and the progress transformer live on the graph, so every caller (API, eval, resume)
-    # gets them. The transformer only matters to astream_events(version="v3") callers.
+    # The branch cap (see MAX_PARALLEL_BRANCHES) and the progress transformer live on the graph,
+    # so every caller (API, eval, resume) gets them. The transformer only matters to astream_events(version="v3") callers.
     return g.compile(
         checkpointer=checkpointer, store=store, transformers=[ProgressTransformer]
     ).with_config({"max_concurrency": MAX_PARALLEL_BRANCHES})

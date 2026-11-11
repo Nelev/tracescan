@@ -38,6 +38,9 @@ export type ClusterDetail = {
 
 export type RunCounts = {
   run_id: string;
+  traces: number;
+  judged: number;
+  judge_failures: number;
   failed_traces: number;
   clusters: number;
   unclustered: number;
@@ -99,6 +102,9 @@ function isCounts(v: unknown): v is RunCounts {
   return (
     isObj(v) &&
     isText(v.run_id) &&
+    isCount(v.traces) &&
+    isCount(v.judged) &&
+    isCount(v.judge_failures) &&
     isCount(v.failed_traces) &&
     isCount(v.clusters) &&
     isCount(v.unclustered) &&
@@ -157,6 +163,7 @@ export function pipeline({
   clusters,
 }: RunOverview): Stage[] {
   const isolated = clusters.filter((c) => c.method === "isolated").length;
+  const judgedAny = s.judged + s.judge_failures;
   const approved = clusters.filter((c) => c.decision === "approve").length;
   const rejected = clusters.filter((c) => c.decision === "reject").length;
   const reviewed = approved + rejected > 0;
@@ -172,12 +179,19 @@ export function pipeline({
     {
       key: "collect",
       label: "Collect traces",
-      detail: plural(s.failed_traces, "failed trace"),
-      done:
-        s.failed_traces > 0 ||
-        ended ||
-        status === "review_required" ||
-        reviewed,
+      detail: plural(s.traces, "trace"),
+      // A window with no traces ends the run here: collected, nothing to judge.
+      done: s.traces > 0 || ended,
+    },
+    {
+      key: "judge",
+      label: "Judge traces",
+      detail:
+        judgedAny > 0
+          ? `${s.judged} judged · ${s.failed_traces} failed` +
+            (s.judge_failures > 0 ? ` · ${s.judge_failures} not judged` : "")
+          : "—",
+      done: s.traces > 0 && judgedAny >= s.traces,
     },
     {
       key: "cluster",

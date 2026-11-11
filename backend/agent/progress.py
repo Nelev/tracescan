@@ -6,6 +6,7 @@ the `tasks` channel down to an allowlist: node, task id, cluster id, ok flag and
 read it only through `progress_events`, never by iterating the raw stream.
 """
 
+from collections import Counter
 from collections.abc import AsyncIterator
 from typing import Literal, TypedDict
 
@@ -13,9 +14,13 @@ from langgraph.stream import AsyncGraphRunStream, ProtocolEvent, StreamChannel, 
 
 CHANNEL = "progress"
 
-# Nodes that run once per trace: up to MAX_JUDGED_TRACES of them, so they report nothing of their
-# own (each progress event costs the API a UI-spec call); join_scores after them reports the count.
-SILENT_NODES = frozenset({"score_trace"})
+# Nodes fanned out once per item (score_trace: once per trace, up to MAX_JUDGED_TRACES), so their
+# branches do not each report (each progress event costs the API a UI-spec call). Instead a
+# `node_progress` event says how many are done each time another 1/PROGRESS_STEPS of them is (the
+# last step is left out: the node after them starting says it). The total is the number of start
+# events: LangGraph emits the start of every task of a step before any of them runs.
+COUNTED_NODES = frozenset({"score_trace"})
+PROGRESS_STEPS = 4
 
 # Result keys whose length is reported. Only lengths leave the graph, never the values.
 COUNTED_KEYS = (
@@ -32,7 +37,8 @@ COUNTED_KEYS = (
 
 class ProgressEvent(TypedDict, total=False):
     # node_paused: the node called interrupt() and waits for a resume (human_review).
-    event: Literal["node_started", "node_finished", "node_failed", "node_paused"]
+    # node_progress: another share of a COUNTED_NODES fan-out is done; counts {done, total}.
+    event: Literal["node_started", "node_finished", "node_failed", "node_paused", "node_progress"]
     node: str
     task_id: str
     # Set on the branches of the diagnose fan-out, so the client can tell parallel tasks apart.
@@ -50,6 +56,9 @@ class ProgressTransformer(StreamTransformer):
         self._channel: StreamChannel[ProgressEvent] = StreamChannel(CHANNEL)
         # A result payload has no input, so the cluster id is kept from the matching start.
         self._cluster_ids: dict[str, str] = {}
+        # Per counted node: how many of its branches started, and how many are done.
+        self._started: Counter[str] = Counter()
+        self._done: Counter[str] = Counter()
 
     def init(self) -> dict:
         return {CHANNEL: self._channel}
@@ -60,16 +69,30 @@ class ProgressTransformer(StreamTransformer):
         if event["method"] != "tasks" or tuple(params["namespace"]) != self.scope:
             return True
         data = params["data"]
-        if data["name"] in SILENT_NODES:
+        # Same discriminator as LangGraph's own lifecycle transformer: only results carry `result`.
+        finished = "result" in data
+        if data["name"] in COUNTED_NODES:
+            if finished:
+                self._count_done(data["name"])
+            else:
+                self._started[data["name"]] += 1
             return True
         progress: ProgressEvent = {"node": data["name"], "task_id": data["id"]}
-        # Same discriminator as LangGraph's own lifecycle transformer: only results carry `result`.
-        if "result" in data:
+        if finished:
             self._finish(progress, data)
         else:
             self._start(progress, data)
         self._channel.push(progress)
         return True
+
+    def _count_done(self, node: str) -> None:
+        """Count one finished branch of `node`; report each step but the last."""
+        self._done[node] += 1
+        done, total = self._done[node], self._started[node]
+        if done < total and (done - 1) * PROGRESS_STEPS // total < done * PROGRESS_STEPS // total:
+            self._channel.push(
+                {"event": "node_progress", "node": node, "counts": {"done": done, "total": total}}
+            )
 
     def _start(self, progress: ProgressEvent, data: dict) -> None:
         progress["event"] = "node_started"

@@ -11,9 +11,12 @@ DEFAULT_UI_SPEC_MODEL = "anthropic/claude-haiku-5.5"
 # The TRACE_JUDGE_MODEL environment variable overrides it (JUDGE_MODEL is the eval's grader).
 DEFAULT_TRACE_JUDGE_MODEL = "anthropic/claude-haiku-5.5"
 
-# Parallel branches within one run (the graph's max_concurrency): N clusters would otherwise
-# mean N model calls at once. It does not limit several runs at the same time.
-MAX_PARALLEL_BRANCHES = 4
+# Parallel branches within one run. The graph's max_concurrency is MAX_PARALLEL_BRANCHES, which is
+# what the judge branches (one small call per trace) run at; the diagnose branches are held to
+# MAX_PARALLEL_DIAGNOSES by a per-run semaphore (TraceContext.diagnose_slots), since N clusters
+# would otherwise mean N large model calls at once. Neither limits several runs at the same time.
+MAX_PARALLEL_BRANCHES = 16
+MAX_PARALLEL_DIAGNOSES = 4
 
 # The UI spec of each streamed message (api.ui_spec), one model call per message. Starting values.
 MAX_UI_CALLS_PER_RUN = 40  # past it, a message gets no call and no spec

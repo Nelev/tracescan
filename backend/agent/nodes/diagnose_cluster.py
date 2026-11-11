@@ -49,11 +49,13 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
     context = runtime.context
     spent = Spent()  # every call, failed ones included
     try:
-        # Fetched once: a failing fetch is a failure, not a model error to retry.
-        trees = await asyncio.gather(
-            *(context.traces.get_trace_tree(t) for t in cluster["exemplar_trace_ids"])
-        )
-        diagnosis = await _diagnose(cluster, trees, context.model, spent)
+        # Per-run cap, see TraceContext.diagnose_slots.
+        async with context.diagnose_slots:
+            # Fetched once: a failing fetch is a failure, not a model error to retry.
+            trees = await asyncio.gather(
+                *(context.traces.get_trace_tree(t) for t in cluster["exemplar_trace_ids"])
+            )
+            diagnosis = await _diagnose(cluster, trees, context.model, spent)
     except Exception as exc:
         # Type name only: the message could carry span contents.
         logger.error("diagnosis of %s failed: %s", cluster_id, type(exc).__name__)

@@ -142,6 +142,9 @@ async def test_stream_reports_progress_and_stops_at_the_review_with_counts(clien
     started, summary_ = events[0][1], dict(events[-1][1])
     assert UUID(summary_["run_id"]) and started == {"run_id": summary_.pop("run_id")}
     assert summary_ == {
+        "traces": 2,
+        "judged": 2,
+        "judge_failures": 0,
         "failed_traces": 2,
         "clusters": 1,
         "unclustered": 0,

@@ -44,6 +44,9 @@ class RunSummary(BaseModel):
     """Counts and the actions log. The only view of a run's state besides its proposals."""
 
     run_id: str  # the graph's thread_id
+    traces: int  # in the window, up to MAX_JUDGED_TRACES; each is judged
+    judged: int  # traces the judge gave a verdict on
+    judge_failures: int  # traces whose judging failed; they are not clustered
     failed_traces: int
     clusters: int
     unclustered: int  # failures that fit no cluster; each is diagnosed on its own
@@ -154,6 +157,9 @@ def _log_failure(exc: Exception) -> None:
 def _summary(run_id: str, values: Mapping) -> RunSummary:
     return RunSummary(
         run_id=run_id,
+        traces=len(values.get("traces", [])),
+        judged=len(values.get("verdicts", [])),
+        judge_failures=len(values.get("judge_failures", [])),
         failed_traces=len(values.get("failed_traces", [])),
         clusters=len(values.get("clusters", [])),
         unclustered=len(values.get("unclustered", [])),

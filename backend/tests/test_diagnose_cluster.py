@@ -7,7 +7,7 @@ import pytest
 from langgraph.runtime import Runtime
 
 from agent import model_guard
-from agent.const import MAX_MODEL_ATTEMPTS, MAX_PARALLEL_BRANCHES, UNSUPPORTED_CONFIDENCE_CAP
+from agent.const import MAX_MODEL_ATTEMPTS, MAX_PARALLEL_DIAGNOSES, UNSUPPORTED_CONFIDENCE_CAP
 from agent.evidence import FALLBACK_NOTE
 from agent.graph import build_graph
 from agent.nodes.diagnose_cluster import TAXONOMY, diagnose_cluster
@@ -90,27 +90,37 @@ async def test_a_failed_cluster_does_not_cost_the_others_their_diagnosis():
 
 
 class SlowTraces(FakeTraces):
-    """Counts how many span-tree fetches are in flight at once."""
+    """Counts how many span-tree fetches are in flight at once, per stage.
 
-    active = peak = 0
+    The judge fetches each trace once, before any diagnosis; a second fetch of the same trace is
+    a diagnose branch fetching its exemplar.
+    """
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.seen: set[str] = set()
+        self.active = {"judge": 0, "diagnose": 0}
+        self.peak = {"judge": 0, "diagnose": 0}
 
     async def get_trace_tree(self, trace_id: str):
-        self.active += 1
-        self.peak = max(self.peak, self.active)
+        stage = "diagnose" if trace_id in self.seen else "judge"
+        self.seen.add(trace_id)
+        self.active[stage] += 1
+        self.peak[stage] = max(self.peak[stage], self.active[stage])
         await asyncio.sleep(0.01)
-        self.active -= 1
+        self.active[stage] -= 1
         return await super().get_trace_tree(trace_id)
 
 
 @pytest.mark.anyio
-async def test_the_graph_diagnoses_at_most_the_capped_number_of_clusters_at_once():
+async def test_the_judge_runs_wider_than_the_diagnoser_and_the_diagnoser_keeps_its_cap():
     # Five failures stay below the HDBSCAN threshold, so each failing step is its own cluster.
-    ids = [f"t{i}" for i in range(MAX_PARALLEL_BRANCHES + 1)]
+    ids = [f"t{i}" for i in range(MAX_PARALLEL_DIAGNOSES + 1)]
     failures = [summary(i, failing_span_name=f"step_{i}") for i in ids]
     traces = SlowTraces(failures, {i: span_tree(i) for i in ids})
     context = fake_context(traces, fake_diagnoser(DIAGNOSIS))  # one exemplar per cluster
     await build_graph().ainvoke({"target_app": "medas"}, context=context)
-    assert traces.peak == MAX_PARALLEL_BRANCHES
+    assert traces.peak == {"judge": len(ids), "diagnose": MAX_PARALLEL_DIAGNOSES}
 
 
 def citing(*pairs: tuple[str, str]) -> Diagnosis:
