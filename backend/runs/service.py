@@ -25,7 +25,7 @@ from langgraph.types import Command, StateSnapshot
 from pydantic import BaseModel
 
 from agent.context import ClosedTraces, TraceAccess, TraceContext
-from agent.model_guard import Spent, spent_by_cluster
+from agent.model_guard import Spent, spent_by
 from agent.progress import ProgressEvent, progress_events
 from agent.schemas import ClusterMethod, Decision, Proposal, StoredDiagnosis
 from agent.state import TriageState
@@ -172,7 +172,7 @@ def _status(run_id: str, values: Mapping, state: RunState) -> RunStatus:
 def _detail(run_id: str, values: Mapping, state: RunState) -> RunDetail:
     diagnoses = {d["cluster_id"]: d for d in values.get("diagnoses", [])}
     failures = set(values.get("diagnosis_failures", []))
-    spent = spent_by_cluster(values.get("model_usage", []))
+    spent = spent_by(values.get("model_usage", []))
     verification = {
         p["cluster_id"]: p.get("verification", "unverified") for p in values.get("proposals", [])
     }

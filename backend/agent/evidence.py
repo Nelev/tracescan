@@ -17,14 +17,15 @@ FALLBACK_NOTE = (
 )
 
 
-def _walk(span: SpanNode) -> Iterator[SpanNode]:
-    yield span
+def walk(span: SpanNode, depth: int = 0) -> Iterator[tuple[int, SpanNode]]:
+    """Every span of a tree, top down, with its depth (the root is 0)."""
+    yield depth, span
     for child in span.children:
-        yield from _walk(child)
+        yield from walk(child, depth + 1)
 
 
 def span_index(trees: Iterable[SpanNode]) -> SpanIndex:
-    return {tree.trace_id: {span.span_id for span in _walk(tree)} for tree in trees}
+    return {tree.trace_id: {span.span_id for _, span in walk(tree)} for tree in trees}
 
 
 def _is_real(evidence: Evidence, index: SpanIndex) -> bool:
@@ -56,7 +57,7 @@ def fallback_evidence(trees: Sequence[SpanNode]) -> list[Evidence]:
     return [
         Evidence(
             trace_id=tree.trace_id,
-            span_id=next((s for s in _walk(tree) if s.status == "error"), tree).span_id,
+            span_id=next((s for _, s in walk(tree) if s.status == "error"), tree).span_id,
             note=FALLBACK_NOTE,
         )
         for tree in trees

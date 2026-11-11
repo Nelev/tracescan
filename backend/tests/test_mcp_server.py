@@ -67,6 +67,9 @@ SUMMARY = TraceSummary(
 class StubReader:
     """Serves SUMMARY as the only failed trace and SPAN as trace t1."""
 
+    async def search_traces(self, query):
+        return [SUMMARY]
+
     async def search_failed_traces(self, query):
         return [SUMMARY]
 
@@ -95,9 +98,14 @@ async def stub_client():
 
 
 @pytest.mark.anyio
-async def test_exposes_exactly_the_three_read_only_tools(client):
+async def test_exposes_exactly_the_four_read_only_tools(client):
     tools = await client.list_tools()
-    assert {t.name for t in tools} == {"search_failed_traces", "get_trace_tree", "get_span"}
+    assert {t.name for t in tools} == {
+        "search_traces",
+        "search_failed_traces",
+        "get_trace_tree",
+        "get_span",
+    }
     assert all(t.annotations.readOnlyHint for t in tools)
 
 
@@ -106,6 +114,19 @@ async def test_search_failed_traces_returns_summaries(client):
     result = await client.call_tool("search_failed_traces", {"query": {"app": "medas"}})
     ids = [t["trace_id"] for t in result.structured_content["result"]]
     assert ids == ["tr_tool_schema", "tr_retrieval_miss"]
+
+
+@pytest.mark.anyio
+async def test_search_traces_returns_every_trace_failed_or_not(client):
+    result = await client.call_tool("search_traces", {"query": {"app": "medas"}})
+    ids = [t["trace_id"] for t in result.structured_content["result"]]
+    assert ids == ["tr_healthy", "tr_tool_schema", "tr_retrieval_miss"]
+
+
+@pytest.mark.anyio
+async def test_search_traces_serves_only_allowed_apps(client):
+    with pytest.raises(ToolError, match="app not allowed"):
+        await client.call_tool("search_traces", {"query": {"app": "someone-else"}})
 
 
 @pytest.mark.anyio

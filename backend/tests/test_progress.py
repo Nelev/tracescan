@@ -11,7 +11,7 @@ from agent.state import TriageState
 from tests.fakes import (
     DIAGNOSIS,
     FakeApiError,
-    FakeDiagnoserModel,
+    FakeStructuredModel,
     FakeTraces,
     fake_context,
     fake_diagnoser,
@@ -92,7 +92,7 @@ async def test_a_cluster_run_again_is_another_branch_and_the_next_stage_starts_o
             raise FakeApiError(503)  # whichever cluster calls first, once
         return DIAGNOSIS.model_copy(update={"evidence": [first_span_shown(messages)]})
 
-    events, final = await stream_progress(FakeDiagnoserModel(messages=iter(()), answer=answer))
+    events, final = await stream_progress(FakeStructuredModel(messages=iter(()), answer=answer))
 
     starts = of(events, "node_started", "diagnose_cluster")
     assert sorted(e["cluster_id"] for e in starts) in (["c0", "c0", "c1"], ["c0", "c1", "c1"])

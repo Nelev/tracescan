@@ -12,18 +12,26 @@ SpanStatus = Literal["unset", "ok", "error"]
 TraceId = Annotated[str, Field(pattern=ID_PATTERN)]
 
 
-class FailedTraceQuery(BaseModel):
+class TraceQuery(BaseModel):
+    """Input of search_traces: every trace of an app in a window, failed or not.
+
+    The agent's trace judge decides which ones failed, so nothing here reads scores.
+    """
+
+    app: str
+    since: AwareDatetime | None = None  # inclusive
+    until: AwareDatetime | None = None  # exclusive
+    limit: int = Field(default=50, ge=1, le=MAX_LIMIT)
+
+
+class FailedTraceQuery(TraceQuery):
     """Input of search_failed_traces. A trace is failed if its lowest score is <= max_score.
 
     Scores come from the scoring job (trace_store/scoring.py): an error span alone does not
     make a trace failed, since an error can be harmless.
     """
 
-    app: str
-    since: AwareDatetime | None = None  # inclusive
-    until: AwareDatetime | None = None  # exclusive
     max_score: float = FAILED_MAX_SCORE
-    limit: int = Field(default=50, ge=1, le=MAX_LIMIT)
 
 
 class TraceSummary(BaseModel):

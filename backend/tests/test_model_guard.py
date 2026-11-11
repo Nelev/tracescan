@@ -6,7 +6,15 @@ from langchain_core.messages import AIMessage
 
 from agent import model_guard
 from agent.const import MAX_MODEL_ATTEMPTS
-from agent.model_guard import Spent, backoff_delay, guarded, retryable, spent_for
+from agent.model_guard import (
+    Spent,
+    backoff_delay,
+    guarded,
+    retryable,
+    spent_by,
+    spent_for,
+    trace_budget,
+)
 from tests.fakes import FakeApiError
 
 
@@ -89,6 +97,28 @@ def test_a_cluster_spent_is_the_sum_of_its_own_usage_entries():
     ]
     assert spent_for(usage, "c0") == Spent(3, 300, 0.002)
     assert spent_for(usage, "c9") == Spent()
+
+
+def test_a_trace_spent_sums_its_judge_usage_entries_by_trace_id():
+    usage = [
+        {"trace_id": "t1", "calls": 1, "tokens": 150, "cost_usd": 0.001},
+        {"trace_id": "t2", "calls": 1, "tokens": 100, "cost_usd": 0.0},
+        {"trace_id": "t1", "calls": 1, "tokens": 50, "cost_usd": 0.001},
+    ]
+    assert spent_for(usage, "t1", key="trace_id") == Spent(2, 200, 0.002)
+    assert spent_by(usage, key="trace_id") == {"t1": Spent(2, 200, 0.002), "t2": Spent(1, 100, 0.0)}
+
+
+def test_a_trace_has_its_own_smaller_budget(monkeypatch):
+    monkeypatch.setattr(model_guard, "MAX_TRACE_TOKENS", 200)
+    monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 1_000)
+    assert not Spent(tokens=200).ok(trace_budget())
+    assert Spent(tokens=200).ok()  # the cluster budget, by default
+    assert not Spent(calls=MAX_MODEL_ATTEMPTS).ok(trace_budget())
+    monkeypatch.setattr(model_guard, "MAX_TRACE_COST_USD", 0.0015)
+    assert not Spent(cost_usd=0.0015).ok(trace_budget()) and Spent(cost_usd=0.001).ok(
+        trace_budget()
+    )
 
 
 def test_the_wait_before_a_re_run_doubles(monkeypatch):

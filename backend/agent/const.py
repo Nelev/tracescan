@@ -42,5 +42,13 @@ MAX_CLUSTER_COST_USD = 0.5
 # The SDK's own retry is off (agent.model); this bounds one call so a hung one is retried by us.
 REQUEST_TIMEOUT_MS = 120_000
 
+# The trace judge (agent.judge): a trace whose score is at most this counts as failed. A starting
+# value; tune it with the eval.
+JUDGE_FAILED_MAX_SCORE = 0.5
+# Model calls for one trace's judgement: the same attempts as a cluster, smaller spend caps, since
+# the judge sees one tree and runs once per trace in the window. Starting values; tune with the eval.
+MAX_TRACE_TOKENS = 20_000
+MAX_TRACE_COST_USD = 0.05
+
 # HDBSCAN fails when it gets fewer traces than either of its size settings.
 assert max(MIN_CLUSTER_SIZE, MIN_SAMPLES) <= MIN_TRACES_FOR_HDBSCAN
