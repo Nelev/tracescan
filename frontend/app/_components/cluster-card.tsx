@@ -1,10 +1,18 @@
 "use client";
 
-import { Check, ChevronDown, type LucideIcon, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  type LucideIcon,
+  Search,
+  Wrench,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { formatPercent } from "@/lib/format";
+import { formatCategory, formatPercent } from "@/lib/format";
 import { issueSections, type Proposal } from "@/lib/review";
 import {
   type ClusterDetail,
@@ -17,7 +25,7 @@ import type { Decision } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
 import { SEGMENT_ITEM, SEGMENT_LIST } from "./styles";
-import { Section, TraceTree } from "./trace-tree";
+import { TraceTree } from "./trace-tree";
 import { useTrace } from "./use-traces";
 
 const CHECK: Record<EvidenceCheck, { label: string; tone: StatusTone }> = {
@@ -103,53 +111,93 @@ const DECIDED: Record<Decision, { label: string; tone: StatusTone }> = {
   reject: { label: "Rejected", tone: "neutral" },
 };
 
+type Pick = { traceId: string; spanId: string | null };
+
 /**
- * The traces the diagnoser was shown, one at a time, as trees with the cited spans marked. Only
- * for a cluster with exemplars (every cluster has at least one).
+ * The evidence the diagnosis rests on: each cited span as a numbered item, and the trace of the
+ * picked one drawn below as a span tree, its cited spans starred with their notes. The traces the
+ * diagnoser was shown without citing them can be opened too.
  */
-function ExemplarTrees({ cluster }: { cluster: ClusterDetail }) {
+function Evidence({ cluster }: { cluster: ClusterDetail }) {
   const evidence = cluster.diagnosis?.evidence ?? [];
-  // The cited traces first: they are the ones the diagnosis rests on.
-  const citedTraces = new Set(evidence.map((e) => e.trace_id));
-  const traces = [
-    ...cluster.exemplar_trace_ids.filter((t) => citedTraces.has(t)),
-    ...cluster.exemplar_trace_ids.filter((t) => !citedTraces.has(t)),
-    ...[...citedTraces].filter((t) => !cluster.exemplar_trace_ids.includes(t)),
-  ];
-  const [open, setOpen] = useState<{ traceId: string; spanId: string | null }>(
-    () => ({ traceId: traces[0], spanId: null }),
+  const cited = new Set(evidence.map((e) => e.trace_id));
+  const uncited = cluster.exemplar_trace_ids.filter((t) => !cited.has(t));
+  const [open, setOpen] = useState<Pick>(() =>
+    evidence.length > 0
+      ? { traceId: evidence[0].trace_id, spanId: evidence[0].span_id }
+      : { traceId: cluster.exemplar_trace_ids[0], spanId: null },
   );
   const state = useTrace(open.traceId);
-  const cited = new Map(
+  const notes = new Map(
     evidence
       .filter((e) => e.trace_id === open.traceId)
       .map((e) => [e.span_id, e.note]),
   );
 
   return (
-    <Section title="Evidence in the traces">
-      {evidence.length > 0 && (
-        <ul className="flex flex-col gap-1.5">
-          {evidence.map((e) => (
-            <li key={`${e.trace_id}:${e.span_id}`} className="flex flex-col">
-              <button
-                type="button"
-                onClick={() =>
-                  setOpen({ traceId: e.trace_id, spanId: e.span_id })
-                }
-                className="w-fit text-left font-mono text-primary underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
-              >
-                {shortId(e.trace_id)} › {e.span_id}
-              </button>
-              <span className="text-muted-foreground">{e.note}</span>
-            </li>
-          ))}
-        </ul>
+    <section
+      aria-labelledby={`evidence-${cluster.cluster_id}`}
+      className="flex flex-col gap-3"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 id={`evidence-${cluster.cluster_id}`} className="type-h3">
+          Evidence
+        </h4>
+        <Link
+          href={tracePath(open.traceId, open.spanId)}
+          className="type-body text-primary underline-offset-4 hover:underline"
+        >
+          Open trace {shortId(open.traceId)} in full
+        </Link>
+      </div>
+      {evidence.length > 0 ? (
+        <ol className="flex flex-col gap-1.5">
+          {evidence.map((e, i) => {
+            const picked =
+              e.trace_id === open.traceId && e.span_id === open.spanId;
+            return (
+              <li key={`${e.trace_id}:${e.span_id}`}>
+                <button
+                  type="button"
+                  aria-pressed={picked}
+                  onClick={() =>
+                    setOpen({ traceId: e.trace_id, spanId: e.span_id })
+                  }
+                  className={cn(
+                    "grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    picked &&
+                      "border-primary/60 bg-primary/10 hover:bg-primary/15",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex size-6 items-center justify-center rounded-full border font-mono",
+                      picked &&
+                        "border-primary bg-primary text-primary-foreground",
+                    )}
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="flex min-w-0 flex-col">
+                    <span>{e.note}</span>
+                    <span className="font-mono text-muted-foreground">
+                      trace {shortId(e.trace_id)} · span {shortId(e.span_id)}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="text-muted-foreground">The diagnosis cites no span.</p>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <fieldset className="flex flex-wrap gap-1.5">
-          <legend className="sr-only">Traces shown to the diagnoser</legend>
-          {traces.map((traceId, i) => (
+      {uncited.length > 0 && (
+        <fieldset className="flex flex-wrap items-center gap-1.5">
+          <legend className="float-left mr-1 text-muted-foreground">
+            Also shown to the diagnoser:
+          </legend>
+          {uncited.map((traceId) => (
             <Button
               key={traceId}
               size="sm"
@@ -159,17 +207,11 @@ function ExemplarTrees({ cluster }: { cluster: ClusterDetail }) {
               className="font-mono"
               title={traceId}
             >
-              {i + 1}. {shortId(traceId)}
+              {shortId(traceId)}
             </Button>
           ))}
         </fieldset>
-        <Link
-          href={tracePath(open.traceId, open.spanId)}
-          className="type-body text-primary underline-offset-4 hover:underline"
-        >
-          Open full trace
-        </Link>
-      </div>
+      )}
       <div className="overflow-hidden rounded-lg border bg-background/40">
         {state.status === "loading" && state.value === null && (
           <p className="type-body p-3 text-muted-foreground">Loading trace…</p>
@@ -185,21 +227,77 @@ function ExemplarTrees({ cluster }: { cluster: ClusterDetail }) {
           <TraceTree
             key={`${open.traceId}:${open.spanId}`}
             trace={state.value}
-            cited={cited}
+            cited={notes}
             initialSpan={open.spanId}
             layout="stacked"
           />
         )}
       </div>
-    </Section>
+    </section>
+  );
+}
+
+/** A closed-by-default block of secondary detail, its summary always visible. */
+function More({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-lg border">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          className="size-4 text-muted-foreground transition-transform group-open:rotate-90"
+          aria-hidden="true"
+        />
+        <span className="type-h3">{title}</span>
+      </summary>
+      <div className="border-t p-3">{children}</div>
+    </details>
+  );
+}
+
+/** Where the diagnosis stands for a cluster that has none yet, or lost it. */
+function NoDiagnosis({
+  cluster,
+  live,
+}: {
+  cluster: ClusterDetail;
+  live: LiveDiagnosis;
+}) {
+  if (cluster.diagnosis_failed) {
+    return (
+      <p className="text-destructive">
+        The diagnosis failed. The cluster is kept, and its proposal is a stub.
+      </p>
+    );
+  }
+  if (live === "diagnosing") {
+    return (
+      <p className="flex items-center gap-2 text-muted-foreground">
+        <Chip tone="info" size="sm" live>
+          Diagnosing
+        </Chip>
+        The diagnoser is reading this cluster's traces.
+      </p>
+    );
+  }
+  return (
+    <p className="text-muted-foreground">
+      {live === "queued" ? "Queued for a diagnosis." : "Not diagnosed."}
+    </p>
   );
 }
 
 /**
- * One cluster of failed traces and what the run made of it: the signature, the diagnosis (the
- * model's own prose, possibly clinical: shown, never logged), and, opened, the evidence as span
- * trees, the drafted issue, the cluster's traces and its spend. While the run waits for review it
- * also takes the reviewer's decision.
+ * One cluster of failed traces and what the run made of it. Closed, it reads as a finding: the
+ * diagnosed category, the root cause in a sentence or two, the failing step, and one line of
+ * facts (size, confidence, evidence check). Opened from its footer, it shows the suggested fix,
+ * the evidence as span trees, and the drafted issue and the cluster's traces folded away. The
+ * diagnosis is the model's own prose, possibly clinical: shown, never logged. While the run waits
+ * for review the header takes the reviewer's decision.
  */
 export function ClusterCard({
   cluster,
@@ -233,6 +331,8 @@ export function ClusterCard({
   const shown = cluster.trace_ids.slice(0, MAX_TRACE_CHIPS);
   const hidden = cluster.trace_ids.length - shown.length;
   const detailsId = `cluster-${cluster.cluster_id}-details`;
+  const cites = diagnosis?.evidence.length ?? 0;
+  const check = diagnosis ? CHECK[diagnosis.evidence_check] : null;
 
   return (
     <article
@@ -240,51 +340,61 @@ export function ClusterCard({
       aria-labelledby={`cluster-${cluster.cluster_id}`}
       aria-current={focused ? "true" : undefined}
       className={cn(
-        "type-body flex scroll-mt-20 flex-col gap-3 rounded-xl border bg-card p-4",
+        "type-body flex scroll-mt-20 flex-col overflow-hidden rounded-xl border bg-card",
         focused && "ring-2 ring-primary/60",
-        expanded && "border-foreground/20",
         onDecide && decision === undefined && "border-warning/40",
       )}
     >
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-1">
-          <h3
-            id={`cluster-${cluster.cluster_id}`}
-            className="flex flex-wrap items-baseline gap-x-2 font-mono [overflow-wrap:anywhere]"
-          >
-            <span className="text-muted-foreground">{cluster.cluster_id}</span>
-            {cluster.signature}
-          </h3>
-          <span className="text-muted-foreground">
-            {plural(cluster.trace_ids.length, "trace")} ·{" "}
-            {METHOD[cluster.method]}
-          </span>
-        </div>
-        {onDecide ? (
-          <DecisionPicker
-            clusterId={cluster.cluster_id}
-            decision={decision}
-            disabled={deciding}
-            onDecide={onDecide}
-          />
-        ) : (
-          decision && (
-            <Chip tone={DECIDED[decision].tone} size="sm">
-              {DECIDED[decision].label}
-            </Chip>
-          )
-        )}
-      </header>
+      <div className="flex flex-col gap-3 p-4">
+        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <h3
+              id={`cluster-${cluster.cluster_id}`}
+              className="type-h2 flex flex-wrap items-baseline gap-x-2"
+            >
+              {diagnosis
+                ? formatCategory(diagnosis.category)
+                : "Undiagnosed failure"}
+              <span className="type-body font-normal text-muted-foreground">
+                {plural(cluster.trace_ids.length, "failed trace")}
+              </span>
+            </h3>
+            <p
+              className="truncate font-mono text-muted-foreground"
+              title={cluster.signature}
+            >
+              {cluster.signature}
+            </p>
+          </div>
+          {onDecide ? (
+            <DecisionPicker
+              clusterId={cluster.cluster_id}
+              decision={decision}
+              disabled={deciding}
+              onDecide={onDecide}
+            />
+          ) : (
+            decision && (
+              <Chip tone={DECIDED[decision].tone} size="sm">
+                {DECIDED[decision].label}
+              </Chip>
+            )
+          )}
+        </header>
 
-      {diagnosis ? (
-        <>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-md border px-2 font-mono">
-              {diagnosis.category}
-            </span>
-            <span className="flex items-center gap-2">
+        {diagnosis ? (
+          <p className={cn(!expanded && "line-clamp-2")}>
+            {diagnosis.root_cause}
+          </p>
+        ) : (
+          <NoDiagnosis cluster={cluster} live={live} />
+        )}
+
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
+          {diagnosis && (
+            <li className="flex items-center gap-2">
               <span
-                className="h-1.5 w-16 overflow-hidden rounded-full bg-foreground/10"
+                className="h-1.5 w-12 overflow-hidden rounded-full bg-foreground/10"
                 aria-hidden="true"
               >
                 <span
@@ -292,112 +402,117 @@ export function ClusterCard({
                   style={{ width: `${diagnosis.confidence * 100}%` }}
                 />
               </span>
-              <span className="tabular-nums">
-                {formatPercent(diagnosis.confidence)} confidence
-              </span>
-            </span>
-            <Chip tone={CHECK[diagnosis.evidence_check].tone} size="sm">
-              {CHECK[diagnosis.evidence_check].label}
-            </Chip>
-          </div>
-          <p className={cn(!expanded && "line-clamp-2")}>
-            {diagnosis.root_cause}
-          </p>
-        </>
-      ) : (
-        <p
-          className={cn(
-            cluster.diagnosis_failed
-              ? "text-destructive"
-              : "text-muted-foreground",
-            "flex items-center gap-2",
+              {formatPercent(diagnosis.confidence)} confident
+            </li>
           )}
-        >
-          {live === "diagnosing" && (
-            <Chip tone="info" size="sm" live>
-              Diagnosing
-            </Chip>
+          {check && (
+            <li>
+              <Chip tone={check.tone} size="sm">
+                {check.label}
+              </Chip>
+            </li>
           )}
-          {cluster.diagnosis_failed
-            ? "The diagnosis failed. The cluster is kept, and its proposal is a stub."
-            : live === "diagnosing"
-              ? "The diagnoser is reading this cluster's traces."
-              : live === "queued"
-                ? "Queued for a diagnosis."
-                : "Not diagnosed."}
-        </p>
-      )}
+          <li>{METHOD[cluster.method]}</li>
+          <li className="font-mono">{cluster.cluster_id}</li>
+        </ul>
+      </div>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-2 w-fit"
+      <button
+        type="button"
         aria-expanded={expanded}
         aria-controls={detailsId}
         onClick={() => setExpanded((on) => !on)}
+        className={cn(
+          "flex w-full items-center justify-between gap-3 border-t px-4 py-2.5 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none",
+          expanded && "bg-primary/5",
+        )}
       >
+        <span className="type-h3 flex items-center gap-2 text-primary">
+          <Search className="size-4" aria-hidden="true" />
+          {expanded
+            ? "Hide the evidence"
+            : diagnosis
+              ? `Show the evidence and the fix · ${plural(cites, "cited span")}`
+              : "Show the traces"}
+        </span>
         <ChevronDown
-          className={cn("transition-transform", expanded && "rotate-180")}
+          className={cn(
+            "size-4 transition-transform",
+            expanded && "rotate-180",
+          )}
           aria-hidden="true"
         />
-        {expanded ? "Hide details" : "Evidence, traces and issue"}
-      </Button>
+      </button>
 
       {expanded && (
-        <div id={detailsId} className="flex flex-col gap-5">
+        <div
+          id={detailsId}
+          className="flex flex-col gap-5 border-t bg-background/20 p-4"
+        >
           {diagnosis && (
-            <Section title="Suggested fix">
-              <p>{diagnosis.suggested_fix}</p>
-            </Section>
+            <section
+              aria-label="Suggested fix"
+              className="flex gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3"
+            >
+              <Wrench
+                className="mt-0.5 size-4 shrink-0 text-primary"
+                aria-hidden="true"
+              />
+              <div className="flex flex-col gap-1">
+                <h4 className="type-h3">Suggested fix</h4>
+                <p>{diagnosis.suggested_fix}</p>
+              </div>
+            </section>
           )}
           {cluster.exemplar_trace_ids.length > 0 && (
-            <ExemplarTrees cluster={cluster} />
+            <Evidence cluster={cluster} />
           )}
-          {proposal && (
-            <Section title="Drafted issue">
-              <div className="flex flex-col gap-3 rounded-lg border p-3">
-                <p className="type-h3 [overflow-wrap:anywhere]">
-                  {proposal.title}
-                </p>
-                {issueSections(proposal.body).map(({ heading, text }) => (
-                  <section key={heading} className="flex flex-col gap-1">
-                    {heading && <h5 className="type-h3">{heading}</h5>}
-                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
-                      {text}
-                    </p>
-                  </section>
+          <div className="flex flex-col gap-2">
+            {proposal && (
+              <More title={`Drafted issue: ${proposal.title}`}>
+                <div className="flex flex-col gap-3">
+                  {issueSections(proposal.body).map(({ heading, text }) => (
+                    <section key={heading} className="flex flex-col gap-1">
+                      {heading && <h5 className="type-h3">{heading}</h5>}
+                      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                        {text}
+                      </p>
+                    </section>
+                  ))}
+                </div>
+              </More>
+            )}
+            <More
+              title={`All ${plural(cluster.trace_ids.length, "trace")} in the cluster`}
+            >
+              <ul className="flex flex-wrap gap-1.5">
+                {shown.map((traceId) => (
+                  <li key={traceId}>
+                    <Link
+                      href={tracePath(traceId)}
+                      title={
+                        exemplars.has(traceId)
+                          ? `${traceId} (shown to the diagnoser)`
+                          : traceId
+                      }
+                      className={cn(
+                        "block rounded-md border px-2 font-mono hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none",
+                        exemplars.has(traceId) &&
+                          "border-primary/60 text-primary",
+                      )}
+                    >
+                      {shortId(traceId)}
+                    </Link>
+                  </li>
                 ))}
-              </div>
-            </Section>
-          )}
-          <Section title="All traces in the cluster">
-            <ul className="flex flex-wrap gap-1.5">
-              {shown.map((traceId) => (
-                <li key={traceId}>
-                  <Link
-                    href={tracePath(traceId)}
-                    title={
-                      exemplars.has(traceId)
-                        ? `${traceId} (shown to the diagnoser)`
-                        : traceId
-                    }
-                    className={cn(
-                      "block rounded-md border px-2 font-mono hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none",
-                      exemplars.has(traceId) &&
-                        "border-primary/60 text-primary",
-                    )}
-                  >
-                    {shortId(traceId)}
-                  </Link>
-                </li>
-              ))}
-              {hidden > 0 && (
-                <li className="px-2 text-muted-foreground">+{hidden} more</li>
-              )}
-            </ul>
-          </Section>
+                {hidden > 0 && (
+                  <li className="px-2 text-muted-foreground">+{hidden} more</li>
+                )}
+              </ul>
+            </More>
+          </div>
           <p className="type-h4 flex flex-wrap gap-x-4 gap-y-1">
-            <span>{formatUsage(cluster.usage)}</span>
+            <span>Diagnosis: {formatUsage(cluster.usage)}</span>
             <span>{cluster.verification}</span>
           </p>
         </div>

@@ -21,3 +21,9 @@ export function formatAge(ms: number): string {
 
 /** A share as "43%". */
 export const formatPercent = (share: number) => `${Math.round(share * 100)}%`;
+
+/** A failure category as words: "infra_error" reads "Infra error". */
+export function formatCategory(category: string): string {
+  const words = category.replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
