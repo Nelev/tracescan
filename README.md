@@ -36,8 +36,8 @@ flowchart LR
         api["Runs API + SSE<br/>api/runs.py"]
         uispec["UI spec call<br/>api/ui_spec.py"]
         runs["Runs module<br/>runs/"]
-        graph["LangGraph graph<br/>agent/"]
-        api --> runs --> graph
+        agentgraph["LangGraph graph<br/>agent/"]
+        api --> runs --> agentgraph
         api --> uispec
     end
 
@@ -61,12 +61,12 @@ flowchart LR
     collector -- "INSERT … ON CONFLICT DO NOTHING" --> spans
     spans --> reader
     browser -- "read-only engine" --> spans
-    graph -- "TraceClient (MCP)" --> tools
-    graph --> llm
+    agentgraph -- "TraceClient (MCP)" --> tools
+    agentgraph --> llm
     uispec --> llm
-    graph -- "checkpointer" --> cp
+    agentgraph -- "checkpointer" --> cp
     runs --> apptables
-    graph -- "apply_actions (dry run)" --> out
+    agentgraph -- "apply_actions (dry run)" --> out
     ui -- "/api/* → /v1/*" --> api
     ui -- "/api/traces" --> browser
 ```
@@ -405,6 +405,100 @@ flowchart TD
 4. **Retries and budget.** Each cluster has 3 model calls, 100,000 tokens and 0.50 USD. A transient error is retried after a doubling wait while the budget holds; the SDK's own retries are off, so all retrying is here. Any other error, or an empty budget, puts the cluster in `diagnosis_failures`, logged by exception type only. The node appends one `{cluster_id, calls, tokens, cost_usd}` entry to `model_usage` over all its attempts, with the cost OpenRouter reports.
 
 The failure categories: `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, the MAST top-level `system_design`, `inter_agent_misalignment` and `task_verification`, and `unknown`. `agent/taxonomy.md` defines each one.
+
+## Guards on the agent
+
+The agent reads clinical traces, calls paid models and drafts text that may be written somewhere. Every one of those steps has a guard written in code, so it does not depend on the model behaving. The guards sit at five points:
+
+```mermaid
+flowchart LR
+    subgraph access["1 · Trace access"]
+        a1["import boundary<br/>test_boundaries.py"]
+        a2["MCP only, read-only<br/>transactions"]
+        a3["app allowlist,<br/>TraceId pattern"]
+        a4["TraceGuard:<br/>500 calls, audit log"]
+        a5["sanitizer:<br/>attribute allowlist"]
+    end
+    subgraph calls["2 · Model calls"]
+        b1["Budget per item:<br/>calls, tokens, cost"]
+        b2["retry transient<br/>errors only"]
+        b3["timeout, SDK<br/>retries off"]
+        b4["concurrency caps<br/>16 / 4"]
+    end
+    subgraph answers["3 · Model answers"]
+        c1["schema validation"]
+        c2["blame check<br/>(judge)"]
+        c3["citation check<br/>(diagnoser)"]
+        c4["code sets ids<br/>and verdicts"]
+    end
+    subgraph failures["4 · Failures"]
+        d1["one branch fails,<br/>the others go on"]
+        d2["failed items kept,<br/>never dropped"]
+    end
+    subgraph writes["5 · Writes"]
+        e1["human review<br/>interrupt"]
+        e2["one decision per<br/>proposal, row lock"]
+        e3["dry run only"]
+        e4["safe file names"]
+    end
+    access --> calls --> answers --> failures --> writes
+```
+
+### 1. Trace access
+
+| Guard | Where | What it stops |
+| --- | --- | --- |
+| Import boundary | `tests/test_boundaries.py` | `agent/` importing a database driver, the Postgres saver or any `trace_store` module except `models`: the agent can reach traces only through the MCP client |
+| Read-only server | `trace_store/mcp_server.py`, `postgres_reader.py` | Writes: there is no write tool, and every reader transaction is read-only |
+| Argument checks | `TraceQuery`, `TraceId` in `trace_store/models.py` | Another app's traces (`ALLOWED_APPS`, checked in `search_traces`; the reader scopes the id lookups too), and ids of any shape other than `^[A-Za-z0-9_.-]{1,64}$`, rejected by pydantic before the tool runs. A search returns at most 200 rows |
+| Call budget | `TraceGuard` in `trace_store/guard.py` | A runaway loop of tool calls: 500 per server process, which is one run. Rejected calls count too; past the budget every call is `denied` |
+| Audit log | `TraceGuard` | Silent access: every call is logged with the tool, the outcome and a hash of its arguments, never the arguments, results or exception messages |
+| Sanitizer | `trace_store/sanitize.py` | Clinical text reaching a model: attribute values outside the allowlist read `[redacted]`, and strings are cut to 200 characters in a tree |
+| Closed session on resume | `ClosedTraces` in `agent/context.py` | Trace reads after the review: the resume gets a trace access whose every call raises |
+
+### 2. Model calls
+
+All of it is in `agent/model_guard.py`, shared by the trace judge and the diagnoser.
+
+| Guard | What it does |
+| --- | --- |
+| Budget per item | Each trace and each cluster has its own `Spent` (calls, tokens, cost) and `Budget`. `Spent.ok` is checked before any second call. Trace: 3 calls, 20,000 tokens, 0.05 USD. Cluster: 3 calls, 100,000 tokens, 0.50 USD. A call is counted before it is made, so a call that raises still counts. Tokens and cost come from what OpenRouter reports |
+| Transient errors only | `retryable` allows 408, 429, 5xx, timeouts and dropped connections. Anything else is a bug and is raised at once |
+| Backoff | `retrying` waits 1 s before the first retry and doubles the wait after each, and retries one call at a time, so an answer already received is never asked for again. The diagnoser uses it; the judge makes one attempt plus its blame re-ask |
+| One retry layer | The SDK's own retries are off (`max_retries=0`), and each request has a 120 s timeout, so a call that hangs becomes a timeout that the budget controls |
+| Window cap | A run judges at most `MAX_JUDGED_TRACES` (200) traces, the newest first |
+| Concurrency | At most 16 branches run at once (`max_concurrency`), and at most 4 diagnoses (a semaphore in `TraceContext`), so N clusters never mean N large calls at the same time |
+| Spend on record | Every branch appends its spend to `judge_usage` or `model_usage`, failed attempts included, and the Run tab shows it |
+
+### 3. Model answers
+
+| Guard | What it does |
+| --- | --- |
+| Schema validation | Both models answer through `with_structured_output(..., method="json_schema")`, and the answer is validated by pydantic (`TraceVerdict`, `Diagnosis`: closed category list, confidence between 0 and 1, at least one piece of evidence). An answer that doesn't parse raises |
+| Blame check | A failed verdict must blame a span of the tree the judge was shown. Otherwise the judge is asked once more with the valid ids, and then the code blames the deepest error span (`blame_check`: `valid`, `corrected`, `fallback`) |
+| Citation check | Every span the diagnoser cites must be in the exemplar trees it was shown. Otherwise it is asked once more. Citations it still can't back up are dropped, the confidence is capped at 0.3, and the cluster's first failing span is cited if nothing is left (`evidence_check`) |
+| The code decides | The model gives a score, and the code decides "failed" (at most 0.5). The code sets `cluster_id`, `evidence_check` and `blame_check`. Verification stays `unverified` until a reproducer exists |
+| No content in prompts back | A re-ask sends ids only, never span contents |
+
+### 4. Failures
+
+A judge or diagnose branch catches its own errors. It records the trace id in `judge_failures` or the cluster id in `diagnosis_failures`, logs the exception type only (a message could quote span contents), and returns normally, so one failure never stops the other branches. A cluster without a diagnosis still gets a stub proposal, so the reviewer sees it. Isolated failures become one-trace clusters instead of being dropped.
+
+### 5. Writes
+
+| Guard | Where | What it stops |
+| --- | --- | --- |
+| Human review | `human_review` (`interrupt`) | Any write without a person: the run pauses before `apply_actions`, and the interrupt value holds ids only, because it is checkpointed and streamed |
+| Complete decisions | `Runs.review` in `runs/service.py` | A partial review: exactly one `approve` or `reject` per proposal, otherwise `422` with the `missing` and `unknown` cluster ids |
+| One review at a time | `PostgresRunStore.reviewing` | Two reviews of one run: a row lock (`FOR UPDATE SKIP LOCKED`) makes the second get `409`, and the decisions and the new status commit together or not at all |
+| Approved only | `apply_actions` | Rejected proposals being written, or becoming "known" |
+| Dry run only | `require_dry_run` in `agent/actions.py` | Real writes before the writers exist: the app refuses to start with `DRY_RUN` off, and `apply_actions` raises before writing. No request can change the setting |
+| Safe file names | `write_dry_run` | Path tricks: a cluster id that is not `[A-Za-z0-9_-]+` raises before anything is written |
+| Ids-only regression cases | `proposals.py` | Span text in the eval dataset: a regression case holds trace and span ids only |
+
+The UI spec model, which runs next to the graph, has its own limits: at most 40 calls per run (`MAX_UI_CALLS_PER_RUN`) and 15 s per call. A message that goes past either is sent without a spec.
+
+What is not guarded yet: the diagnoser's prose is not checked for clinical content (the human review is the gate), the collector has no authentication or size limit, and no read-only database role exists.
 
 ## Runs, review and the API
 
