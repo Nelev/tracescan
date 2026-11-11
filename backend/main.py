@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Checked before anything opens: better to refuse at startup than after a run's review.
     require_dry_run(dry_run)
     # DATABASE_URL: a role separate from the read-only trace role. One database, two owners: the
-    # checkpointer creates its own tables, Alembic creates ours (users, runs, reviews).
+    # checkpointer creates its own tables, Alembic creates ours (runs, reviews, spans, scores).
     database_url = os.environ["DATABASE_URL"]
     engine = create_engine(database_url)
     app.state.engine = engine  # the collector (api.traces) writes spans through it

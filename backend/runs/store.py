@@ -11,15 +11,15 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Protocol
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import Update, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from agent.schemas import Decision
-from db.models import Review, Run, User
+from db.models import Review, Run
 from db.models import RunStatus as StoredStatus
 
 ENDED: frozenset[str] = frozenset({"completed", "failed", "aborted"})
@@ -44,14 +44,14 @@ Finish = Callable[[StoredStatus, RunCounts], Awaitable[None]]
 
 
 class RunRecord(BaseModel):
-    """One row of `runs`, with the starter's name."""
+    """One row of `runs`."""
 
     run_id: str
     target_app: str
     since: datetime | None
     until: datetime | None
     status: StoredStatus
-    started_by: str | None  # a user's name; None for a run first recorded at its review
+    started_by: str | None  # a name as the client sent it; None only on old rows
     created_at: datetime
     ended_at: datetime | None
     failed_traces: int
@@ -74,7 +74,7 @@ class RunStore(Protocol):
         since: datetime | None,
         until: datetime | None,
         status: StoredStatus,
-        user: str | None,
+        user: str,
     ) -> None:
         """Record a run. A run that is already recorded is left as it is."""
         ...
@@ -111,13 +111,13 @@ _SELECT_RUNS = select(
     Run.since,
     Run.until,
     Run.status,
-    User.name.label("started_by"),
+    Run.started_by,
     Run.created_at,
     Run.ended_at,
     Run.failed_traces,
     Run.clusters,
     Run.proposals,
-).join(User, Run.started_by == User.id, isouter=True)
+)
 
 
 def _record(row) -> RunRecord:
@@ -147,17 +147,6 @@ class PostgresRunStore:
                 "the runs table cannot be read: run `uv run alembic upgrade head`"
             ) from exc
 
-    async def _user_id(self, conn: AsyncConnection, name: str) -> UUID:
-        """The id of the user of that name, created when new."""
-        # DO UPDATE, not DO NOTHING, so the existing row's id is returned too.
-        upsert = (
-            pg_insert(User)
-            .values(id=uuid4(), name=name)
-            .on_conflict_do_update(index_elements=[User.name], set_={"name": name})
-            .returning(User.id)
-        )
-        return (await conn.execute(upsert)).scalar_one()
-
     async def create_run(
         self,
         run_id: str,
@@ -165,10 +154,9 @@ class PostgresRunStore:
         since: datetime | None,
         until: datetime | None,
         status: StoredStatus,
-        user: str | None,
+        user: str,
     ) -> None:
         async with self._engine.begin() as conn:
-            started_by = await self._user_id(conn, user) if user else None
             await conn.execute(
                 pg_insert(Run)
                 .values(
@@ -177,7 +165,7 @@ class PostgresRunStore:
                     since=since,
                     until=until,
                     status=status,
-                    started_by=started_by,
+                    started_by=user,
                 )
                 .on_conflict_do_nothing(index_elements=[Run.id])
             )
@@ -203,7 +191,6 @@ class PostgresRunStore:
             if held.first() is None:
                 raise NotClaimable
             if decisions:
-                reviewer_id = await self._user_id(conn, reviewer)
                 await conn.execute(
                     insert(Review),
                     [
@@ -211,7 +198,7 @@ class PostgresRunStore:
                             "run_id": UUID(run_id),
                             "cluster_id": cluster_id,
                             "decision": decision,
-                            "reviewer_id": reviewer_id,
+                            "reviewer": reviewer,
                         }
                         for cluster_id, decision in decisions.items()
                     ],
@@ -235,8 +222,7 @@ class PostgresRunStore:
     async def reviews(self, run_id: str) -> list[ReviewRecord]:
         """The run's recorded decisions, by cluster id. Nothing in the app reads them yet."""
         query = (
-            select(Review.cluster_id, Review.decision, User.name, Review.decided_at)
-            .join(User, Review.reviewer_id == User.id)
+            select(Review.cluster_id, Review.decision, Review.reviewer, Review.decided_at)
             .where(Review.run_id == UUID(run_id))
             .order_by(Review.cluster_id)
         )
@@ -245,7 +231,7 @@ class PostgresRunStore:
                 ReviewRecord(
                     cluster_id=row.cluster_id,
                     decision=row.decision,
-                    reviewer=row.name,
+                    reviewer=row.reviewer,
                     decided_at=row.decided_at,
                 )
                 for row in await conn.execute(query)

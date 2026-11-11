@@ -260,7 +260,7 @@ class InMemoryRunStore:
         since: datetime | None,
         until: datetime | None,
         status: StoredStatus,
-        user: str | None,
+        user: str,
     ) -> None:
         if run_id in self.runs:
             return

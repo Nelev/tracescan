@@ -78,7 +78,7 @@ async def _open_run(
     collection.
     """
     try:
-        async with runs.start(body.target_app, body.since, body.until, user) as run:
+        async with runs.start(body.target_app, user, body.since, body.until) as run:
             yield run
     except RunFailed:
         # Raised only while opening, so before the stream starts: a plain 502.

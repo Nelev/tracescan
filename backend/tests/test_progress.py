@@ -87,7 +87,7 @@ async def test_a_cluster_whose_diagnosis_failed_is_flagged_not_dropped():
 
 
 @pytest.mark.anyio
-async def test_a_cluster_run_again_is_another_branch_and_the_next_stage_starts_once():
+async def test_a_retried_cluster_is_still_one_branch_and_the_next_stage_starts_once():
     failed_once = []
 
     def answer(messages):
@@ -99,11 +99,10 @@ async def test_a_cluster_run_again_is_another_branch_and_the_next_stage_starts_o
     events, final = await stream_progress(FakeStructuredModel(messages=iter(()), answer=answer))
 
     starts = of(events, "node_started", "diagnose_cluster")
-    assert sorted(e["cluster_id"] for e in starts) in (["c0", "c0", "c1"], ["c0", "c1", "c1"])
-    # The run that left its cluster unfinished reports no result and is not flagged as failed.
-    unfinished = [e for e in of(events, "node_finished", "diagnose_cluster") if not e["counts"]]
-    assert len(unfinished) == 1 and "ok" not in unfinished[0]
-    assert len(of(events, "node_started", "reproduce_failure")) == 1  # the join is a barrier
+    assert sorted(e["cluster_id"] for e in starts) == ["c0", "c1"]
+    finishes = of(events, "node_finished", "diagnose_cluster")
+    assert all(e["counts"] == {"diagnoses": 1} and "ok" not in e for e in finishes)
+    assert len(of(events, "node_started", "draft_proposals")) == 1  # after both branches
     assert len(final["diagnoses"]) == 2
 
 

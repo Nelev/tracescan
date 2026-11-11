@@ -1,7 +1,8 @@
-"""The application's tables: who uses TraceScan, the runs they start, and what they decide.
+"""The application's tables: the runs people start, and what they decide.
 
-They sit in the same database as the graph checkpoints (DATABASE_URL). `users`, `runs` and
-`reviews` hold ids, counts and decisions only: no issue text and no span content. The checkpoint
+They sit in the same database as the graph checkpoints (DATABASE_URL). `runs` and `reviews` hold
+ids, names, counts and decisions only: no issue text and no span content. A person is a name the
+client sent (there is no login), stored as it is in the row that names them. The checkpoint
 stays the record of a run's state and proposals; `runs` is the index and the lifecycle around it.
 `spans` is the exception: it is the trace store, and holds what the collector received;
 `scores` is what the heuristic checks say about each of its traces (ids and numbers only).
@@ -11,7 +12,7 @@ Change a table here, then write a migration: `uv run alembic revision --autogene
 
 from datetime import datetime
 from typing import Any, Literal, get_args
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -25,7 +26,7 @@ RunStatus = Literal["in_progress", "review_required", "completed", "failed", "ab
 RUN_STATUSES = get_args(RunStatus)
 DECISIONS = get_args(Decision)
 SPAN_STATUSES = get_args(SpanStatus)
-NAME_MAX = 80  # the width of users.name, and so the longest name the API accepts
+NAME_MAX = 80  # the width of a stored name, and so the longest name the API accepts
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> str:
@@ -34,16 +35,6 @@ def _one_of(column: str, values: tuple[str, ...]) -> str:
 
 class Base(DeclarativeBase):
     pass
-
-
-class User(Base):
-    """A person, recorded by name only. There is no login: the name is whatever the client says."""
-
-    __tablename__ = "users"
-
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    name: Mapped[str] = mapped_column(String(NAME_MAX), unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Run(Base):
@@ -58,8 +49,8 @@ class Run(Base):
     since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20))
-    # Null for a run that was first recorded at its review (started before this table existed).
-    started_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
+    # Null only for rows from before names were required.
+    started_by: Mapped[str | None] = mapped_column(String(NAME_MAX))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failed_traces: Mapped[int] = mapped_column(server_default="0")
@@ -80,7 +71,7 @@ class Review(Base):
     )
     cluster_id: Mapped[str] = mapped_column(primary_key=True)
     decision: Mapped[str] = mapped_column(String(10))
-    reviewer_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    reviewer: Mapped[str] = mapped_column(String(NAME_MAX))
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

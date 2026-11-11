@@ -1,13 +1,14 @@
 """Budget and retry building blocks for the model calls of the diagnoser and the trace judge.
 
-The budget lives in graph state. Every diagnose_cluster run appends one usage entry to
-`model_usage`, keyed by `cluster_id`, and every judge run one to `judge_usage`, keyed by
-`trace_id`; an item's spend is the sum of its entries (`spent_for`). The router puts the item's
-entries in the `Send` payload, so the node can check the budget before and after its run
-(`Spent.ok`, against the cluster or the trace `Budget`). `guarded` makes one structured call (`include_raw=True`: the raw message carries
-tokens and cost) and adds it to a `Spent`; whether to run again is the graph's decision.
+Each node keeps one `Spent` for its item (a cluster, a trace) over all its calls, checks it with
+`Spent.ok` against the item's `Budget` before asking again, and appends it to graph state as one
+usage entry: `model_usage` keyed by `cluster_id`, `judge_usage` keyed by `trace_id` (`spent_by`
+sums them per item). `guarded` makes one structured call (`include_raw=True`: the raw message
+carries tokens and cost) and adds it to a `Spent`.
 """
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -25,6 +26,8 @@ from agent.const import (
     MAX_TRACE_TOKENS,
     RETRY_DELAY_S,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -56,13 +59,12 @@ class Spent:
             self.calls + other.calls, self.tokens + other.tokens, self.cost_usd + other.cost_usd
         )
 
-    def ok(self, budget: Budget | None = None) -> bool:
-        """Whether another call is allowed within `budget` (a cluster's, by default)."""
-        limit = budget or cluster_budget()
+    def ok(self, budget: Budget) -> bool:
+        """Whether another call is allowed within `budget`."""
         return (
-            self.calls < limit.calls
-            and self.tokens < limit.tokens
-            and self.cost_usd < limit.cost_usd
+            self.calls < budget.calls
+            and self.tokens < budget.tokens
+            and self.cost_usd < budget.cost_usd
         )
 
 
@@ -76,11 +78,6 @@ def spent_by(usage: list[dict], key: str = "cluster_id") -> dict[str, Spent]:
     for entry in usage:
         totals[entry[key]] = totals.get(entry[key], Spent()) + _spent(entry)
     return totals
-
-
-def spent_for(usage: list[dict], item_id: str, key: str = "cluster_id") -> Spent:
-    """What one item has spent so far: the sum of its usage entries."""
-    return spent_by(usage, key).get(item_id, Spent())
 
 
 def retryable(exc: Exception) -> bool:
@@ -110,6 +107,28 @@ async def guarded(ask: Callable[[], Awaitable[Any]], spent: Spent):
     if out["parsed"] is None:
         raise out["parsing_error"]
     return out["parsed"]
+
+
+def retrying[**P, R](
+    call: Callable[P, Awaitable[R]], spent: Spent, budget: Budget, label: str
+) -> Callable[P, Awaitable[R]]:
+    """`call`, retried after a doubling wait on a transient error while `spent` is within `budget`.
+
+    One call at a time, so an answer already given is never asked for again. Any other error, or
+    one with no budget left, is raised. `label` names the item in the log; no message is logged.
+    """
+
+    async def call_retrying(*args: P.args, **kwargs: P.kwargs) -> R:
+        while True:
+            try:
+                return await call(*args, **kwargs)
+            except Exception as exc:
+                if not (retryable(exc) and spent.ok(budget)):
+                    raise
+                logger.warning("%s: %s, retrying", label, type(exc).__name__)
+                await asyncio.sleep(backoff_delay(spent.calls))
+
+    return call_retrying
 
 
 def structured_asker[M: BaseModel](

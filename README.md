@@ -11,7 +11,7 @@ The pipeline runs end to end on synthetic traces, as a dry run.
 | Part | State |
 | --- | --- |
 | Graph: collect, cluster, diagnose, draft, review, apply | Working |
-| Graph: `reproduce_failure`, `match_known_issues` | Placeholders that return fixed values |
+| Graph: `reproduce_failure`, `match_known_issues` | Not built, not in the graph |
 | Trace MCP server (read-only, sanitized, budgeted) | Working, over the Postgres reader |
 | OTLP collector (`POST /v1/traces` into the `spans` table) | Working, minimal: localhost and synthetic traffic only |
 | Postgres trace reader | The only trace source. A trace is failed when its lowest score is low. No read-only role yet |
@@ -40,7 +40,7 @@ flowchart LR
 
     subgraph pg["Postgres"]
         spans[("spans")]
-        app[("users, runs, reviews")]
+        app[("runs, reviews")]
         cp[("graph checkpoints")]
     end
 
@@ -228,15 +228,14 @@ One LangGraph `StateGraph` over a shared `TriageState`, built by `build_graph` i
 ```mermaid
 flowchart TD
     start([START]) --> collect[collect_traces]
-    collect -- "no failed traces" --> stop([END])
-    collect --> cluster[cluster_failures]
+    collect -- "no traces" --> stop([END])
+    collect -- "one Send per trace" --> judge["score_trace × T<br/>(the trace judge)"]
+    judge --> joins[join_scores]
+    joins -- "no failed traces" --> stop
+    joins --> cluster[cluster_failures]
     cluster -- "no clusters" --> stop
     cluster -- "one Send per cluster" --> diagnose["diagnose_cluster × N<br/>(parallel, at most 4 at once)"]
-    diagnose --> join[join_diagnoses]
-    join -- "clusters left unfinished<br/>by a transient error" --> diagnose
-    join --> repro["reproduce_failure<br/>(placeholder)"]
-    repro --> known["match_known_issues<br/>(placeholder)"]
-    known --> draft[draft_proposals]
+    diagnose --> draft[draft_proposals]
     draft --> review["human_review<br/>(interrupt: the run pauses)"]
     review -- "nothing approved" --> stop
     review -- "at least one approval" --> apply["apply_actions<br/>(dry run)"]
@@ -249,20 +248,16 @@ flowchart TD
 
 **`cluster_failures`** groups the summaries with embeddings and HDBSCAN (see the next section). It makes no model call. It writes `clusters` and `unclustered`. Each unclustered trace also becomes a one-trace cluster with method `isolated`, so it is diagnosed like any other; there is no cap on these yet.
 
-**`diagnose_cluster`** runs once per cluster, in parallel. A router sends each cluster as a `ClusterTask`, which holds the cluster and its spend so far, not the whole state. The node:
+**`diagnose_cluster`** runs once per cluster, in parallel. A router sends each cluster as a `ClusterTask`, which holds the cluster, not the whole state. The node:
 
 1. Fetches the span trees of the cluster's exemplars (the 3 newest traces) through the MCP server.
 2. Makes one structured-output call that returns a `Diagnosis`: a category, a root cause, a suggested fix, a confidence between 0 and 1, and at least one piece of evidence (a trace id, a span id and a note). The system prompt is `agent/taxonomy.md`, which defines the ten categories.
 3. Checks the evidence. Every cited span must be a span of the trees the model was shown. If one is not, the model is asked once more with the valid ids listed. If it still cites spans it was not shown, those are dropped, the confidence is capped at 0.3, and with no real citation left the cluster's own first failing span is cited. The stored diagnosis records the outcome in `evidence_check`: `valid`, `corrected` or `unsupported`.
-4. Records its spend. Every run appends `{cluster_id, calls, tokens, cost_usd}` to `model_usage`, including failed runs.
+4. Records its spend: one `{cluster_id, calls, tokens, cost_usd}` entry in `model_usage` over all its attempts, failed or not.
 
-Each cluster has a budget: 3 model calls, 100,000 tokens and 0.50 USD. A transient model error (408, 429, 5xx, a timeout, a dropped connection) with budget left leaves the cluster unfinished, and the graph runs the node again after a wait that doubles each time. Any other error, or an empty budget, puts the cluster id in `diagnosis_failures`. A failure is logged by exception type only.
+Each cluster has a budget: 3 model calls, 100,000 tokens and 0.50 USD. A transient model error (408, 429, 5xx, a timeout, a dropped connection) with budget left is retried inside the node after a wait that doubles each time. The trees are fetched once, and a failing fetch is not retried. Any other error, or an empty budget, puts the cluster id in `diagnosis_failures`. A failure is logged by exception type only.
 
-**`join_diagnoses`** is the barrier after each round of parallel branches. The router after it sends back every cluster that has neither a diagnosis nor a recorded failure. Because the budget lives in state, the retry loop survives a resume, and because every run uses at least one attempt, it ends.
-
-**`reproduce_failure`** is a placeholder. It will replay exemplar inputs against the target app. Until then every diagnosis is `unverified`, and no cluster is dropped for not reproducing.
-
-**`match_known_issues`** is a placeholder. It will compare clusters with issues from earlier runs.
+`draft_proposals` runs once, after every diagnose branch is done. `reproduce_failure` (replay exemplar inputs against the target app) and `match_known_issues` (compare clusters with earlier issues) are planned and not in the graph; until the reproducer exists every diagnosis is `unverified`, and no cluster is dropped for not reproducing.
 
 **`draft_proposals`** builds one `Proposal` per cluster, in cluster order, with no model call. The issue is markdown rendered with plain f-strings from the cluster and its diagnosis. A diagnosed cluster also gets a `RegressionCase` that holds ids only: the exemplar traces and the cited spans, never span text. A cluster without a diagnosis gets a stub proposal, so a failed cluster still reaches the reviewer. An evidence check other than `valid` is flagged in the issue body.
 

@@ -25,11 +25,9 @@ class TriageState(TypedDict, total=False):
     diagnoses: Annotated[list[dict], operator.add]
     # Ids of clusters whose diagnosis failed. Kept, never dropped, so the run can report them.
     diagnosis_failures: Annotated[list[str], operator.add]
-    # One entry per diagnose run, failed or not: {cluster_id, calls, tokens, cost_usd}. Numbers
-    # only. A cluster's spend is the sum of its entries (agent.model_guard.spent_for).
+    # One entry per diagnosed cluster, failed or not: {cluster_id, calls, tokens, cost_usd},
+    # over all its attempts. Numbers only.
     model_usage: Annotated[list[dict], operator.add]
-    reproductions: list[dict]
-    known_matches: dict[str, str]
     # One Proposal (agent.schemas) per cluster, in cluster order, written by draft_proposals.
     proposals: list[dict]
     decisions: dict[str, Decision]  # by cluster id, set when human_review is resumed

@@ -1,1 +1,1 @@
-"""The application's own tables (users, runs, reviews): see db.models. Migrations: migrations/."""
+"""The application's own tables (runs, reviews, spans, scores): see db.models. Migrations: migrations/."""

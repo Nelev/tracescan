@@ -1,6 +1,6 @@
 """Data contracts of the graph: what nodes put into state, the failure categories and the diagnosis."""
 
-from typing import Literal, NotRequired, TypedDict, get_args
+from typing import Literal, TypedDict, get_args
 
 from pydantic import BaseModel, Field
 
@@ -26,14 +26,9 @@ class Cluster(TypedDict):
 
 
 class ClusterTask(TypedDict):
-    """Private input of one diagnose branch: its cluster, not the whole state.
-
-    A node reached through `Send` sees only this payload, so the router adds the cluster's
-    `model_usage` entries (numbers only) for the node to check its budget against.
-    """
+    """Private input of one diagnose branch: its cluster, not the whole state."""
 
     cluster: Cluster
-    model_usage: NotRequired[list[dict]]
 
 
 class TraceTask(TypedDict):

@@ -226,10 +226,6 @@ def _counts(summary: RunSummary) -> RunCounts:
     return RunCounts(summary.failed_traces, summary.clusters, summary.proposals)
 
 
-def _when(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value else None
-
-
 class Runs:
     """Built once at startup with everything a run needs; `open_traces` opens one trace session."""
 
@@ -260,9 +256,9 @@ class Runs:
     async def start(
         self,
         target_app: str,
+        user: str,
         since: datetime | None = None,
         until: datetime | None = None,
-        user: str | None = None,
     ) -> AsyncIterator[StartedRun]:
         """Start a run on a fresh thread, in `user`'s name, and yield its id and events.
 
@@ -341,20 +337,9 @@ class Runs:
         return await self._store.list_runs(limit)
 
     async def _load(self, run_id: str) -> tuple[Mapping, RunState]:
-        """The run's state values and where it stands, from its two records read at once."""
-        async with anyio.create_task_group() as tg:
-            record = snapshot = None
-
-            async def read_record() -> None:
-                nonlocal record
-                record = await self._store.get_run(run_id)
-
-            async def read_snapshot() -> None:
-                nonlocal snapshot
-                snapshot = await self._find_snapshot(run_id)
-
-            tg.start_soon(read_record)
-            tg.start_soon(read_snapshot)
+        """The run's state values and where it stands, from its two records."""
+        record = await self._store.get_run(run_id)
+        snapshot = await self._find_snapshot(run_id)
         state = _resolve(snapshot, record)
         return (snapshot.values if snapshot else {}), state
 
@@ -388,38 +373,6 @@ class Runs:
                 missing=sorted(expected - set(decisions)), unknown=sorted(set(decisions) - expected)
             )
         try:
-            return await self._apply_review(run_id, decisions, reviewer)
-        except NotClaimable:
-            pass
-        # Not there to review. Unless it only has no row yet, as a run from before the runs table:
-        # then record it as the checkpoint has it and review it.
-        waiting = snapshot.values
-        try:
-            unrecorded = await self._store.get_run(run_id) is None
-            if unrecorded:
-                await self._store.create_run(
-                    run_id,
-                    waiting.get("target_app", ""),
-                    _when(waiting.get("since")),
-                    _when(waiting.get("until")),
-                    "review_required",
-                    None,
-                )
-        except Exception as exc:
-            _log_failure(exc)
-            raise RunFailed from None
-        if not unrecorded:
-            raise NotWaitingForReview
-        try:
-            return await self._apply_review(run_id, decisions, reviewer)
-        except NotClaimable:
-            raise NotWaitingForReview from None
-
-    async def _apply_review(
-        self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
-    ) -> RunStatus:
-        """Resume the graph inside the store's review. Raises `NotClaimable` or `RunFailed`."""
-        try:
             async with self._store.reviewing(run_id, decisions, reviewer) as finish:
                 values = await self._graph.ainvoke(
                     Command(resume=dict(decisions)),
@@ -432,7 +385,8 @@ class Runs:
                 await finish(status.status, _counts(status.summary))
                 return status
         except NotClaimable:
-            raise
+            # Another review holds it, or it ended since the checkpoint was read.
+            raise NotWaitingForReview from None
         except Exception as exc:
             _log_failure(exc)
             raise RunFailed from None

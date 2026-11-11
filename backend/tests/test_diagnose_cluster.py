@@ -40,11 +40,10 @@ FAILURES = [
 ]
 
 
-async def diagnose(model, usage: list[dict] | None = None) -> dict:
-    """One run of the node. `usage` is what the router would pass from earlier runs."""
+async def diagnose(model) -> dict:
+    """One run of the node over CLUSTER, whose one exemplar is TREE."""
     context = fake_context(FakeTraces(trees={"t1": TREE}), model)
-    task = ClusterTask(cluster=CLUSTER, model_usage=usage or [])
-    return await diagnose_cluster(task, Runtime(context=context))
+    return await diagnose_cluster(ClusterTask(cluster=CLUSTER), Runtime(context=context))
 
 
 async def run_graph(trees: dict, model) -> dict:
@@ -207,62 +206,50 @@ async def test_the_graph_collects_one_usage_entry_per_cluster():
     assert sorted(u["cluster_id"] for u in result["model_usage"]) == ["c0", "c1"]
 
 
-def earlier_runs(calls: int, tokens: int = 0) -> list[dict]:
-    """The cluster's `model_usage` entries from `calls` earlier runs, as the router passes them."""
-    entry = {"cluster_id": "c0", "calls": 1, "tokens": tokens // calls, "cost_usd": 0.0}
-    return [entry] * calls
-
-
 @pytest.mark.anyio
-async def test_a_transient_error_with_budget_left_leaves_the_cluster_unfinished():
-    model = scripted_model(FakeApiError(503))
+async def test_a_transient_error_is_retried_until_it_clears():
+    model = scripted_model(FakeApiError(503), FakeApiError(429), GOOD)
     result = await diagnose(model)
 
-    # No verdict: the graph runs the node again. Only the spend is reported.
-    assert result == {"model_usage": [{"cluster_id": "c0", "calls": 1, "tokens": 0, "cost_usd": 0}]}
+    (diagnosis,) = result["diagnoses"]
+    assert diagnosis["evidence_check"] == "valid"
+    assert len(model.seen) == 3
+    # One entry for the cluster: three calls, only the last one answered.
+    assert result["model_usage"] == [
+        {"cluster_id": "c0", "calls": 3, "tokens": 150, "cost_usd": 0.001}
+    ]
 
 
 @pytest.mark.anyio
-async def test_a_transient_error_with_no_budget_left_fails_the_cluster():
-    model = scripted_model(FakeApiError(503))
-    result = await diagnose(model, earlier_runs(MAX_MODEL_ATTEMPTS - 1))
+async def test_a_transient_error_that_never_clears_fails_the_cluster_within_the_budget():
+    model = scripted_model(FakeApiError(429))  # repeats for ever
+    result = await diagnose(model)
 
     assert result["diagnosis_failures"] == ["c0"]
-    assert result["model_usage"][0]["calls"] == 1  # this run only, not the earlier ones
+    assert "diagnoses" not in result
+    assert len(model.seen) == MAX_MODEL_ATTEMPTS
+    assert result["model_usage"][0]["calls"] == MAX_MODEL_ATTEMPTS
 
 
 @pytest.mark.anyio
 async def test_an_error_that_asking_again_cannot_fix_fails_the_cluster_at_once():
-    result = await diagnose(scripted_model(FakeApiError(401)))
+    model = scripted_model(FakeApiError(401))
+    result = await diagnose(model)
     assert result["diagnosis_failures"] == ["c0"]
     assert "diagnoses" not in result
+    assert len(model.seen) == 1
 
 
 @pytest.mark.anyio
-async def test_the_budget_is_checked_before_the_run_and_the_model_is_not_called():
-    model = scripted_model(GOOD)
-    result = await diagnose(model, earlier_runs(MAX_MODEL_ATTEMPTS))
-
-    assert result == {"diagnosis_failures": ["c0"]}
-    assert model.seen == []
-
-
-@pytest.mark.anyio
-async def test_a_re_run_waits_and_then_diagnoses_like_a_first_run():
-    result = await diagnose(scripted_model(GOOD), earlier_runs(1))
-    (diagnosis,) = result["diagnoses"]
-    assert diagnosis["evidence_check"] == "valid"
-    assert result["model_usage"][0]["calls"] == 1
-
-
-@pytest.mark.anyio
-async def test_earlier_spend_counts_against_the_evidence_re_ask(monkeypatch):
+async def test_retries_and_the_evidence_re_ask_share_one_budget(monkeypatch):
     monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 200)
-    model = scripted_model(citing(("t9", "s9")))  # this run alone costs 150, under the cap
-    result = await diagnose(model, earlier_runs(1, tokens=100))
+    # A failed call costs no tokens; the answer costs 150 and cites a span it was not shown.
+    model = scripted_model(FakeApiError(503), citing(("t9", "s9")), GOOD)
+    result = await diagnose(model)
 
-    assert len(model.seen) == 1  # 100 earlier + 150 now is over: no re-ask
-    assert result["diagnoses"][0]["evidence_check"] == "unsupported"
+    assert len(model.seen) == 3  # 150 tokens is under the cap: the re-ask is allowed
+    assert result["diagnoses"][0]["evidence_check"] == "corrected"
+    assert result["model_usage"][0]["calls"] == 3
 
 
 class FailingTraces(FakeTraces):
@@ -281,46 +268,6 @@ async def test_a_failure_before_any_model_call_is_a_failure_not_a_retry():
     assert model.seen == []
 
 
-async def run_one_cluster(model) -> dict:
-    """The whole graph over one failed trace, so one cluster, c0."""
-    failure = summary("t1", failing_span_name="retrieve", error_message="empty result")
-    context = fake_context(FakeTraces([failure], {"t1": TREE}), model)
-    return await build_graph().ainvoke({"target_app": "medas"}, context=context)
-
-
-@pytest.mark.anyio
-async def test_the_graph_runs_the_node_again_after_a_transient_error():
-    model = scripted_model(FakeApiError(503), FakeApiError(429), GOOD)
-    result = await run_one_cluster(model)
-
-    (diagnosis,) = result["diagnoses"]
-    assert diagnosis["evidence_check"] == "valid"
-    assert result.get("diagnosis_failures", []) == []
-    assert len(model.seen) == 3
-    # One entry per run; the two failed runs spent a call and no tokens.
-    assert [(u["calls"], u["tokens"]) for u in result["model_usage"]] == [(1, 0), (1, 0), (1, 150)]
-
-
-@pytest.mark.anyio
-async def test_the_graph_stops_when_errors_never_clear_and_records_the_failure():
-    model = scripted_model(FakeApiError(429))  # repeats for ever
-    result = await run_one_cluster(model)
-
-    assert result["diagnosis_failures"] == ["c0"]
-    assert result.get("diagnoses", []) == []
-    assert len(model.seen) == MAX_MODEL_ATTEMPTS
-    assert len(result["model_usage"]) == MAX_MODEL_ATTEMPTS
-
-
-@pytest.mark.anyio
-async def test_the_graph_does_not_run_the_node_again_after_a_fatal_error():
-    model = scripted_model(FakeApiError(401))
-    result = await run_one_cluster(model)
-
-    assert result["diagnosis_failures"] == ["c0"]
-    assert len(model.seen) == 1
-
-
 @pytest.mark.anyio
 async def test_one_cluster_running_again_does_not_hold_back_or_repeat_the_others():
     failed_once = []
@@ -336,7 +283,8 @@ async def test_one_cluster_running_again_does_not_hold_back_or_repeat_the_others
 
     assert sorted(d["cluster_id"] for d in result["diagnoses"]) == ["c0", "c1"]  # each only once
     assert result.get("diagnosis_failures", []) == []
-    assert len(result["model_usage"]) == 3  # two first runs and one re-run
+    # One entry per cluster; the one that was retried made two calls.
+    assert sorted(u["calls"] for u in result["model_usage"]) == [1, 2]
 
 
 @pytest.mark.anyio
@@ -354,3 +302,13 @@ async def test_a_spent_budget_keeps_the_diagnosis_as_unsupported_instead_of_aski
     assert diagnosis["confidence"] == UNSUPPORTED_CONFIDENCE_CAP
     (evidence,) = diagnosis["evidence"]
     assert (evidence["trace_id"], evidence["span_id"]) == ("t1", "s1")  # the failing span
+
+
+@pytest.mark.anyio
+async def test_a_transient_error_on_the_re_ask_retries_that_call_only():
+    model = scripted_model(citing(("t9", "s9")), FakeApiError(503), GOOD)
+    result = await diagnose(model)
+
+    assert len(model.seen) == 3  # the first answer is kept, not asked for again
+    assert len(model.seen[2]) == 4  # the retried call is the re-ask, with the correction
+    assert result["diagnoses"][0]["evidence_check"] == "corrected"
