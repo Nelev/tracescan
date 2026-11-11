@@ -17,6 +17,16 @@ export const CHIP_TONE: Record<StatusTone, string> = {
   stopped: "border-stopped/40 bg-stopped/10 text-stopped",
 };
 
+/** Each tone as a solid fill: the bars of the pipeline and of the run outcomes. */
+export const TONE_FILL: Record<StatusTone, string> = {
+  neutral: "bg-foreground/10",
+  info: "bg-info",
+  warning: "bg-warning",
+  success: "bg-success",
+  destructive: "bg-destructive",
+  stopped: "bg-stopped",
+};
+
 const SIZE = {
   md: { box: "h-7 gap-2 px-3", icon: "size-4" },
   sm: { box: "h-6 gap-1.5 px-2", icon: "size-3.5" },

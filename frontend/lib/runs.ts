@@ -1,5 +1,6 @@
-// The run list of GET /v1/runs: read once into typed rows, and the words the Runs tab shows.
+// The run list of GET /v1/runs: read once into typed rows, and the words the runs overview shows.
 
+import { formatDuration } from "./format.ts";
 import type { RunRecord, RunStatus } from "./types.ts";
 
 /**
@@ -60,6 +61,9 @@ export function parseRuns(body: unknown): RunRecord[] {
   return Array.isArray(body) ? body.filter(isRun) : [];
 }
 
+/** A run's page. */
+export const runPath = (runId: string) => `/runs/${encodeURIComponent(runId)}`;
+
 /** Enough of a run id to tell runs apart in a list. */
 export function shortId(runId: string): string {
   return runId.slice(0, 8);
@@ -103,4 +107,13 @@ export function formatWindow(
   if (until === null) return `From ${when(since as string)}`;
   if (since === null) return `Until ${when(until)}`;
   return `${when(since)} → ${when(until)}`;
+}
+
+/** How long a run took (`formatDuration`); null while it has not ended. */
+export function runDuration(run: RunRecord): string | null {
+  if (run.ended_at === null) return null;
+  const ms =
+    new Date(run.ended_at).getTime() - new Date(run.created_at).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return formatDuration(ms);
 }

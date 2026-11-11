@@ -5,6 +5,7 @@ import {
   formatWindow,
   parseRuns,
   RUN_STATUS,
+  runDuration,
   shortId,
 } from "./runs.ts";
 
@@ -99,4 +100,17 @@ test("a window names the ends it has", () => {
   assert.equal(formatWindow(since, null, utc), "From 5 Nov, 09:00");
   assert.equal(formatWindow(null, until, utc), "Until 6 Nov, 09:00");
   assert.equal(formatWindow(since, until, utc), "5 Nov, 09:00 → 6 Nov, 09:00");
+});
+
+test("a run's duration reads short, and is null until it ends", () => {
+  const [run] = parseRuns([RUN]);
+  assert.equal(runDuration(run), null);
+  assert.equal(
+    runDuration({ ...run, ended_at: "2026-11-10T14:32:47Z" }),
+    "42 s",
+  );
+  assert.equal(
+    runDuration({ ...run, ended_at: "2026-11-10T14:35:10Z" }),
+    "3 min 5 s",
+  );
 });

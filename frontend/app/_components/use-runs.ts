@@ -1,16 +1,21 @@
 "use client";
 
 import { listRuns } from "@/lib/api";
-import type { RunRecord } from "@/lib/types";
-import { type ListState, useList } from "./use-list";
-
-export type RunsState = ListState<RunRecord>;
+import { useRunStatus } from "./run-stream";
+import { useList } from "./use-list";
 
 /**
- * The recorded runs, loaded while `enabled` and again whenever `reloadOn` changes or `refresh`
- * is called. `recheck` loads once more a moment later, for a change the server records late: it
- * marks a run as aborted only when it notices that the connection closed.
+ * The recorded runs, loaded when the page opens, again when this window's run changes phase or
+ * gets its first event (the server records a run once it accepts it), once more a moment after a
+ * cancel or a lost connection (the server records `aborted` only when it notices), and on
+ * `refresh`. No polling.
  */
-export function useRuns(enabled: boolean, reloadOn: unknown, recheck = false) {
-  return useList(listRuns, enabled, reloadOn, recheck);
+export function useRuns() {
+  const { phase, started } = useRunStatus();
+  return useList(
+    listRuns,
+    true,
+    `${phase}:${started}`,
+    phase === "cancelled" || phase === "lost",
+  );
 }

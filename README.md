@@ -79,7 +79,7 @@ What each part owns:
 - **`backend/runs/`** is the only code that knows a run is a graph thread. It starts runs, reads their status from the checkpoint, and resumes them at the review. Callers never get raw graph state.
 - **`backend/api/`** is also HTTP and server-sent events over the runs module, and the read-only trace browser API.
 - **`backend/db/`** and **`backend/migrations/`** hold the application's own tables (SQLAlchemy 2 and Alembic). LangGraph's checkpointer creates and owns its tables in the same database.
-- **`frontend/`** is one page, the run console.
+- **`frontend/`** is the web app: the runs, one run as it happens, and the stored traces.
 
 ## Traces and spans
 
@@ -250,7 +250,7 @@ An index on `(app, start_time DESC)` serves the window queries. There is no `tra
 
 **`scores`** (migration `0004`): one row per trace and check (`trace_id`, `evaluator`, `value` from 0.0 bad to 1.0 fine, the blamed `span_id`, `scored_at`). The trace browser reads it. Nothing writes it for now: which traces failed is decided by the trace judge inside each run, and its verdicts stay in the run's state.
 
-**Reading.** `PostgresTraceReader` (`trace_store/postgres_reader.py`) is the only reader. Its engine opens every transaction read-only (a dedicated read-only role is planned, not created yet). It serves only `ALLOWED_APPS`. The trace MCP server uses it for the graph, and the trace browser API uses it for the console's Traces tab.
+**Reading.** `PostgresTraceReader` (`trace_store/postgres_reader.py`) is the only reader. Its engine opens every transaction read-only (a dedicated read-only role is planned, not created yet). It serves only `ALLOWED_APPS`. The trace MCP server uses it for the graph, and the trace browser API uses it for the app's trace pages.
 
 ## How the graph reads traces: the MCP server
 
@@ -468,7 +468,7 @@ All of it is in `agent/model_guard.py`, shared by the trace judge and the diagno
 | One retry layer | The SDK's own retries are off (`max_retries=0`), and each request has a 120 s timeout, so a call that hangs becomes a timeout that the budget controls |
 | Window cap | A run judges at most `MAX_JUDGED_TRACES` (200) traces, the newest first |
 | Concurrency | At most 16 branches run at once (`max_concurrency`), and at most 4 diagnoses (a semaphore in `TraceContext`), so N clusters never mean N large calls at the same time |
-| Spend on record | Every branch appends its spend to `judge_usage` or `model_usage`, failed attempts included, and the Run tab shows it |
+| Spend on record | Every branch appends its spend to `judge_usage` or `model_usage`, failed attempts included, and the run page shows it |
 
 ### 3. Model answers
 
@@ -515,20 +515,18 @@ A run is one graph thread. Its state is checkpointed in Postgres (`AsyncPostgres
 | `GET /v1/runs/{run_id}/detail` | One run's pipeline and clusters with their diagnoses and spend |
 | `POST /v1/runs/{run_id}/review` | Resumes a paused run with one decision per proposal |
 
-The stream sends `run_started`, `progress` events (node, counts; never state), one `proposal` event per draft, and last `review_required`, `run_completed` or `run_failed`. Behind most messages comes a `ui_spec`: a small model (`UI_SPEC_MODEL`) describes the message as a [json-render](https://github.com/vercel-labs/json-render) spec, which the console checks and draws.
+The stream sends `run_started`, `progress` events (node, counts; never state), one `proposal` event per draft, and last `review_required`, `run_completed` or `run_failed`. Behind most messages comes a `ui_spec`: a small model (`UI_SPEC_MODEL`) describes the message as a [json-render](https://github.com/vercel-labs/json-render) spec, which the run page's agent console checks and draws.
 
 A review holds a row lock for the length of the resume, so a second review of the same run gets a `409`, and the decisions and the new status are committed together. There is no login: the `X-User-Name` header is recorded, not verified (`local` without one).
 
-## The run console
+## The web app
 
-`frontend/` is one Next.js page: a form to start a run over a console with six tabs.
+`frontend/` is a Next.js app with a slim left nav and three kinds of page. **New run**, in the header, opens a small form (app, time window) and takes you to the run's page once the server names it.
 
-- **Runs** lists past runs; a run that waits for review has a Review button.
-- **Run** shows one run: the pipeline node by node, and each cluster with its diagnosis, cited spans (each opens under Traces), traces and spend.
-- **Traces** lists stored traces and opens one as a waterfall with a side panel for the picked span.
-- **Console** draws the run's messages from the `ui_spec` events.
-- **Raw events** shows the stream exactly as received.
-- **Review** shows each proposal's issue with Approve or Reject, and sends all decisions at once.
+- **Dashboard** (`/`, the landing page): the runs waiting for your review in one line, four figures (the latest run's failure rate, failed traces found in the last 7 days, open proposals, how long the oldest review has waited), what the newest analyzed run found (failed traces by category, its five largest clusters), failed traces per run over the last runs (each bar opens its run), how the week's runs ended, and the latest run's diagnosis spend.
+- **Runs** (`/runs`): every run with its funnel (failed traces → clusters → proposals), duration and who started it.
+- **Run** (`/runs/<id>`): one run, live or finished. A pipeline stepper (Collect → Judge → Cluster → Diagnose → Draft → Review → Apply) shows where it stands and what each stage produced, driven by the stream while it runs. Below it, one card per cluster: signature, category, confidence, evidence check and root cause. Opening a card shows the suggested fix, the cited evidence as span trees of the traces the diagnoser was shown (cited spans starred), the drafted issue and the cluster's traces. While the run waits, each card takes Approve or Reject and a sticky bar sends all decisions at once. Beside it, the **agent console** draws the run's messages from the `ui_spec` events (json-render), with a Raw events toggle for the stream as received.
+- **Traces** (`/traces`, `/traces/<id>`): the stored traces, and one trace as a span tree over its timeline with the picked span's attributes.
 
 The page reaches the backend through a Next rewrite (`/api/*` to `/v1/*`), because the backend has no CORS.
 
@@ -647,7 +645,7 @@ cd frontend && npm run lint && npx tsc --noEmit && npm test && npm run build
 | `backend/eval/` | Ground truth, eval runner, grader, metrics |
 | `backend/main.py` | The FastAPI app and its startup wiring |
 | `backend/tests/` | Tests and shared fakes |
-| `frontend/` | The run console |
+| `frontend/` | The web app: dashboard, runs, run pages, traces |
 | `docker-compose.yml` | Local Postgres |
 | `PLAN.md` | Scope, architecture decisions and task order |
 | `CLAUDE.md` | Detailed notes on every module, for contributors and coding agents |

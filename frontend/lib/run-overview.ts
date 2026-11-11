@@ -1,7 +1,9 @@
 // What a run found, from GET /v1/runs/{id}/detail: read once into typed values, and the pipeline
-// the Run tab draws from them. Mirrors runs.RunDetail (backend/runs/service.py) by hand.
+// stepper of the run page drawn from them (and from the run's own stream while it
+// runs). Mirrors runs.RunDetail (backend/runs/service.py) by hand.
 
-import { isRecord as isObj } from "./events.ts";
+import { isRecord as isObj } from "./guards.ts";
+import { diagnosesIn, type LiveProgress } from "./progress.ts";
 import { isCount, isRunStatus, isText, plural } from "./runs.ts";
 import { isNum } from "./traces.ts";
 import type { Decision, RunStatus } from "./types.ts";
@@ -128,7 +130,7 @@ export function parseRunOverview(body: unknown): RunOverview | null {
 
 /**
  * Where a stage stands: finished, running now, waiting for a person, where the run failed or was
- * stopped, not reached yet, not needed (nothing was found), or not part of the graph yet.
+ * stopped, not reached yet, or not needed (nothing was found).
  */
 export type StageState =
   | "done"
@@ -137,14 +139,16 @@ export type StageState =
   | "failed"
   | "stopped"
   | "pending"
-  | "skipped"
-  | "not_built";
+  | "skipped";
 
 export type Stage = {
-  key: string;
+  key: StageKey;
   label: string;
+  /** What the stage produced, in a few words ("48 traces"), or a dash. */
   detail: string;
   state: StageState;
+  /** How far a running fan-out is, from 0 to 1 (the judge and the diagnoses); else null. */
+  progress: number | null;
 };
 
 /** Where the run stands at the stage it reached, by its status. */
@@ -156,94 +160,191 @@ const AT: Record<RunStatus, StageState> = {
   completed: "skipped", // ended with nothing left to do
 };
 
-/** The graph's nodes in order, each with what it produced in this run and where it stands. */
-export function pipeline({
-  status,
-  summary: s,
-  clusters,
-}: RunOverview): Stage[] {
-  const isolated = clusters.filter((c) => c.method === "isolated").length;
+/**
+ * The graph's nodes of each stage, in order; the last one ends the stage, except for the
+ * diagnoses, whose branches end one by one: that stage is done once the drafting starts.
+ */
+const NODES = {
+  collect: ["collect_traces"],
+  judge: ["score_trace", "join_scores"],
+  cluster: ["cluster_failures"],
+  diagnose: ["diagnose_cluster"],
+  draft: ["draft_proposals"],
+  review: ["human_review"],
+  apply: ["apply_actions"],
+} satisfies Record<string, string[]>;
+
+export type StageKey = keyof typeof NODES;
+
+/** An empty run, for a stream whose run has no checkpoint to read yet. */
+export function emptyOverview(runId: string): RunOverview {
+  return {
+    status: "in_progress",
+    summary: {
+      run_id: runId,
+      traces: 0,
+      judged: 0,
+      judge_failures: 0,
+      failed_traces: 0,
+      clusters: 0,
+      unclustered: 0,
+      diagnoses: 0,
+      diagnosis_failures: 0,
+      proposals: 0,
+      actions_log: [],
+    },
+    clusters: [],
+  };
+}
+
+/** States from the stream: the stage whose node runs is running, the ones before it are done. */
+function liveStates(keys: StageKey[], live: LiveProgress): StageState[] {
+  const reached = (i: number) =>
+    keys
+      .slice(i)
+      .some(
+        (k) =>
+          NODES[k].some((n) => n in live.nodes) ||
+          (k === "judge" && live.judge !== null),
+      );
+  const done = keys.map((k, i) => {
+    const last = NODES[k].at(-1) as string;
+    return reached(i + 1) || (k !== "diagnose" && live.nodes[last] === "done");
+  });
+  const at = done.indexOf(false);
+  return keys.map((k, i) => {
+    if (NODES[k].some((n) => live.nodes[n] === "failed")) return "failed";
+    if (done[i]) return "done";
+    if (i !== at) return "pending";
+    return live.nodes.human_review === "paused" ? "waiting" : "running";
+  });
+}
+
+/**
+ * The graph's stages in order, each with what it produced in this run and where it stands. With
+ * `live`, the progress of the run's own stream while it runs, the states come from the stream and
+ * the counts from whichever of the two is further along.
+ */
+export function pipeline(
+  { status, summary: s, clusters }: RunOverview,
+  live: LiveProgress | null = null,
+): Stage[] {
+  const c = live?.counts ?? {};
+  const n = {
+    traces: Math.max(s.traces, c.traces ?? 0),
+    failed: Math.max(s.failed_traces, c.failed_traces ?? 0),
+    clusters: Math.max(s.clusters, c.clusters ?? 0),
+    diagnoses: Math.max(s.diagnoses, live ? diagnosesIn(live, "done") : 0),
+    diagnosisFailures: Math.max(
+      s.diagnosis_failures,
+      live ? diagnosesIn(live, "failed") : 0,
+    ),
+    proposals: Math.max(s.proposals, c.proposals ?? 0),
+  };
+  const isolated = clusters.filter((cl) => cl.method === "isolated").length;
   const judgedAny = s.judged + s.judge_failures;
-  const approved = clusters.filter((c) => c.decision === "approve").length;
-  const rejected = clusters.filter((c) => c.decision === "reject").length;
+  const approved = clusters.filter((cl) => cl.decision === "approve").length;
+  const rejected = clusters.filter((cl) => cl.decision === "reject").length;
   const reviewed = approved + rejected > 0;
   const ended = status === "completed";
+  const diagnosedAny = n.diagnoses + n.diagnosisFailures;
+  const judgeDone = s.traces > 0 && judgedAny >= s.traces;
 
-  // `done` is left out for a node the graph only has as a placeholder.
   const steps: {
-    key: string;
+    key: StageKey;
     label: string;
     detail: string;
-    done?: boolean;
+    done: boolean;
   }[] = [
     {
       key: "collect",
-      label: "Collect traces",
-      detail: plural(s.traces, "trace"),
+      label: "Collect",
+      detail: plural(n.traces, "trace"),
       // A window with no traces ends the run here: collected, nothing to judge.
-      done: s.traces > 0 || ended,
+      done: n.traces > 0 || ended,
     },
     {
       key: "judge",
-      label: "Judge traces",
-      detail:
-        judgedAny > 0
-          ? `${s.judged} judged · ${s.failed_traces} failed` +
-            (s.judge_failures > 0 ? ` · ${s.judge_failures} not judged` : "")
-          : "—",
-      done: s.traces > 0 && judgedAny >= s.traces,
+      label: "Judge",
+      detail: judgeDone
+        ? `${n.failed} failed of ${s.judged}` +
+          (s.judge_failures > 0 ? ` · ${s.judge_failures} not judged` : "")
+        : live?.judge
+          ? `${live.judge.done} of ${live.judge.total} judged`
+          : c.failed_traces !== undefined
+            ? `${n.failed} failed`
+            : "—",
+      done: judgeDone,
     },
     {
       key: "cluster",
       label: "Cluster",
       detail:
-        plural(s.clusters, "cluster") +
-        (isolated > 0 ? ` · ${isolated} isolated` : ""),
-      done: s.clusters > 0,
+        n.clusters > 0
+          ? plural(n.clusters, "cluster") +
+            (isolated > 0 ? ` · ${isolated} isolated` : "")
+          : "—",
+      done: n.clusters > 0,
     },
     {
       key: "diagnose",
       label: "Diagnose",
       detail:
-        `${s.diagnoses} diagnosed` +
-        (s.diagnosis_failures > 0 ? ` · ${s.diagnosis_failures} failed` : ""),
-      done: s.clusters > 0 && s.diagnoses + s.diagnosis_failures >= s.clusters,
+        n.clusters > 0
+          ? `${n.diagnoses} of ${n.clusters}` +
+            (n.diagnosisFailures > 0 ? ` · ${n.diagnosisFailures} failed` : "")
+          : "—",
+      done: n.clusters > 0 && diagnosedAny >= n.clusters,
     },
-    { key: "reproduce", label: "Reproduce", detail: "Not built yet" },
-    { key: "match", label: "Match known issues", detail: "Not built yet" },
     {
       key: "draft",
-      label: "Draft proposals",
-      detail: plural(s.proposals, "proposal"),
-      done: s.proposals > 0,
+      label: "Draft",
+      detail: n.proposals > 0 ? plural(n.proposals, "proposal") : "—",
+      done: n.proposals > 0,
     },
     {
       key: "review",
-      label: "Human review",
+      label: "Review",
       detail: reviewed
         ? `${approved} approved · ${rejected} rejected`
         : status === "review_required"
-          ? "Waiting for you"
+          ? `${plural(n.proposals, "proposal")} to decide`
           : "—",
       done: reviewed,
     },
     {
       key: "apply",
-      label: "Apply (dry run)",
+      label: "Apply",
       detail: reviewed ? plural(s.actions_log.length, "action") : "—",
       done: reviewed && ended,
     },
   ];
 
-  // The first stage not done is where the run stands; the ones after it are not reached yet.
-  const at = steps.findIndex((step) => step.done === false);
-  return steps.map(({ done, ...step }, i) => {
-    let state: StageState;
-    if (done === undefined) state = "not_built";
-    else if (done) state = "done";
-    else if (i === at) state = AT[status];
-    else state = ended ? "skipped" : "pending";
-    return { ...step, state };
+  const keys = steps.map((step) => step.key);
+  let states: StageState[];
+  if (live) {
+    states = liveStates(keys, live);
+  } else {
+    // The first stage not done is where the run stands; the ones after it are not reached yet.
+    const at = steps.findIndex((step) => !step.done);
+    states = steps.map(({ done }, i) => {
+      if (done) return "done";
+      if (i === at) return AT[status];
+      return ended ? "skipped" : "pending";
+    });
+  }
+
+  return steps.map(({ key, label, detail }, i) => {
+    let progress: number | null = null;
+    if (states[i] === "running") {
+      if (key === "judge" && live?.judge && live.judge.total > 0) {
+        progress = live.judge.done / live.judge.total;
+      }
+      if (key === "diagnose" && n.clusters > 0) {
+        progress = diagnosedAny / n.clusters;
+      }
+    }
+    return { key, label, detail, state: states[i], progress };
   });
 }
 

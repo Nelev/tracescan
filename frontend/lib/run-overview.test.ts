@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  foldProgress,
+  type LiveProgress,
+  NO_PROGRESS,
+  type ProgressData,
+} from "./progress.ts";
+import {
+  emptyOverview,
   formatUsage,
   parseRunOverview,
   pipeline,
@@ -109,23 +116,22 @@ test("one cluster off contract makes the whole run unreadable", () => {
   assert.equal(parseRunOverview(null), null);
 });
 
-test("a paused run waits at the review, with the unbuilt stages shown as such", () => {
+test("a paused run waits at the review", () => {
   assert.deepEqual(states(read(PAUSED)), {
     collect: "done",
     judge: "done",
     cluster: "done",
     diagnose: "done",
-    reproduce: "not_built",
-    match: "not_built",
     draft: "done",
     review: "waiting",
     apply: "pending",
   });
   const [collect, judge, cluster, diagnose] = pipeline(read(PAUSED));
   assert.equal(collect.detail, "10 traces");
-  assert.equal(judge.detail, "9 judged · 4 failed · 1 not judged");
+  assert.equal(judge.detail, "4 failed of 9 · 1 not judged");
   assert.equal(cluster.detail, "2 clusters · 1 isolated");
-  assert.equal(diagnose.detail, "1 diagnosed · 1 failed");
+  assert.equal(diagnose.detail, "1 of 2 · 1 failed");
+  assert.ok(pipeline(read(PAUSED)).every((st) => st.progress === null));
 });
 
 test("a reviewed run is done end to end, with the decisions counted", () => {
@@ -139,7 +145,7 @@ test("a reviewed run is done end to end, with the decisions counted", () => {
     ],
   });
   const stages = pipeline(o);
-  assert.ok(stages.every((s) => s.state === "done" || s.state === "not_built"));
+  assert.ok(stages.every((s) => s.state === "done"));
   assert.equal(
     stages.find((s) => s.key === "review")?.detail,
     "1 approved · 1 rejected",
@@ -202,4 +208,74 @@ test("the spend adds up over the clusters and reads short", () => {
   const total = totalUsage(read(PAUSED).clusters);
   assert.deepEqual(total, { calls: 3, tokens: 1200, cost_usd: 0.004 });
   assert.equal(formatUsage(total), "3 calls · 1,200 tokens · $0.004");
+});
+
+const live = (events: ProgressData[]): LiveProgress =>
+  events.reduce(foldProgress, NO_PROGRESS);
+const ev = (
+  event: ProgressData["event"],
+  node: string,
+  extra: Partial<ProgressData> = {},
+): ProgressData => ({
+  event,
+  node,
+  clusterId: null,
+  ok: true,
+  counts: {},
+  ...extra,
+});
+
+test("while streaming, the judge runs with its share done", () => {
+  const progress = live([
+    ev("node_started", "collect_traces"),
+    ev("node_finished", "collect_traces", { counts: { traces: 48 } }),
+    ev("node_progress", "score_trace", { counts: { done: 12, total: 48 } }),
+  ]);
+  const stages = pipeline(emptyOverview("r1"), progress);
+  const [collect, judge, cluster] = stages;
+  assert.equal(collect.state, "done");
+  assert.equal(collect.detail, "48 traces");
+  assert.equal(judge.state, "running");
+  assert.equal(judge.progress, 0.25);
+  assert.equal(judge.detail, "12 of 48 judged");
+  assert.equal(cluster.state, "pending");
+});
+
+test("while streaming, the diagnoses count up and the run waits at the review", () => {
+  const diagnosing = live([
+    ev("node_finished", "collect_traces", { counts: { traces: 48 } }),
+    ev("node_finished", "join_scores", { counts: { failed_traces: 22 } }),
+    ev("node_finished", "cluster_failures", { counts: { clusters: 4 } }),
+    ev("node_started", "diagnose_cluster", { clusterId: "c0" }),
+    ev("node_finished", "diagnose_cluster", { clusterId: "c0" }),
+  ]);
+  const stages = pipeline(emptyOverview("r1"), diagnosing);
+  const diagnose = stages.find((s) => s.key === "diagnose");
+  assert.equal(diagnose?.state, "running");
+  assert.equal(diagnose?.progress, 0.25);
+  assert.equal(diagnose?.detail, "1 of 4");
+  assert.equal(stages.find((s) => s.key === "judge")?.detail, "22 failed");
+
+  const paused = live([
+    ev("node_finished", "draft_proposals", { counts: { proposals: 4 } }),
+    ev("node_started", "human_review"),
+    ev("node_paused", "human_review"),
+  ]);
+  const at = Object.fromEntries(
+    pipeline(emptyOverview("r1"), paused).map((s) => [s.key, s.state]),
+  );
+  assert.equal(at.diagnose, "done");
+  assert.equal(at.review, "waiting");
+  assert.equal(at.apply, "pending");
+});
+
+test("a node that failed marks its stage", () => {
+  const failed = live([
+    ev("node_finished", "collect_traces", { counts: { traces: 3 } }),
+    ev("node_failed", "cluster_failures"),
+  ]);
+  const at = Object.fromEntries(
+    pipeline(emptyOverview("r1"), failed).map((s) => [s.key, s.state]),
+  );
+  assert.equal(at.cluster, "failed");
 });

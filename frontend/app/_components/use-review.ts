@@ -32,17 +32,25 @@ const failureOf = (err: unknown): Failure =>
   err instanceof RunError ? err : NOT_REACHED;
 
 /**
- * Loads a run for review, keeps the reviewer's decisions, and sends them. Mount it with the run
- * id as `key`: one instance reviews one run. `onReviewed` is called once the server has taken
- * the review.
+ * Loads a run's status and proposals while `enabled`, and again when `reloadOn` changes; keeps
+ * the reviewer's decisions, and sends them. It is loaded alongside the run's
+ * detail rather than after it, so a run that waits shows its pickers without a second round
+ * trip. Mount it under a component keyed by the run id: one instance reviews one run.
+ * `onReviewed` is called once the server has taken the review.
  */
-export function useReview(runId: string, onReviewed: (runId: string) => void) {
+export function useReview(
+  runId: string,
+  enabled: boolean,
+  reloadOn: string,
+  onReviewed: (runId: string) => void,
+) {
   const [state, setState] = useState<ReviewState>({ step: "loading" });
   const [decisions, setDecisions] = useState<Decisions>({});
   const [loads, setLoads] = useState(0);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: loads is not read, it is the signal to load again
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loads and reloadOn are not read, they are the signals to load again
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     getRun(runId, controller.signal).then(
       (detail) =>
@@ -57,7 +65,7 @@ export function useReview(runId: string, onReviewed: (runId: string) => void) {
       },
     );
     return () => controller.abort();
-  }, [runId, loads]);
+  }, [runId, enabled, loads, reloadOn]);
 
   async function submit() {
     if (state.step !== "open" || state.sending) return;

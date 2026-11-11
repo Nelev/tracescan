@@ -1,7 +1,7 @@
 // The review of a run: its detail and the review's answer read once into what the review screen
 // shows, and the words it uses.
 
-import { isRecord } from "./events.ts";
+import { isRecord } from "./guards.ts";
 import { isRunStatus, isText } from "./runs.ts";
 import type { Decision, RunStatus } from "./types.ts";
 
