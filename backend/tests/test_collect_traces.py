@@ -88,12 +88,14 @@ def test_routes():
     assert route_after_collect(state(traces=[])) == "__end__"
     traces = [{"trace_id": "t1"}, {"trace_id": "t2"}]
     sends = route_after_collect(state(traces=traces))
+    assert isinstance(sends, list)
     assert [(s.node, s.arg) for s in sends] == [("score_trace", {"trace": t}) for t in traces]
     assert route_after_scores(state(failed_traces=[])) == "__end__"
     assert route_after_scores(state(failed_traces=[{"trace_id": "t"}])) == "cluster_failures"
     assert route_after_cluster(state()) == "__end__"
     clusters = [{"cluster_id": "c0"}, {"cluster_id": "c1"}]
     sends = route_after_cluster(state(clusters=clusters))
+    assert isinstance(sends, list)
     assert [(s.node, s.arg) for s in sends] == [
         ("diagnose_cluster", {"cluster": c}) for c in clusters
     ]

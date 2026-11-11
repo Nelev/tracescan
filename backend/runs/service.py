@@ -11,10 +11,11 @@ that only the store knows a run failed or was aborted.
 """
 
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
 import anyio
@@ -237,7 +238,7 @@ class Runs:
 
     def __init__(
         self,
-        graph: CompiledStateGraph,
+        graph: CompiledStateGraph[Any, TraceContext, Any, Any],
         context: TraceContext,
         open_traces: OpenTraces,
         store: RunStore,
@@ -265,7 +266,7 @@ class Runs:
         user: str,
         since: datetime | None = None,
         until: datetime | None = None,
-    ) -> AsyncIterator[StartedRun]:
+    ) -> AsyncGenerator[StartedRun]:
         """Start a run on a fresh thread, in `user`'s name, and yield its id and events.
 
         The trace session and the graph stream live as long as this context. Leaving it early

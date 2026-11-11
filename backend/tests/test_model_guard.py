@@ -88,7 +88,8 @@ def test_the_budget_runs_out_of_attempts_tokens_and_cost(monkeypatch):
 
 
 def test_spent_adds_up():
-    assert Spent(1, 150, 0.001) + Spent(2, 50, 0.002) == Spent(3, 200, pytest.approx(0.003))
+    total = Spent(1, 150, 0.001) + Spent(2, 50, 0.002)
+    assert (total.calls, total.tokens) == (3, 200) and total.cost_usd == pytest.approx(0.003)
 
 
 def test_a_cluster_spent_is_the_sum_of_its_own_usage_entries():
