@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { AgentConsole } from "./agent-console";
 import { Chip } from "./chip";
 import { ClusterCard, type LiveDiagnosis } from "./cluster-card";
+import { ClusterMapPanel } from "./cluster-map-panel";
 import { PipelineStepper } from "./pipeline-stepper";
 import { type RunStream, useRun } from "./run-stream";
 import { useResource } from "./use-list";
@@ -101,6 +102,16 @@ export function RunView({
   // the review's outcome stays on screen.
   const [refreshes, setRefreshes] = useState(0);
   const [reviews, setReviews] = useState(0);
+  // The cluster picked on the map, and the card to open: both start on a linked cluster.
+  const [mapCluster, setMapCluster] = useState(focusCluster);
+  // A new `ask` each time, so opening the same finding again scrolls to it again.
+  const [finding, setFinding] = useState(
+    focusCluster === null ? null : { clusterId: focusCluster, ask: 0 },
+  );
+
+  function openFinding(clusterId: string) {
+    setFinding((f) => ({ clusterId, ask: (f?.ask ?? 0) + 1 }));
+  }
 
   const detail = useResource(
     (signal) => getRunOverview(runId, signal),
@@ -208,87 +219,110 @@ export function RunView({
           </section>
 
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
-            <section
-              aria-labelledby="findings"
-              className="flex min-w-0 flex-col gap-3"
-            >
-              <h2 id="findings" className="flex items-baseline gap-2">
-                Findings
-                <span className="type-body text-muted-foreground">
-                  {clusters.length > 0 &&
-                    `${plural(clusters.length, "cluster")} of ${plural(overview.summary.failed_traces, "failed trace")}`}
-                </span>
-              </h2>
-              {review.state.step === "unavailable" && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <p role="alert" className="type-body text-destructive">
-                    {review.state.problem}
-                  </p>
-                  <Button variant="outline" size="sm" onClick={review.reload}>
-                    Try again
-                  </Button>
-                </div>
-              )}
-              {review.state.step === "reviewed" && (
-                <output className="type-body flex flex-col gap-1 rounded-xl border border-success/35 bg-success/5 p-4">
-                  <span className="text-success">
-                    Review recorded:{" "}
-                    {tallyText(
-                      tally(review.state.detail.proposals, review.decisions),
-                    )}
-                  </span>
-                  {review.state.result.actionsLog.length === 0 ? (
-                    <span className="text-muted-foreground">
-                      Nothing was written.
-                    </span>
-                  ) : (
-                    <ul className="font-mono text-muted-foreground [overflow-wrap:anywhere]">
-                      {review.state.result.actionsLog.map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  )}
-                </output>
-              )}
-              {clusters.length === 0 ? (
-                <p className="type-body rounded-xl border border-dashed p-4 text-muted-foreground">
-                  {noClusters(overview, streaming)}
-                </p>
-              ) : (
-                clusters.map((cluster) => (
-                  <ClusterCard
-                    key={cluster.cluster_id}
-                    cluster={cluster}
-                    focused={cluster.cluster_id === focusCluster}
-                    live={liveDiagnosis(cluster.cluster_id)}
-                    proposal={proposals.get(cluster.cluster_id) ?? null}
-                    decision={
-                      decidable
-                        ? review.decisions[cluster.cluster_id]
-                        : (cluster.decision ?? undefined)
-                    }
-                    onDecide={
-                      decidable
-                        ? (d) => review.decide(cluster.cluster_id, d)
-                        : null
-                    }
-                    deciding={sending}
+            <div className="flex min-w-0 flex-col gap-6">
+              {clusters.length > 0 &&
+                (overview.cluster_map ? (
+                  <ClusterMapPanel
+                    map={overview.cluster_map}
+                    clusters={clusters}
+                    selected={mapCluster}
+                    onSelect={setMapCluster}
+                    onOpenFinding={openFinding}
                   />
-                ))
-              )}
-              {review.state.step === "open" && decidable && (
-                <ReviewBar
-                  progress={tally(
-                    review.state.detail.proposals,
-                    review.decisions,
-                  )}
-                  problem={review.state.problem}
-                  sending={sending}
-                  onSubmit={() => void review.submit()}
-                  onReload={review.reload}
-                />
-              )}
-            </section>
+                ) : (
+                  !streaming && (
+                    <p className="type-body text-muted-foreground">
+                      No cluster map: the run had too few failed traces to
+                      embed, or was clustered before the map existed.
+                    </p>
+                  )
+                ))}
+              <section
+                aria-labelledby="findings"
+                className="flex min-w-0 flex-col gap-3"
+              >
+                <h2 id="findings" className="flex items-baseline gap-2">
+                  Findings
+                  <span className="type-body text-muted-foreground">
+                    {clusters.length > 0 &&
+                      `${plural(clusters.length, "cluster")} of ${plural(overview.summary.failed_traces, "failed trace")}`}
+                  </span>
+                </h2>
+                {review.state.step === "unavailable" && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p role="alert" className="type-body text-destructive">
+                      {review.state.problem}
+                    </p>
+                    <Button variant="outline" size="sm" onClick={review.reload}>
+                      Try again
+                    </Button>
+                  </div>
+                )}
+                {review.state.step === "reviewed" && (
+                  <output className="type-body flex flex-col gap-1 rounded-xl border border-success/35 bg-success/5 p-4">
+                    <span className="text-success">
+                      Review recorded:{" "}
+                      {tallyText(
+                        tally(review.state.detail.proposals, review.decisions),
+                      )}
+                    </span>
+                    {review.state.result.actionsLog.length === 0 ? (
+                      <span className="text-muted-foreground">
+                        Nothing was written.
+                      </span>
+                    ) : (
+                      <ul className="font-mono text-muted-foreground [overflow-wrap:anywhere]">
+                        {review.state.result.actionsLog.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </output>
+                )}
+                {clusters.length === 0 ? (
+                  <p className="type-body rounded-xl border border-dashed p-4 text-muted-foreground">
+                    {noClusters(overview, streaming)}
+                  </p>
+                ) : (
+                  clusters.map((cluster) => (
+                    <ClusterCard
+                      key={cluster.cluster_id}
+                      cluster={cluster}
+                      focus={
+                        finding?.clusterId === cluster.cluster_id
+                          ? finding.ask
+                          : null
+                      }
+                      live={liveDiagnosis(cluster.cluster_id)}
+                      proposal={proposals.get(cluster.cluster_id) ?? null}
+                      decision={
+                        decidable
+                          ? review.decisions[cluster.cluster_id]
+                          : (cluster.decision ?? undefined)
+                      }
+                      onDecide={
+                        decidable
+                          ? (d) => review.decide(cluster.cluster_id, d)
+                          : null
+                      }
+                      deciding={sending}
+                    />
+                  ))
+                )}
+                {review.state.step === "open" && decidable && (
+                  <ReviewBar
+                    progress={tally(
+                      review.state.detail.proposals,
+                      review.decisions,
+                    )}
+                    problem={review.state.problem}
+                    sending={sending}
+                    onSubmit={() => void review.submit()}
+                    onReload={review.reload}
+                  />
+                )}
+              </section>
+            </div>
             {/* Beside the findings on a wide screen, above them otherwise: a live run is read there. */}
             <div
               className={cn(

@@ -279,3 +279,32 @@ test("a node that failed marks its stage", () => {
   );
   assert.equal(at.cluster, "failed");
 });
+
+test("the cluster map is read with the run, and missing reads as none", () => {
+  const map = {
+    projection: "pca",
+    trust: 0.9,
+    points: [
+      {
+        trace_ids: ["t1", "t2", "t3"],
+        x: 0.1,
+        y: -0.2,
+        z: 1,
+        cluster_id: "c0",
+        stage: "hdbscan",
+        hdbscan_label: 0,
+        membership: 0.8,
+      },
+    ],
+  };
+  assert.deepEqual(read({ ...PAUSED, cluster_map: map }).cluster_map, map);
+  assert.equal(read({ ...PAUSED, cluster_map: null }).cluster_map, null);
+  assert.equal(read(PAUSED).cluster_map, null); // a backend from before the map
+  assert.equal(
+    parseRunOverview({
+      ...PAUSED,
+      cluster_map: { ...map, projection: "umap" },
+    }),
+    null,
+  );
+});
