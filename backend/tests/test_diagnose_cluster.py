@@ -83,7 +83,8 @@ async def test_the_graph_diagnoses_every_cluster():
 
 @pytest.mark.anyio
 async def test_a_failed_cluster_does_not_cost_the_others_their_diagnosis():
-    result = await run_graph({"t1": span_tree("t1")}, fake_diagnoser(DIAGNOSIS))  # no tree for t2
+    # The first diagnosis call fails for good (401); the other cluster's call answers.
+    result = await run_graph({"t1": span_tree("t1")}, scripted_model(FakeApiError(401), DIAGNOSIS))
     diagnosed = [d["cluster_id"] for d in result["diagnoses"]]
     assert len(diagnosed) == 1  # one cluster diagnosed, the other recorded as failed
     assert sorted(diagnosed + result["diagnosis_failures"]) == ["c0", "c1"]

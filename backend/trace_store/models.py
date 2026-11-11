@@ -1,4 +1,4 @@
-"""Contracts for the trace-reading MCP tools (search_failed_traces, get_trace_tree, get_span)."""
+"""Contracts for the trace-reading MCP tools (search_traces, get_trace_tree, get_span)."""
 
 from typing import Annotated, Any, Literal
 
@@ -24,18 +24,9 @@ class TraceQuery(BaseModel):
     limit: int = Field(default=50, ge=1, le=MAX_LIMIT)
 
 
-class FailedTraceQuery(TraceQuery):
-    """Input of search_failed_traces. A trace is failed if its lowest score is <= max_score.
-
-    Scores come from the scoring job (trace_store/scoring.py): an error span alone does not
-    make a trace failed, since an error can be harmless.
-    """
-
-    max_score: float = FAILED_MAX_SCORE
-
-
 class TraceSummary(BaseModel):
-    """One row from search_failed_traces. Small enough to cluster without fetching trees."""
+    """One row from search_traces; a failed trace's gets its failure fields from the trace judge
+    (agent.judge.failed_summary). Small enough to cluster without fetching trees."""
 
     trace_id: str
     app: str

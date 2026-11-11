@@ -1,7 +1,7 @@
 """The chat models are built from the environment, with a default each."""
 
-from agent.const import DEFAULT_DIAGNOSER_MODEL, DEFAULT_UI_SPEC_MODEL
-from agent.model import build_diagnoser_model, build_ui_spec_model
+from agent.const import DEFAULT_DIAGNOSER_MODEL, DEFAULT_TRACE_JUDGE_MODEL, DEFAULT_UI_SPEC_MODEL
+from agent.model import build_diagnoser_model, build_trace_judge_model, build_ui_spec_model
 
 
 def test_each_model_has_its_own_default(monkeypatch):
@@ -18,3 +18,14 @@ def test_the_environment_overrides_each_model_alone(monkeypatch):
     monkeypatch.setenv("UI_SPEC_MODEL", "mistralai/mistral-small-3.2-24b-instruct")
     assert build_ui_spec_model().model_name == "mistralai/mistral-small-3.2-24b-instruct"
     assert build_diagnoser_model().model_name == DEFAULT_DIAGNOSER_MODEL
+
+
+def test_the_trace_judge_has_its_own_cheap_default_and_variable(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.delenv("TRACE_JUDGE_MODEL", raising=False)
+    monkeypatch.setenv("JUDGE_MODEL", "openai/gpt-6.1-sol")  # the eval's grader, not this one
+    assert build_trace_judge_model().model_name == DEFAULT_TRACE_JUDGE_MODEL
+    assert DEFAULT_TRACE_JUDGE_MODEL != DEFAULT_DIAGNOSER_MODEL
+    monkeypatch.setenv("TRACE_JUDGE_MODEL", "mistralai/mistral-small-3.2-24b-instruct")
+    assert build_trace_judge_model().model_name == "mistralai/mistral-small-3.2-24b-instruct"
+    assert build_trace_judge_model().max_retries == 0

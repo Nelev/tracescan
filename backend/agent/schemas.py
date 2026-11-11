@@ -37,14 +37,9 @@ class ClusterTask(TypedDict):
 
 
 class TraceTask(TypedDict):
-    """Private input of one judge branch: its trace's summary, not the whole state.
-
-    Like ClusterTask, it carries the trace's own `judge_usage` entries (numbers only), the budget
-    the node checks before and after its run.
-    """
+    """Private input of one judge branch (score_trace): its trace's summary, not the whole state."""
 
     trace: dict  # a TraceSummary as plain JSON, as collect_traces stores it
-    judge_usage: NotRequired[list[dict]]
 
 
 FailureCategory = Literal[

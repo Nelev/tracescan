@@ -114,7 +114,7 @@ async def start(client) -> str:
 
 
 class ExplodingTraces(FakeTraces):
-    async def search_failed_traces(self, query):
+    async def search_traces(self, query):
         raise RuntimeError(f"span says: {PHI}")
 
 

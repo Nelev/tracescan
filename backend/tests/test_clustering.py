@@ -191,7 +191,12 @@ def test_exemplars_are_the_newest_traces_of_the_cluster():
 
 
 async def run_fixture_graph() -> dict:
-    """The whole graph over the fixture failures, with a fake diagnoser answering every cluster."""
+    """The whole graph over the fixture failures, with a fake diagnoser answering every cluster.
+
+    The fake judge rebuilds each failure's summary from its blamed span, so the fixture's
+    hand-written signatures do not reach the clustering: these tests check what the graph does
+    with the clusters, and the exact grouping is checked on the fixture itself above.
+    """
     trees = {s.trace_id: span_tree(s.trace_id) for s in load()}
     context = fake_context(FakeTraces(load(), trees), fake_diagnoser(DIAGNOSIS))
     return await build_graph().ainvoke({"target_app": "medas"}, context=context)
@@ -201,8 +206,10 @@ async def run_fixture_graph() -> dict:
 async def test_node_puts_plain_json_clusters_and_unclustered_into_state():
     result = await run_fixture_graph()
     json.dumps(result["clusters"])  # plain dicts: nothing for the checkpoint serializer to warn on
-    assert len(result["clusters"]) == len(GROUPS) + len(OUTLIERS)
-    assert set(result["unclustered"]) == OUTLIERS
+    placed = [t for c in result["clusters"] for t in c["trace_ids"]]
+    assert sorted(placed) == sorted(s.trace_id for s in load())  # every failure, exactly once
+    isolated = {t for c in result["clusters"] if c["method"] == "isolated" for t in c["trace_ids"]}
+    assert set(result["unclustered"]) == isolated
 
 
 def test_isolated_clusters_are_one_trace_clusters_numbered_after_the_real_ones():
@@ -218,7 +225,7 @@ def test_isolated_clusters_are_one_trace_clusters_numbered_after_the_real_ones()
 async def test_the_graph_diagnoses_each_isolated_failure_on_its_own():
     result = await run_fixture_graph()
     isolated = [c for c in result["clusters"] if c["method"] == "isolated"]
-    assert {t for c in isolated for t in c["trace_ids"]} == OUTLIERS
+    assert isolated and all(len(c["trace_ids"]) == 1 for c in isolated)
     diagnosed = {d["cluster_id"] for d in result["diagnoses"]}
     assert {c["cluster_id"] for c in isolated} <= diagnosed
     assert result.get("diagnosis_failures", []) == []

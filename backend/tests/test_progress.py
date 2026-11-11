@@ -53,7 +53,11 @@ async def test_reports_each_node_and_one_branch_per_cluster():
     events, final = await stream_progress(fake_diagnoser(DIAGNOSIS))
 
     (collected,) = of(events, "node_finished", "collect_traces")
-    assert collected["counts"] == {"failed_traces": 2}
+    assert collected["counts"] == {"traces": 2}
+    # One judge branch per trace, and none of them reports: the join after them gives the count.
+    assert not [e for e in events if e["node"] == "score_trace"]
+    (scored,) = of(events, "node_finished", "join_scores")
+    assert scored["counts"] == {"failed_traces": 2}
     (clustered,) = of(events, "node_finished", "cluster_failures")
     assert clustered["counts"] == {"clusters": 2, "unclustered": 0}
 

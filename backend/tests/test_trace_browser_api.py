@@ -22,6 +22,24 @@ async def browser(collector, spans_engine, reader):
     healthy["end_time"] = healthy["start_time"].replace(second=21)
     other_app = [{**span, "trace_id": OTHER_APP, "app": "someone-else"} for span in (root, child)]
     await store(spans_engine, [root, child, healthy, *other_app])
+    # Nothing scores a trace on the way in: the scores the browser shows are written here.
+    async with spans_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO scores (trace_id, evaluator, value, span_id)"
+                " VALUES (:trace_id, :evaluator, :value, :span_id)"
+            ),
+            [
+                {"trace_id": FAILED, "evaluator": "request_failed", "value": 1.0, "span_id": None},
+                {
+                    "trace_id": FAILED,
+                    "evaluator": "tool_error",
+                    "value": 0.0,
+                    "span_id": CHILD_ID.hex(),
+                },
+                {"trace_id": HEALTHY, "evaluator": "request_failed", "value": 1.0, "span_id": None},
+            ],
+        )
     app.state.trace_reader = reader
     yield collector
     del app.state.trace_reader

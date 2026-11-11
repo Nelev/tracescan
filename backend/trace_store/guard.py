@@ -3,8 +3,8 @@ Per-call guard for the trace MCP server.
 
 TraceGuard is FastMCP middleware around every tools/call. It does the two things that need
 state across calls: a call budget and an audit log. What one call may ask for is validated
-where its arguments are declared: TraceId and FailedTraceQuery in models.py, and the app
-allowlist inside search_failed_traces in mcp_server.py.
+where its arguments are declared: TraceId and TraceQuery in models.py, and the app
+allowlist inside search_traces in mcp_server.py.
 
 The budget assumes one server process is one graph run, which holds because TraceClient
 starts a fresh stdio subprocess per run; on a shared transport it would silently become

@@ -1,9 +1,11 @@
 """The trace reader over Postgres: the `spans` table the collector writes (api/traces.py).
 
-There is no traces table: a trace is the spans that share a trace_id. A failed trace is one
-with a root span whose lowest score (trace_store/scoring.py) is at most the query's max_score.
-An error span alone does not make a trace failed, and a trace with no scores yet is not served.
-The failing span of a trace is the one its lowest score blames.
+There is no traces table: a trace is the spans that share a trace_id, and a trace is served
+once its root span is stored. search_traces reads no scores: which traces failed is the agent's
+trace judge's call. The trace browser's reads (list_traces, get_trace_detail) show what `scores`
+holds: a trace is failed there when its lowest score is at most FAILED_MAX_SCORE, and its failing
+span is the one that score blames. Nothing writes `scores` since the heuristic scoring job was
+removed, so new traces read as unscored.
 Give it TRACE_DATABASE_URL; the session is opened read-only, whatever the role may do.
 """
 
@@ -20,7 +22,6 @@ from db.engine import sqlalchemy_url
 from db.models import Score, Span
 from trace_store.const import ALLOWED_APPS, FAILED_MAX_SCORE
 from trace_store.models import (
-    FailedTraceQuery,
     SpanNode,
     TraceDetail,
     TraceQuery,
@@ -83,52 +84,6 @@ class PostgresTraceReader:
     def __init__(self, engine: AsyncEngine, apps: Collection[str] = ALLOWED_APPS) -> None:
         self._engine = engine
         self._apps = list(apps)
-
-    async def search_failed_traces(self, query: FailedTraceQuery) -> list[TraceSummary]:
-        if query.app not in self._apps:
-            return []
-        # Root spans, each with its trace's lowest score: Postgres lets the other root columns
-        # be selected because the grouping is by the table's primary key.
-        lowest = func.min(Score.value)
-        roots = (
-            select(Span.trace_id, Span.start_time, Span.end_time, Span.status, lowest.label("low"))
-            .join(Score, Score.trace_id == Span.trace_id)
-            .where(Span.parent_span_id.is_(None), Span.app == query.app)
-            .group_by(Span.trace_id, Span.span_id)
-            .having(lowest <= query.max_score)
-        )
-        if query.since is not None:
-            roots = roots.where(Span.start_time >= query.since)
-        if query.until is not None:
-            roots = roots.where(Span.start_time < query.until)
-        roots = roots.order_by(Span.start_time.desc(), Span.trace_id).limit(query.limit)
-
-        async with self._engine.connect() as conn:
-            traces = (await conn.execute(roots)).mappings().all()
-            if not traces:
-                return []
-            blamed = await _blamed(conn, [t["trace_id"] for t in traces], query.max_score)
-
-        summaries = []
-        for trace in traces:
-            failing = blamed[trace["trace_id"]]  # every low score blames a span
-            summaries.append(
-                TraceSummary(
-                    trace_id=trace["trace_id"],
-                    app=query.app,
-                    start_time=trace["start_time"],
-                    duration_ms=(trace["end_time"] - trace["start_time"]).total_seconds() * 1000,
-                    status=trace["status"],
-                    error_message=failing["status_message"],
-                    failing_span_id=failing["span_id"],
-                    failing_span_name=failing["name"],
-                    min_score=trace["low"],
-                    # Names only (the span, then its exception type or, without one, the check
-                    # that scored it low): no message and no attribute value.
-                    signature=f"{failing['name']} {failing['exception_type'] or failing['evaluator']}",
-                )
-            )
-        return summaries
 
     async def search_traces(self, query: TraceQuery) -> list[TraceSummary]:
         """Every trace of the app with a root span in the window, newest first, failed or not.

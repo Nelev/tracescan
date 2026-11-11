@@ -1,7 +1,7 @@
 """The trace judge: one structured-output call that says whether a trace failed its user.
 
-It replaces nothing yet: it is the first piece of moving the decision "this trace failed" from the
-heuristic scoring job (trace_store/scoring.py) into the agent. `judge_trace` takes a tree the trace
+It decides, for each trace in a run's window (nodes/score_trace.py), whether the trace failed:
+the decision the removed heuristic scoring job used to make when spans were stored. `judge_trace` takes a tree the trace
 server already sanitized, so the model sees no attribute outside the allowlist.
 
 The score is the model's; whether that counts as failed is the code's (`JUDGE_FAILED_MAX_SCORE`).
@@ -34,6 +34,41 @@ def fallback_span(tree: SpanNode) -> str:
     if not errors:
         return tree.span_id
     return min(errors, key=lambda found: (-found[0], found[1].start_time))[1].span_id
+
+
+def error_type(span: SpanNode) -> str | None:
+    """What kind of error a span recorded: its `error.type` attribute, else `exception.type` on the
+    span, then on its first exception event. The same places, in the same order, as the trace
+    reader (trace_store/postgres_reader._EXCEPTION_TYPE): a step can fail without raising."""
+    recorded = [span.attributes.get("error.type"), span.attributes.get("exception.type")]
+    recorded += [(event.get("attributes") or {}).get("exception.type") for event in span.events]
+    return next((str(found) for found in recorded if found), None)
+
+
+def failure_fields(tree: SpanNode, blamed_span_id: str) -> dict:
+    """What clustering reads of a failed trace, from its blamed span: the step's name, its error
+    type and its status message (already truncated by the trace server). Names, no attributes."""
+    span = next(span for _, span in walk(tree) if span.span_id == blamed_span_id)
+    return {
+        "failing_span_name": span.name,
+        "error_type": error_type(span),
+        "error_message": span.status_message,
+    }
+
+
+def failed_summary(trace: dict, verdict: dict) -> dict:
+    """A failed trace as clustering reads it: its TraceSummary dict, failure fields from the
+    verdict. The signature is the blamed step and its error type, or the step alone: names only,
+    no message, and nothing every failure shares (an attribution would pull them together)."""
+    step, error = verdict["failing_span_name"], verdict["error_type"]
+    return {
+        **trace,
+        "failing_span_id": verdict["blamed_span_id"],
+        "failing_span_name": step,
+        "error_message": verdict["error_message"],
+        "min_score": verdict["score"],
+        "signature": f"{step} {error}" if error else step,
+    }
 
 
 def retry_message(blamed: str | None, valid: set[str]) -> str:
