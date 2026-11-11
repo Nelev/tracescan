@@ -1,6 +1,8 @@
 """Shared constants."""
 
-MAX_LIMIT = 200  # hard cap on rows returned by search_failed_traces
+MAX_LIMIT = 200  # hard cap on rows returned by search_failed_traces and list_traces
+# A trace is failed when its lowest score (trace_store/scoring.py) is at most this.
+FAILED_MAX_SCORE = 0.5
 
 # The apps whose spans the collector stores (api/traces.py) and search_failed_traces serves.
 ALLOWED_APPS = frozenset({"medas"})

@@ -9,11 +9,14 @@ import type { StatusTone } from "@/lib/runs";
 import { RUN_EVENTS } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
-import { PANE_HEIGHT } from "./console-styles";
+import { PANE_HEIGHT, PANE_SLOT } from "./console-styles";
 import { ReviewPane } from "./review-pane";
 import { RunsTable } from "./runs-table";
+import { TracesPane } from "./traces-pane";
+import { listFooter } from "./use-list";
 import type { ConsoleLine, Phase, Tone } from "./use-run-stream";
-import { type RunsState, useRuns } from "./use-runs";
+import { useRuns } from "./use-runs";
+import { useTraceList } from "./use-traces";
 
 // The messages draw with json-render, zod and the package's components, which the page does not
 // need until a run sends its first message: their own chunk. It starts loading when a run starts
@@ -204,24 +207,13 @@ function ScrollPane({
   );
 }
 
-type Tab = "console" | "raw" | "runs" | "review";
-
-function runsFooter({ status, runs, loadedAt }: RunsState): string {
-  if (loadedAt === null) {
-    return status === "error" ? "Runs not loaded" : "Loading runs…";
-  }
-  const count = `${runs.length} ${runs.length === 1 ? "run" : "runs"}`;
-  const at = new Date(loadedAt).toLocaleTimeString();
-  return status === "error"
-    ? `${count} · last loaded ${at} · refresh failed`
-    : `${count} · loaded ${at}`;
-}
+type Tab = "console" | "raw" | "runs" | "traces" | "review";
 
 /**
  * The page's whole output: the messages the server streams, drawn from the UI specs its model
  * wrote (Console), the same stream as received (Raw events), the runs the server has recorded
  * (Runs), which are loaded when that tab opens, when this page's run changes phase or is
- * reviewed, and on Refresh, and the review of one run (Review): this page's run once it waits
+ * reviewed, and on Refresh, the stored traces and one trace's spans (Traces), and the review of one run (Review): this page's run once it waits
  * for one, or a waiting run picked under Runs.
  */
 export function RunConsole({
@@ -266,6 +258,16 @@ export function RunConsole({
     phase === "cancelled" || phase === "lost",
   );
 
+  // The trace open under Traces (null: the list), and whether the list shows failed ones only.
+  const [openTrace, setOpenTrace] = useState<{
+    traceId: string;
+    spanId: string | null;
+  } | null>(null);
+  const [failedOnly, setFailedOnly] = useState(false);
+  // Loaded while the tab is open, not each time a trace is closed: the list it went back to is
+  // the one it left, and Refresh is there for a newer one.
+  const stored = useTraceList(tab === "traces", failedOnly);
+
   function openReview(id: string) {
     setPicked(id);
     setTab("review");
@@ -277,7 +279,12 @@ export function RunConsole({
   }
 
   function footer(): string {
-    if (tab === "runs") return runsFooter(recorded);
+    if (tab === "runs") return listFooter(recorded, "run");
+    if (tab === "traces") {
+      return openTrace
+        ? `Trace ${openTrace.traceId}`
+        : listFooter(stored, failedOnly ? "failed trace" : "trace");
+    }
     if (tab === "review") return reviewId ? `Run ${reviewId}` : "No run open";
     return PHASE[phase].footer(events);
   }
@@ -308,12 +315,17 @@ export function RunConsole({
   }
 
   return (
-    <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
+    <Tabs
+      value={tab}
+      onValueChange={(value) => setTab(value as Tab)}
+      className="flex-1"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="sr-only">Run output</h2>
           <TabsList aria-label="Run output">
             <TabsTrigger value="runs">Runs</TabsTrigger>
+            <TabsTrigger value="traces">Traces</TabsTrigger>
             <TabsTrigger value="console">Console</TabsTrigger>
             <TabsTrigger value="raw">Raw events</TabsTrigger>
             <TabsTrigger value="review">Review</TabsTrigger>
@@ -333,6 +345,24 @@ export function RunConsole({
           >
             Refresh
           </Button>
+        )}
+        {tab === "traces" && openTrace === null && (
+          <div className="flex gap-2">
+            <Button
+              variant={failedOnly ? "secondary" : "outline"}
+              aria-pressed={failedOnly}
+              onClick={() => setFailedOnly((on) => !on)}
+            >
+              Failed only
+            </Button>
+            <Button
+              variant="outline"
+              onClick={stored.refresh}
+              disabled={stored.status === "loading"}
+            >
+              Refresh
+            </Button>
+          </div>
         )}
         {(tab === "console" || tab === "raw") && (
           <div className="flex gap-2">
@@ -354,8 +384,8 @@ export function RunConsole({
         )}
       </div>
 
-      <div className="mx-6 rounded-xl border bg-muted shadow-[inset_0_2px_8px_0_oklch(0.05_0.05_265/0.6)]">
-        <TabsContent value="console">
+      <div className="mx-6 flex min-h-[24rem] flex-1 basis-0 flex-col rounded-xl border bg-muted shadow-[inset_0_2px_8px_0_oklch(0.05_0.05_265/0.6)]">
+        <TabsContent value="console" className={PANE_SLOT}>
           <ScrollPane watch={messages.length}>
             {error && (
               <p role="alert" className="type-body px-4 pt-4 text-destructive">
@@ -371,7 +401,7 @@ export function RunConsole({
             )}
           </ScrollPane>
         </TabsContent>
-        <TabsContent value="raw">
+        <TabsContent value="raw" className={PANE_SLOT}>
           <ScrollPane watch={lines.at(-1)?.id ?? 0}>
             <ol
               role="log"
@@ -393,16 +423,26 @@ export function RunConsole({
             </ol>
           </ScrollPane>
         </TabsContent>
-        <TabsContent value="runs">
+        <TabsContent value="runs" className={PANE_SLOT}>
           <RunsTable
             status={recorded.status}
-            runs={recorded.runs}
+            runs={recorded.items}
             onReview={openReview}
+          />
+        </TabsContent>
+        <TabsContent value="traces" className={PANE_SLOT}>
+          <TracesPane
+            open={openTrace}
+            status={stored.status}
+            traces={stored.items}
+            failedOnly={failedOnly}
+            onOpen={(traceId) => setOpenTrace({ traceId, spanId: null })}
+            onBack={() => setOpenTrace(null)}
           />
         </TabsContent>
         {/* Kept mounted, unlike the other panes: a look at another tab must not lose the
             decisions made so far, or the outcome of a review. */}
-        <TabsContent value="review" keepMounted>
+        <TabsContent value="review" keepMounted className={PANE_SLOT}>
           <div className={cn(PANE_HEIGHT, "flex flex-col")}>
             {reviewId ? (
               <ReviewPane

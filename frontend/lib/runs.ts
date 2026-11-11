@@ -29,7 +29,7 @@ export const RUN_STATUS: Record<
 export const isText = (v: unknown): v is string => typeof v === "string";
 export const isRunStatus = (v: unknown): v is RunStatus =>
   isText(v) && Object.hasOwn(RUN_STATUS, v);
-const isTextOrNull = (v: unknown): v is string | null =>
+export const isTextOrNull = (v: unknown): v is string | null =>
   v === null || isText(v);
 const isCount = (v: unknown): v is number => Number.isInteger(v);
 

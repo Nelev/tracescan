@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, Field
 
-from trace_store.const import ID_PATTERN, MAX_LIMIT
+from trace_store.const import FAILED_MAX_SCORE, ID_PATTERN, MAX_LIMIT
 
 SpanStatus = Literal["unset", "ok", "error"]
 # A trace or span id taken as a tool argument. Pydantic rejects other shapes before the tool
@@ -22,7 +22,7 @@ class FailedTraceQuery(BaseModel):
     app: str
     since: AwareDatetime | None = None  # inclusive
     until: AwareDatetime | None = None  # exclusive
-    max_score: float = 0.5
+    max_score: float = FAILED_MAX_SCORE
     limit: int = Field(default=50, ge=1, le=MAX_LIMIT)
 
 
@@ -57,3 +57,47 @@ class SpanNode(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
     events: list[dict[str, Any]] = Field(default_factory=list)
     children: list["SpanNode"] = Field(default_factory=list)
+
+
+class TraceRow(BaseModel):
+    """One trace in list_traces, failed or not: its root span, its spans and its lowest score.
+
+    The failing fields are set for a failed trace only; like a TraceSummary, they are names,
+    never a message or an attribute value.
+    """
+
+    trace_id: str
+    start_time: AwareDatetime
+    duration_ms: float
+    status: SpanStatus  # the root span's
+    spans: int
+    min_score: float | None = None  # None: not scored yet
+    failed: bool = False  # min_score <= FAILED_MAX_SCORE
+    failing_span_id: str | None = None
+    failing_span_name: str | None = None
+    failing_check: str | None = None  # the check that gave the lowest score
+    error_type: str | None = None  # the failing span's exception type, when it has one
+
+
+class TraceScore(BaseModel):
+    """One check's score of a trace: 0.0 bad, 1.0 fine; a bad score blames a span."""
+
+    evaluator: str
+    value: float
+    span_id: str | None = None
+    failed: bool = False  # value <= FAILED_MAX_SCORE: the one place the threshold is applied
+
+
+def is_failed(score: float | None) -> bool:
+    """Whether a trace's lowest score, or one check's score, counts as a failure."""
+    return score is not None and score <= FAILED_MAX_SCORE
+
+
+class TraceDetail(BaseModel):
+    """One trace for the trace viewer: its span tree and every score it got."""
+
+    trace_id: str
+    tree: SpanNode
+    scores: list[TraceScore]
+    min_score: float | None  # None: not scored yet
+    failed: bool

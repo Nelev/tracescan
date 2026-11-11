@@ -27,6 +27,24 @@
         "cd frontend && BACKEND_URL=http://localhost:8010 exec npx next start --port 3010"
       ],
       "port": 3010
+    },
+    {
+      "name": "backend-8020",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd backend && exec uv run --env-file .env uvicorn main:app --port 8020"
+      ],
+      "port": 8020
+    },
+    {
+      "name": "frontend-dev-3020",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && BACKEND_URL=http://localhost:8020 exec npx next dev --port 3020"
+      ],
+      "port": 3020
     }
   ]
 }

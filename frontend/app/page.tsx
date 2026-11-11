@@ -14,15 +14,16 @@ export default function Home() {
         </div>
         <ServerStatus />
       </header>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
+      <main className="mx-auto flex w-full max-w-[96rem] flex-1 flex-col px-4 py-8 sm:px-6">
         <div className="mb-6 grid lg:grid-cols-12">
           <div className="flex flex-col gap-1 lg:col-span-9">
             <h1>Triage console</h1>
             <p className="type-body text-muted-foreground">
               Starts a triage run and shows the messages the server streams:
               drawn under Console, and as received under Raw events. Runs lists
-              the runs the server has recorded, and Review is where you approve
-              or reject a run's proposals.
+              the runs the server has recorded, Traces shows the stored traces
+              span by span, and Review is where you approve or reject a run's
+              proposals.
             </p>
           </div>
         </div>
