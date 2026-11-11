@@ -12,3 +12,7 @@ export const PANE_HEIGHT = "min-h-0 flex-1";
 /** A cell of the console's tables (Runs, Traces), and a cell that holds a number. */
 export const CELL = "px-4 py-2 whitespace-nowrap";
 export const NUMERIC = "text-right tabular-nums";
+
+/** A button that reads as a link: an id that opens something in another tab. */
+export const LINK =
+  "font-mono text-primary underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none";

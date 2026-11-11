@@ -41,6 +41,15 @@ class Spent:
         )
 
 
+def spent_by_cluster(usage: list[dict]) -> dict[str, Spent]:
+    """Every cluster's spend so far, in one pass over the `model_usage` entries."""
+    totals: dict[str, Spent] = {}
+    for entry in usage:
+        spent = Spent(entry["calls"], entry["tokens"], entry["cost_usd"])
+        totals[entry["cluster_id"]] = totals.get(entry["cluster_id"], Spent()) + spent
+    return totals
+
+
 def spent_for(usage: list[dict], cluster_id: str) -> Spent:
     """What a cluster has spent so far: the sum of its `model_usage` entries."""
     total = Spent()

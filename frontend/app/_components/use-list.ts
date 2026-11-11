@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { RunError } from "@/lib/api";
 
 export type ListState<T> = {
   /** `error`: the last load failed; `items` still holds what an earlier load returned. */
@@ -57,6 +58,54 @@ export function useList<T>(
   }, [enabled, reloadOn, refreshes, recheck]);
 
   return { ...state, refresh: () => setRefreshes((n) => n + 1) };
+}
+
+export type ResourceState<T> = {
+  /** `error`: the last load failed; `value` still holds what an earlier load returned. */
+  status: "loading" | "ready" | "error";
+  value: T | null;
+  /** The last load was a 404: the server does not have it. */
+  missing: boolean;
+};
+
+/**
+ * One thing from the server, loaded while `enabled` and only when `reloadOn` (a string or number)
+ * differs from what was last loaded: a panel kept mounted and shown again loads nothing, and a
+ * reload keeps showing the previous value until the new one arrives. `load` is always the latest
+ * one passed; whatever it depends on goes in `reloadOn`.
+ */
+export function useResource<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  enabled: boolean,
+  reloadOn: string | number,
+): ResourceState<T> {
+  const [state, setState] = useState<ResourceState<T>>({
+    status: "loading",
+    value: null,
+    missing: false,
+  });
+  const loadedFor = useRef<string | number | null>(null);
+  const latestLoad = useEffectEvent(load);
+
+  useEffect(() => {
+    if (!enabled || loadedFor.current === reloadOn) return;
+    const controller = new AbortController();
+    setState((s) => ({ ...s, status: "loading" }));
+    latestLoad(controller.signal).then(
+      (value) => {
+        loadedFor.current = reloadOn;
+        setState({ status: "ready", value, missing: false });
+      },
+      (err) => {
+        if (controller.signal.aborted) return;
+        const missing = err instanceof RunError && err.status === 404;
+        setState((s) => ({ ...s, status: "error", missing }));
+      },
+    );
+    return () => controller.abort();
+  }, [enabled, reloadOn]);
+
+  return state;
 }
 
 /** The console's footer for a list: how many, and when they were loaded. */

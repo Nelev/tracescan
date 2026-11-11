@@ -19,7 +19,7 @@ import {
 } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
-import { CELL, NUMERIC, PANE_HEIGHT } from "./console-styles";
+import { CELL, LINK, NUMERIC, PANE_HEIGHT } from "./console-styles";
 import { useTrace } from "./use-traces";
 
 const COLUMNS = [
@@ -65,7 +65,7 @@ function TraceListRow({
       <td className={CELL}>
         <button
           type="button"
-          className="font-mono text-primary underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
+          className={LINK}
           title={trace.trace_id}
           onClick={(e) => {
             e.stopPropagation();
@@ -244,7 +244,8 @@ function Attributes({ attributes }: { attributes: Record<string, unknown> }) {
   );
 }
 
-function Section({
+/** A titled block in a detail view (span details here, cluster cards under Run). */
+export function Section({
   title,
   children,
 }: {
@@ -422,7 +423,7 @@ function OpenTrace({
           {traceId}
         </span>
       </div>
-      {state.status === "loading" && (
+      {state.status === "loading" && state.value === null && (
         <p className="type-body p-4 text-muted-foreground">Loading trace…</p>
       )}
       {state.status === "error" && (
@@ -432,9 +433,7 @@ function OpenTrace({
             : "Could not load the trace. Check that the backend is running, then try again."}
         </p>
       )}
-      {state.status === "ready" && (
-        <TraceView trace={state.trace} initialSpan={spanId} />
-      )}
+      {state.value && <TraceView trace={state.value} initialSpan={spanId} />}
     </div>
   );
 }

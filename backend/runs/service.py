@@ -25,8 +25,9 @@ from langgraph.types import Command, StateSnapshot
 from pydantic import BaseModel
 
 from agent.context import ClosedTraces, TraceAccess, TraceContext
+from agent.model_guard import Spent, spent_by_cluster
 from agent.progress import ProgressEvent, progress_events
-from agent.schemas import Decision, Proposal
+from agent.schemas import ClusterMethod, Decision, Proposal, StoredDiagnosis
 from agent.state import TriageState
 from runs.store import NotClaimable, RunCounts, RunRecord, RunStore, StoredStatus
 
@@ -62,6 +63,33 @@ class RunStatus(BaseModel):
     status: RunState
     summary: RunSummary
     proposals: list[Proposal]
+
+
+class ClusterDetail(BaseModel):
+    """One cluster of failed traces, and what the run made of it."""
+
+    cluster_id: str
+    signature: str  # names only: the failing span and its error type or check
+    method: ClusterMethod
+    trace_ids: list[str]
+    exemplar_trace_ids: list[str]  # the ones the diagnoser was shown
+    diagnosis: StoredDiagnosis | None  # None until diagnosed, or when it failed
+    diagnosis_failed: bool
+    usage: Spent  # over all its attempts, failed ones included
+    verification: str  # unverified until the reproducer exists
+    decision: Decision | None  # the reviewer's, once the run is reviewed
+
+
+class RunDetail(BaseModel):
+    """What a run found, cluster by cluster: ids, signatures, diagnoses, spend and decisions.
+
+    No span content: a trace is an id here, and the UI reads it from the trace store. The
+    diagnoses' prose is the model's own, so it goes where the proposals go and is never logged.
+    """
+
+    status: RunState
+    summary: RunSummary
+    clusters: list[ClusterDetail]  # a failure that fit no cluster is an `isolated` one
 
 
 @dataclass(frozen=True)
@@ -139,6 +167,39 @@ def _summary(run_id: str, values: Mapping) -> RunSummary:
 def _status(run_id: str, values: Mapping, state: RunState) -> RunStatus:
     proposals = [Proposal.model_validate(p) for p in values.get("proposals", [])]
     return RunStatus(status=state, summary=_summary(run_id, values), proposals=proposals)
+
+
+def _detail(run_id: str, values: Mapping, state: RunState) -> RunDetail:
+    diagnoses = {d["cluster_id"]: d for d in values.get("diagnoses", [])}
+    failures = set(values.get("diagnosis_failures", []))
+    spent = spent_by_cluster(values.get("model_usage", []))
+    verification = {
+        p["cluster_id"]: p.get("verification", "unverified") for p in values.get("proposals", [])
+    }
+    decisions = values.get("decisions", {})
+    clusters = []
+    for cluster in values.get("clusters", []):
+        cluster_id = cluster["cluster_id"]
+        diagnosis = diagnoses.get(cluster_id)
+        clusters.append(
+            ClusterDetail(
+                cluster_id=cluster_id,
+                signature=cluster["signature"],
+                method=cluster["method"],
+                trace_ids=cluster["trace_ids"],
+                exemplar_trace_ids=cluster["exemplar_trace_ids"],
+                diagnosis=diagnosis and StoredDiagnosis.model_validate(diagnosis),
+                diagnosis_failed=cluster_id in failures,
+                usage=spent.get(cluster_id, Spent()),
+                verification=verification.get(cluster_id, "unverified"),
+                decision=decisions.get(cluster_id),
+            )
+        )
+    return RunDetail(
+        status=state,
+        summary=_summary(run_id, values),
+        clusters=clusters,
+    )
 
 
 def _state_of(snapshot: StateSnapshot) -> RunState:
@@ -279,12 +340,31 @@ class Runs:
         """The newest runs first, as the run store recorded them: no state, no proposals."""
         return await self._store.list_runs(limit)
 
+    async def _load(self, run_id: str) -> tuple[Mapping, RunState]:
+        """The run's state values and where it stands, from its two records read at once."""
+        async with anyio.create_task_group() as tg:
+            record = snapshot = None
+
+            async def read_record() -> None:
+                nonlocal record
+                record = await self._store.get_run(run_id)
+
+            async def read_snapshot() -> None:
+                nonlocal snapshot
+                snapshot = await self._find_snapshot(run_id)
+
+            tg.start_soon(read_record)
+            tg.start_soon(read_snapshot)
+        state = _resolve(snapshot, record)
+        return (snapshot.values if snapshot else {}), state
+
     async def status(self, run_id: str) -> RunStatus:
         """The run's status, counts and proposals. Raises `RunNotFound`."""
-        record = await self._store.get_run(run_id)
-        snapshot = await self._find_snapshot(run_id)
-        state = _resolve(snapshot, record)
-        return _status(run_id, snapshot.values if snapshot else {}, state)
+        return _status(run_id, *await self._load(run_id))
+
+    async def detail(self, run_id: str) -> RunDetail:
+        """What the run found, cluster by cluster. Raises `RunNotFound`."""
+        return _detail(run_id, *await self._load(run_id))
 
     async def review(
         self, run_id: str, decisions: Mapping[str, Decision], reviewer: str

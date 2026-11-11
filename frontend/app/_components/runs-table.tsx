@@ -3,7 +3,7 @@ import { formatWhen, formatWindow, RUN_STATUS, shortId } from "@/lib/runs";
 import type { RunRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
-import { CELL, NUMERIC, PANE_HEIGHT } from "./console-styles";
+import { CELL, LINK, NUMERIC, PANE_HEIGHT } from "./console-styles";
 import type { RunsState } from "./use-runs";
 
 const COLUMNS = [
@@ -21,14 +21,19 @@ const COLUMNS = [
 
 function Row({
   run,
+  onOpen,
   onReview,
 }: {
   run: RunRecord;
+  onOpen: (runId: string) => void;
   onReview: (runId: string) => void;
 }) {
   const { label, tone } = RUN_STATUS[run.status];
   return (
-    <tr className="border-t">
+    <tr
+      className="cursor-pointer border-t hover:bg-foreground/5"
+      onClick={() => onOpen(run.run_id)}
+    >
       <td className={CELL}>
         <time dateTime={run.created_at}>{formatWhen(run.created_at)}</time>
       </td>
@@ -48,14 +53,25 @@ function Row({
         {run.started_by ?? "Unknown"}
       </td>
       <td className={cn(CELL, "font-mono text-muted-foreground")}>
-        <span title={run.run_id}>{shortId(run.run_id)}</span>
+        {/* No handler of its own: its click reaches the row, which opens the run. */}
+        <button
+          type="button"
+          title={run.run_id}
+          className={LINK}
+          aria-label={`Open run ${shortId(run.run_id)}`}
+        >
+          {shortId(run.run_id)}
+        </button>
       </td>
       <td className={CELL}>
         {run.status === "review_required" && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => onReview(run.run_id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onReview(run.run_id);
+            }}
             aria-label={`Review run ${shortId(run.run_id)}`}
           >
             Review
@@ -68,15 +84,18 @@ function Row({
 
 /**
  * The recorded runs, newest first, in a pane of the same height as the console's other tabs.
- * A run that waits for its review has a button that opens it under Review; the other rows do
- * not open.
+ * Each row opens its run under Run; a run that waits for its review also has a button that
+ * opens it under Review.
  */
 export function RunsTable({
   status,
   runs,
+  onOpen,
   onReview,
 }: Pick<RunsState, "status"> & {
   runs: RunRecord[];
+  /** Opens the run under Run. */
+  onOpen: (runId: string) => void;
   onReview: (runId: string) => void;
 }) {
   return (
@@ -111,7 +130,12 @@ export function RunsTable({
           </thead>
           <tbody>
             {runs.map((run) => (
-              <Row key={run.run_id} run={run} onReview={onReview} />
+              <Row
+                key={run.run_id}
+                run={run}
+                onOpen={onOpen}
+                onReview={onReview}
+              />
             ))}
           </tbody>
         </table>

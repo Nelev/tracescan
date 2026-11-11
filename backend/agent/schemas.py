@@ -88,6 +88,12 @@ class Diagnosis(BaseModel):
     evidence: list[Evidence] = Field(min_length=1)
 
 
+class StoredDiagnosis(Diagnosis):
+    """A diagnosis as diagnose_cluster stores it: the model's answer plus the code's evidence check."""
+
+    evidence_check: EvidenceCheck
+
+
 class RegressionCase(BaseModel):
     """What the eval dataset keeps of a cluster: ids only, so no span text or input is copied.
 

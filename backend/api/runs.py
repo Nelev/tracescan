@@ -3,6 +3,8 @@
 - `POST /v1/runs/stream` starts a run and streams it until it waits for review or ends.
 - `GET /v1/runs` lists the newest runs: who started each, its status and counts.
 - `GET /v1/runs/{run_id}` returns its status, counts and proposals, read from the checkpoint.
+- `GET /v1/runs/{run_id}/detail` returns its clusters: signatures, trace ids, diagnoses with the
+  span ids they cite, spend and decisions.
 - `POST /v1/runs/{run_id}/review` resumes it with one decision per proposal.
 
 Who starts or reviews a run is recorded by name, from the `X-User-Name` header (`local` without
@@ -28,6 +30,7 @@ from runs import (
     IncompleteDecisions,
     NotWaitingForReview,
     Progress,
+    RunDetail,
     RunFailed,
     RunNotFound,
     RunRecord,
@@ -140,6 +143,15 @@ async def list_runs(
 async def get_run(run_id: UUID, runs: Annotated[Runs, Depends(_runs)]) -> RunStatus:
     try:
         return await runs.status(str(run_id))
+    except RunNotFound:
+        raise _run_not_found() from None
+
+
+@router.get("/runs/{run_id}/detail")
+async def get_run_detail(run_id: UUID, runs: Annotated[Runs, Depends(_runs)]) -> RunDetail:
+    """What the run found, cluster by cluster: no span content, trace and span ids only."""
+    try:
+        return await runs.detail(str(run_id))
     except RunNotFound:
         raise _run_not_found() from None
 
