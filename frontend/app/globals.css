@@ -5,7 +5,9 @@
    draw the part of a server UI spec that ui-parts.tsx does not, are found here. */
 @source "../node_modules/@json-render/shadcn/dist/*.mjs";
 
-@custom-variant dark (&:is(.dark *));
+/* Light and dark follow the system setting: the tokens below switch under the same media query,
+   so shadcn's `dark:` variants and our tokens always agree. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
 @theme inline {
   --color-background: var(--background);
@@ -16,6 +18,9 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-rule: var(--rule);
+  --color-hover: var(--hover);
+  --color-track: var(--track);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-info: var(--info);
@@ -40,42 +45,66 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Swiss style: no elevation. Layers are told apart by a hairline and a surface step, so the
+     whole shadow scale (ours and the json-render components') is flat. */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: 0 0 #0000;
+  --shadow-xl: 0 0 #0000;
+  --shadow-2xl: 0 0 #0000;
+  /* Motion: one duration and easing for every state change (hover, press, open). */
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /*
- * Design system
+ * Design system: Minimalism and Swiss style
  *
- * Type: four sizes and two weights (400 body, 500 emphasis). Use these, not text-xs/lg/3xl.
- *   h1  24/32  500  page title and key metrics (mono)
- *   h2  16/24  500  panel titles
+ * Grid, hairlines, flush type and one ink. Square corners (--radius 0), no shadows, no gradients
+ * or textures; hierarchy comes from size, weight and space, not from color or depth.
+ *
+ * Type: four sizes. Weights: 400 body, 500 emphasis and small headings, 600 for h1 and h2.
+ * Use these, not text-xs/lg/3xl.
+ *   h1  28/36  600  page title and key metrics (mono), tight tracking
+ *   h2  16/24  600  panel titles
  *   h3  14/20  500  field labels, section headings
- *   h4  12/16  400  mono uppercase overline, muted
+ *   h4  12/16  500  uppercase overline, wide tracking, muted
  *   body 14/22 400  paragraphs and log text
  *
  * Color roles, one job each:
- *   foreground        primary text          muted-foreground  secondary text, overlines
- *   muted < background < card < popover   surfaces: inset, page, card, floating
- *   primary (periwinkle)        the one accent: actions, focus, key metric, selection
+ *   foreground        ink                   muted-foreground  secondary text, overlines
+ *   muted < background = card < popover   surfaces (light: inset gray, white, white, white)
+ *   border            hairlines between regions   rule  the strong line under a heading or axis
+ *   input             control outlines (3:1 against the page)
+ *   hover / track     a row or button under the pointer / the empty part of a bar
+ *   primary           the ink itself (black on light, white on dark): actions, focus, selection,
+ *                     key metric; the interface has no decorative hue
  *   info / warning / success / destructive / stopped   status only, never decoration (chip.tsx);
  *   on small marks (chips, icons, counts, a thin stripe), never as a large border or fill:
- *     info         under way, nothing to do (a cyan-slate, so it never reads as a button)
+ *     info         under way, nothing to do
  *     warning      waiting for a person: the only color that asks for action
  *     success      ended well            destructive  ended badly
- *     stopped      cut short by choice (cancelled, aborted): an orange between warning's amber
- *                  and destructive's red, since it is neither a request nor a failure
+ *     stopped      cut short by choice (cancelled, aborted)
  *     a status that is nothing (idle) is muted-foreground
+ *
+ * Contrast (WCAG, measured on the page and on muted): light: foreground 19.4, muted-foreground
+ * 7.1, every status color at least 4.9, input 3.9. Dark: foreground 17.5, muted-foreground 7.7,
+ * every status color at least 7.0, input 3.5.
  */
 @utility type-h1 {
-  font-size: 1.5rem;
-  line-height: 2rem;
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  font-size: 1.75rem;
+  line-height: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
 }
 
 @utility type-h2 {
   font-size: 1rem;
   line-height: 1.5rem;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 @utility type-h3 {
@@ -85,10 +114,10 @@
 }
 
 @utility type-h4 {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 0.75rem;
   line-height: 1rem;
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted-foreground);
@@ -100,85 +129,80 @@
   font-weight: 400;
 }
 
-/* Dark only: layout.tsx sets the `dark` class on <html>. These light values are shadcn's
-   defaults, kept so its `dark:` variants keep working, and are never rendered. */
 :root {
-  --success: oklch(0.55 0.15 160);
-  --info: oklch(0.55 0.16 255);
-  --warning: oklch(0.6 0.14 80);
-  --stopped: oklch(0.6 0.16 50);
+  color-scheme: light;
+  --radius: 0rem;
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: oklch(0.16 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.16 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.16 0 0);
+  --primary: oklch(0.16 0 0);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.95 0 0);
+  --secondary-foreground: oklch(0.16 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  --muted-foreground: oklch(0.46 0 0);
+  --accent: oklch(0.95 0 0);
+  --accent-foreground: oklch(0.16 0 0);
+  --border: oklch(0.89 0 0);
+  --rule: oklch(0.16 0 0);
+  --input: oklch(0.6 0 0);
+  --ring: oklch(0.16 0 0);
+  --hover: oklch(0.16 0 0 / 5%);
+  --track: oklch(0.16 0 0 / 8%);
+  --destructive: oklch(0.53 0.19 27);
+  --success: oklch(0.5 0.12 155);
+  --info: oklch(0.5 0.09 235);
+  --warning: oklch(0.52 0.11 70);
+  --stopped: oklch(0.54 0.15 45);
 }
 
-.dark {
-  color-scheme: dark;
-  /* Calm graphite: surfaces step up from the page (muted < background < card < popover) with
-     barely any tint, so the accent and the status colors are the only color on screen.
-     Contrast (WCAG) on a card: foreground 15.5, muted-foreground 7.2, primary 7.1, every status
-     color at least 6.5; primary-foreground on primary 7.6. */
-  --background: oklch(0.165 0.008 260);
-  --foreground: oklch(0.95 0.005 260);
-  --card: oklch(0.205 0.009 260);
-  --card-foreground: oklch(0.95 0.005 260);
-  --popover: oklch(0.235 0.01 260);
-  --popover-foreground: oklch(0.95 0.005 260);
-  /* Periwinkle accent: soft enough to sit beside text, with dark text on its fills. */
-  --primary: oklch(0.72 0.12 268);
-  --primary-foreground: oklch(0.17 0.02 268);
-  --secondary: oklch(0.26 0.01 260);
-  --secondary-foreground: oklch(0.95 0.005 260);
-  --muted: oklch(0.145 0.008 260);
-  --muted-foreground: oklch(0.72 0.012 260);
-  --accent: oklch(0.27 0.02 268);
-  --accent-foreground: oklch(0.95 0.005 260);
-  /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
-  --destructive: oklch(0.71 0.14 22);
-  --success: oklch(0.77 0.11 155);
-  --info: oklch(0.78 0.08 225);
-  --warning: oklch(0.82 0.1 78);
-  --stopped: oklch(0.76 0.1 52);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 13%);
-  --ring: oklch(0.72 0.12 268);
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: oklch(0.14 0 0);
+    --foreground: oklch(0.97 0 0);
+    --card: oklch(0.17 0 0);
+    --card-foreground: oklch(0.97 0 0);
+    --popover: oklch(0.2 0 0);
+    --popover-foreground: oklch(0.97 0 0);
+    --primary: oklch(0.97 0 0);
+    --primary-foreground: oklch(0.14 0 0);
+    --secondary: oklch(0.24 0 0);
+    --secondary-foreground: oklch(0.97 0 0);
+    --muted: oklch(0.12 0 0);
+    --muted-foreground: oklch(0.72 0 0);
+    --accent: oklch(0.24 0 0);
+    --accent-foreground: oklch(0.97 0 0);
+    --border: oklch(0.29 0 0);
+    --rule: oklch(0.97 0 0);
+    --input: oklch(0.52 0 0);
+    --ring: oklch(0.97 0 0);
+    --hover: oklch(1 0 0 / 6%);
+    --track: oklch(1 0 0 / 10%);
+    /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
+    --destructive: oklch(0.71 0.14 22);
+    --success: oklch(0.77 0.11 155);
+    --info: oklch(0.78 0.08 225);
+    --warning: oklch(0.82 0.1 78);
+    --stopped: oklch(0.76 0.1 52);
+  }
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  /* One focus look for everything that has no ring of its own: a 2px ink outline, offset. */
+  :focus-visible {
+    outline-width: 2px;
+    outline-offset: 2px;
+    outline-color: var(--ring);
+  }
   body {
     @apply bg-background text-foreground type-body;
-    /* A faint accent glow from the top edge and a barely visible dot grid, fixed so cards
-       scroll over them: texture, not decoration. */
-    background-image:
-      radial-gradient(
-        60rem 28rem at 50% -8rem,
-        oklch(0.72 0.12 268 / 0.07),
-        transparent 70%
-      ),
-      radial-gradient(oklch(1 0 0 / 0.04) 1px, transparent 1px);
-    background-size:
-      100% 100%,
-      22px 22px;
-    background-attachment: fixed;
   }
   /* The body text style goes on <body>, not <html>: on <html> its 0.875rem would become the
      root size, so every rem (type sizes, spacing, control heights) would shrink by 1/8. */

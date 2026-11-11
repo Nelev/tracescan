@@ -105,7 +105,7 @@ export function AgentConsole({ runId }: { runId: string }) {
     <section
       aria-labelledby="agent-console"
       className={cn(
-        "flex flex-col overflow-hidden rounded-xl border bg-muted shadow-[inset_0_2px_8px_0_oklch(0.05_0.05_265/0.6)]",
+        "flex flex-col overflow-hidden border bg-muted",
         mine && "h-full min-h-[20rem]",
       )}
     >
@@ -114,7 +114,7 @@ export function AgentConsole({ runId }: { runId: string }) {
           Agent console
           {running && (
             <span
-              className="size-2 rounded-full bg-info motion-safe:animate-pulse"
+              className="size-2 bg-info motion-safe:animate-pulse"
               aria-hidden="true"
             />
           )}

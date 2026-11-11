@@ -145,7 +145,7 @@ function Evidence({ cluster }: { cluster: ClusterDetail }) {
         </h4>
         <Link
           href={tracePath(open.traceId, open.spanId)}
-          className="type-body text-primary underline-offset-4 hover:underline"
+          className="type-body underline decoration-muted-foreground/60 underline-offset-4 hover:decoration-foreground"
         >
           Open trace {shortId(open.traceId)} in full
         </Link>
@@ -164,14 +164,14 @@ function Evidence({ cluster }: { cluster: ClusterDetail }) {
                     setOpen({ traceId: e.trace_id, spanId: e.span_id })
                   }
                   className={cn(
-                    "grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     picked &&
                       "border-primary/60 bg-primary/10 hover:bg-primary/15",
                   )}
                 >
                   <span
                     className={cn(
-                      "flex size-6 items-center justify-center rounded-full border font-mono",
+                      "flex size-6 items-center justify-center border font-mono",
                       picked &&
                         "border-primary bg-primary text-primary-foreground",
                     )}
@@ -247,7 +247,7 @@ function More({
 }) {
   return (
     <details className="group rounded-lg border">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <ChevronRight
           className="size-4 text-muted-foreground transition-transform group-open:rotate-90"
           aria-hidden="true"
@@ -400,11 +400,11 @@ export function ClusterCard({
           {diagnosis && (
             <li className="flex items-center gap-2">
               <span
-                className="h-1.5 w-12 overflow-hidden rounded-full bg-foreground/10"
+                className="h-1.5 w-12 overflow-hidden bg-track"
                 aria-hidden="true"
               >
                 <span
-                  className="block h-full rounded-full bg-primary"
+                  className="block h-full bg-primary"
                   style={{ width: `${diagnosis.confidence * 100}%` }}
                 />
               </span>
@@ -502,7 +502,7 @@ export function ClusterCard({
                           : traceId
                       }
                       className={cn(
-                        "block rounded-md border px-2 font-mono hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none",
+                        "block rounded-md border px-2 font-mono hover:bg-hover focus-visible:bg-hover focus-visible:outline-none",
                         exemplars.has(traceId) &&
                           "border-primary/60 text-primary",
                       )}

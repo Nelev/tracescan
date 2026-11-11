@@ -63,7 +63,7 @@ function Row({ run }: { run: RunRecord }) {
   const { label, tone } = RUN_STATUS[run.status];
   return (
     <tr
-      className="cursor-pointer border-t hover:bg-foreground/5"
+      className="cursor-pointer border-t hover:bg-hover"
       onClick={() => router.push(runPath(run.run_id))}
     >
       <td className={CELL}>
@@ -132,7 +132,7 @@ export function RunsList() {
 
       <section className="flex flex-col gap-3">
         <h2 className="sr-only">All runs</h2>
-        <div className="overflow-x-auto rounded-xl border bg-card">
+        <div className="relative overflow-x-auto rounded-xl border bg-card">
           {recorded.status === "error" && (
             <p role="alert" className="type-body px-4 pt-4 text-destructive">
               Could not load the runs. Check that the backend is running, then

@@ -38,7 +38,7 @@ export function ClusterLink({ membership: m }: { membership: Membership }) {
     <Link
       href={runPath(m.runId, m.clusterId)}
       title={`${m.signature} · run ${shortId(m.runId)}, ${formatWhen(m.createdAt)}`}
-      className="inline-flex items-baseline gap-1.5 rounded-md border px-2 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex items-baseline gap-1.5 rounded-md border px-2 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={(e) => e.stopPropagation()}
     >
       <span className="font-mono">{m.clusterId}</span>
@@ -62,7 +62,7 @@ function Row({
   const why = trace.error_type ?? trace.failing_check;
   return (
     <tr
-      className="cursor-pointer border-t hover:bg-foreground/5"
+      className="cursor-pointer border-t hover:bg-hover"
       onClick={() => router.push(tracePath(trace.trace_id))}
     >
       <td className={CELL}>
@@ -158,7 +158,7 @@ export function TracesList() {
           </Button>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-xl border bg-card">
+      <div className="relative overflow-x-auto rounded-xl border bg-card">
         {status === "error" && (
           <p role="alert" className="type-body px-4 pt-4 text-destructive">
             Could not load the traces. Check that the backend is running, then

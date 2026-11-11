@@ -320,7 +320,7 @@ function ReviewBar({
   onReload: () => void;
 }) {
   return (
-    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-popover/95 px-4 py-3 shadow-lg backdrop-blur">
+    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 border border-rule bg-popover px-4 py-3">
       <div className="flex min-w-0 flex-col gap-1">
         <span className="type-h3 flex items-center gap-2">
           <UserCheck
