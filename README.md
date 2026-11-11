@@ -368,6 +368,7 @@ flowchart TD
 4. **Second stage.** HDBSCAN cannot see one single dense group (it labels it all noise), and one fault often causes most of a run's failures. So the noise is regrouped by failing step and normalised error (quoted values and digits masked, so `missing 'dose'` and `missing 'unit'` are one error). A group of 3 or more becomes a cluster.
 5. **Small runs.** With fewer than 6 failed traces, embedding is skipped and every step-and-error group becomes a cluster, since nothing can be called noise from so little data.
 6. **Isolated failures.** A trace that fits no group becomes a cluster of one, so it is still diagnosed.
+7. **Cluster map.** The same embeddings are projected to 3D for the run page: identical embeddings in the same cluster become one point, PCA is always tried and t-SNE too from 30 distinct points, and the map keeps the one with the higher trustworthiness (how well near neighbours stay near; stored as `trust`). HDBSCAN worked on all 384 dimensions, so the map is a picture of the space, not the space. It holds trace ids, coordinates and labels, never the failure text. Small runs have no map.
 
 A `Cluster` holds `cluster_id` (`c0`, `c1`, … by size, stable for the same input), `trace_ids`, `signature` (the most common "step: normalised error" among its traces), `exemplar_trace_ids` (the 3 newest traces, which the diagnoser reads) and `method` (`hdbscan`, `step_error` or `isolated`).
 

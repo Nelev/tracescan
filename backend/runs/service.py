@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from agent.context import ClosedTraces, TraceAccess, TraceContext
 from agent.model_guard import Spent, spent_by
 from agent.progress import ProgressEvent, progress_events
-from agent.schemas import ClusterMethod, Decision, Proposal, StoredDiagnosis
+from agent.schemas import ClusterMap, ClusterMethod, Decision, Proposal, StoredDiagnosis
 from agent.state import TriageState
 from runs.store import NotClaimable, RunCounts, RunRecord, RunStore, StoredStatus
 
@@ -94,6 +94,9 @@ class RunDetail(BaseModel):
     status: RunState
     summary: RunSummary
     clusters: list[ClusterDetail]  # a failure that fit no cluster is an `isolated` one
+    # The failures in 3D, for the run page's map. None before clustering, for a run too small
+    # to embed, and for runs clustered before the map existed.
+    cluster_map: ClusterMap | None = None
 
 
 @dataclass(frozen=True)
@@ -206,6 +209,7 @@ def _detail(run_id: str, values: Mapping, state: RunState) -> RunDetail:
         status=state,
         summary=_summary(run_id, values),
         clusters=clusters,
+        cluster_map=values.get("cluster_map"),
     )
 
 

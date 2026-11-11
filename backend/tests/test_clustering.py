@@ -11,10 +11,19 @@ import random
 from functools import cache
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from agent.clustering import cluster_summaries, failure_text, isolated_clusters, normalise_error
-from agent.const import MAX_EXEMPLARS
+from agent.clustering import (
+    cluster_map,
+    cluster_summaries,
+    failure_text,
+    group_failures,
+    isolated_clusters,
+    normalise_error,
+    project,
+)
+from agent.const import MAX_EXEMPLARS, TSNE_MIN_POINTS
 from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
 from tests.fakes import (
@@ -210,6 +219,9 @@ async def test_node_puts_plain_json_clusters_and_unclustered_into_state():
     assert sorted(placed) == sorted(s.trace_id for s in load())  # every failure, exactly once
     isolated = {t for c in result["clusters"] if c["method"] == "isolated" for t in c["trace_ids"]}
     assert set(result["unclustered"]) == isolated
+    json.dumps(result["cluster_map"])  # a plain dict too
+    on_map = [t for p in result["cluster_map"]["points"] for t in p["trace_ids"]]
+    assert sorted(on_map) == sorted(placed)
 
 
 def test_isolated_clusters_are_one_trace_clusters_numbered_after_the_real_ones():
@@ -229,3 +241,97 @@ async def test_the_graph_diagnoses_each_isolated_failure_on_its_own():
     diagnosed = {d["cluster_id"] for d in result["diagnoses"]}
     assert {c["cluster_id"] for c in isolated} <= diagnosed
     assert result.get("diagnosis_failures", []) == []
+
+
+# --- the cluster map
+
+
+def mapped(rows: list[TraceSummary]):
+    grouping = group_failures(rows, HashingEmbedder())
+    clusters = grouping.clusters + isolated_clusters(
+        rows, grouping.unclustered, first_index=len(grouping.clusters)
+    )
+    return clusters, cluster_map(grouping, clusters)
+
+
+def test_the_map_places_every_failure_once_in_its_final_cluster():
+    clusters, found = mapped(load())
+    assert found is not None
+    placed = {t: (c["cluster_id"], c["method"]) for c in clusters for t in c["trace_ids"]}
+    on_map = [t for p in found.points for t in p.trace_ids]
+    assert sorted(on_map) == sorted(placed)
+    for point in found.points:
+        assert {placed[t] for t in point.trace_ids} == {(point.cluster_id, point.stage)}
+        assert all(-1 <= v <= 1 for v in (point.x, point.y, point.z))
+        assert 0 <= point.membership <= 1
+
+
+def test_the_map_keeps_hdbscan_labels_and_marks_noise():
+    _, found = mapped(load())
+    assert found is not None
+    for point in found.points:
+        if point.stage == "hdbscan":
+            # A member's strength can be 0: it joined its group only at the edge.
+            assert point.hdbscan_label >= 0
+        else:  # rescued or isolated: HDBSCAN called it noise
+            assert (point.hdbscan_label, point.membership) == (-1, 0)
+
+
+def test_the_map_keeps_the_known_groups_apart():
+    # The fixture's groups are clearly separate, so the projection should keep neighbours near.
+    _, found = mapped(load())
+    assert found is not None and found.trust is not None and found.trust > 0.9
+
+
+def test_identical_failures_are_one_point_per_cluster():
+    def failure(trace_id: str, ms: int) -> TraceSummary:
+        return summary(trace_id, failing_span_name="retrieve", error_message=f"timed out {ms} ms")
+
+    same = [failure(f"t{i}", 10 * i) for i in range(4)]  # digits masked: one failure text
+    others = [s for s in load() if group_of(s.trace_id) in {"tool", "ctx"}]
+    clusters, found = mapped(same + others)
+    assert found is not None
+    [point] = [p for p in found.points if "t0" in p.trace_ids]
+    assert point.trace_ids == ["t0", "t1", "t2", "t3"]
+    assert len(found.points) == len({failure_text(s) for s in others}) + 1
+
+
+def test_the_map_holds_ids_and_numbers_never_failure_text():
+    _, found = mapped(load())
+    assert found is not None
+    dumped = found.model_dump_json()
+    for s in load():
+        assert s.error_message is None or s.error_message not in dumped
+        assert s.failing_span_name is None or s.failing_span_name not in dumped
+
+
+def test_a_small_run_has_no_map():
+    rows = [summary(f"t{i}", failing_span_name="retrieve", error_message="x") for i in range(3)]
+    grouping = group_failures(rows, NoEmbedding())
+    assert cluster_map(grouping, grouping.clusters) is None
+
+
+def test_the_map_does_not_depend_on_input_order():
+    rows = load()
+    shuffled = rows[:]
+    random.Random(0).shuffle(shuffled)
+    assert mapped(shuffled)[1] == mapped(rows)[1]
+
+
+def test_project_uses_pca_on_few_points_and_fills_missing_axes_with_zero():
+    coords, method, trust = project(np.array([[1.0, 0.0], [0.0, 1.0]]))
+    assert method == "pca" and coords.shape == (2, 3)
+    assert np.allclose(coords[:, 1:], 0) and np.isclose(np.abs(coords).max(), 1)
+    assert trust is None  # too few points to measure
+
+    coords, method, trust = project(np.array([[1.0, 2.0, 3.0]]))
+    assert np.all(coords == 0) and trust is None
+
+
+def test_project_tries_tsne_on_many_points_and_keeps_the_more_trustworthy():
+    rng = np.random.default_rng(0)
+    centres = rng.normal(size=(4, 32)) * 5
+    vectors = np.vstack([c + rng.normal(size=(TSNE_MIN_POINTS, 32)) for c in centres])
+    coords, method, trust = project(vectors)
+    assert method in {"pca", "tsne"} and trust is not None and 0 <= trust <= 1
+    assert coords.shape == (len(vectors), 3)

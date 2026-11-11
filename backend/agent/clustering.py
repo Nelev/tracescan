@@ -7,22 +7,37 @@ big enough becomes a cluster. The second stage matters because HDBSCAN cannot se
 group (it labels the whole group noise), and one fault often causes most of a run's failures. With
 too few traces for HDBSCAN, every trace goes straight to the second stage and every group counts,
 because with so little data nothing can be called noise.
+
+The cluster map is a 3D projection of the same embeddings, made once the clusters are final, so
+the run page can show where each failure sat and which stage grouped it.
 """
 
 import re
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from importlib import import_module
 
 import numpy as np
 
-from agent.const import MAX_EXEMPLARS, MIN_CLUSTER_SIZE, MIN_SAMPLES, MIN_TRACES_FOR_HDBSCAN
+from agent.const import (
+    MAP_SEED,
+    MAX_EXEMPLARS,
+    MIN_CLUSTER_SIZE,
+    MIN_SAMPLES,
+    MIN_TRACES_FOR_HDBSCAN,
+    TRUST_NEIGHBORS,
+    TSNE_MIN_POINTS,
+    TSNE_PERPLEXITY,
+)
 from agent.embeddings import Embedder
-from agent.schemas import Cluster, ClusterMethod
+from agent.schemas import Cluster, ClusterMap, ClusterMethod, MapPoint, Projection
 from trace_store.models import TraceSummary
 
 # Not `from sklearn.cluster import HDBSCAN`: scikit-learn ships no type information, and Pylance's
 # bundled sklearn stubs predate HDBSCAN (added in scikit-learn 1.3), so they flag that import.
 HDBSCAN = import_module("sklearn.cluster").HDBSCAN
+_manifold = import_module("sklearn.manifold")
+PCA = import_module("sklearn.decomposition").PCA
 
 UNKNOWN_STEP = "unknown step"
 _QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
@@ -51,14 +66,31 @@ def _step_and_error(summary: TraceSummary) -> tuple[str, str]:
     return summary.failing_span_name or UNKNOWN_STEP, normalise_error(summary.error_message)
 
 
-def _hdbscan_labels(summaries: list[TraceSummary], embedder: Embedder) -> np.ndarray:
-    """One label per trace, -1 for noise."""
-    vectors = embedder.embed([failure_text(s) for s in summaries])
+@dataclass(frozen=True)
+class Embedded:
+    """What HDBSCAN saw and said, one row per trace in input order."""
+
+    vectors: np.ndarray
+    labels: np.ndarray  # -1 for noise
+    membership: np.ndarray  # HDBSCAN's probabilities_, 0 for noise
+
+
+@dataclass(frozen=True)
+class Grouping:
+    clusters: list[Cluster]
+    unclustered: list[str]
+    summaries: list[TraceSummary]
+    embedded: Embedded | None  # None for a small run, which skips the embedding
+
+
+def _hdbscan(summaries: list[TraceSummary], embedder: Embedder) -> Embedded:
+    vectors = np.asarray(embedder.embed([failure_text(s) for s in summaries]), dtype=float)
     # Cosine distance, so the embedder does not have to return unit vectors. copy=True only
     # silences a FutureWarning about the default changing in scikit-learn 1.10.
-    return HDBSCAN(
+    model = HDBSCAN(
         min_cluster_size=MIN_CLUSTER_SIZE, min_samples=MIN_SAMPLES, metric="cosine", copy=True
-    ).fit_predict(vectors)
+    ).fit(vectors)
+    return Embedded(vectors, np.asarray(model.labels_), np.asarray(model.probabilities_))
 
 
 def _signature(members: list[TraceSummary]) -> str:
@@ -94,8 +126,15 @@ def cluster_summaries(
     summaries: list[TraceSummary], embedder: Embedder
 ) -> tuple[list[Cluster], list[str]]:
     """Return (clusters, unclustered trace ids)."""
+    grouping = group_failures(summaries, embedder)
+    return grouping.clusters, grouping.unclustered
+
+
+def group_failures(summaries: list[TraceSummary], embedder: Embedder) -> Grouping:
+    """The clusters and unclustered ids, plus what HDBSCAN saw, for the cluster map."""
     small = len(summaries) < MIN_TRACES_FOR_HDBSCAN  # too few for HDBSCAN: nothing is noise
-    labels = np.full(len(summaries), -1) if small else _hdbscan_labels(summaries, embedder)
+    embedded = None if small else _hdbscan(summaries, embedder)
+    labels = np.full(len(summaries), -1) if embedded is None else embedded.labels
     min_size = 1 if small else MIN_CLUSTER_SIZE
 
     by_label: dict[int, list[TraceSummary]] = defaultdict(list)
@@ -120,4 +159,98 @@ def cluster_summaries(
     # Biggest first; the lowest trace id makes the order independent of the input order.
     groups.sort(key=lambda g: (-len(g[0]), _signature(g[0]), min(s.trace_id for s in g[0])))
     clusters = [_cluster(f"c{i}", members, method) for i, (members, method) in enumerate(groups)]
-    return clusters, sorted(unclustered)
+    return Grouping(clusters, sorted(unclustered), summaries, embedded)
+
+
+def _unit(vectors: np.ndarray) -> np.ndarray:
+    """Rows scaled to length 1, so Euclidean distance orders points as cosine distance does."""
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    return vectors / np.where(norms == 0, 1, norms)
+
+
+def _trust(vectors: np.ndarray, coords: np.ndarray) -> float | None:
+    neighbors = min(TRUST_NEIGHBORS, (len(vectors) - 1) // 2)
+    if neighbors < 1:
+        return None
+    value = _manifold.trustworthiness(vectors, coords, n_neighbors=neighbors)
+    return round(float(value), 3)
+
+
+def _scaled(coords: np.ndarray) -> np.ndarray:
+    coords = coords - coords.mean(axis=0)
+    scale = np.abs(coords).max()
+    return coords / scale if scale > 0 else coords
+
+
+def _pca(unit: np.ndarray) -> np.ndarray:
+    n = len(unit)
+    components = min(3, n, unit.shape[1])
+    coords = np.zeros((n, 3))
+    if n > 1:
+        # "full": exact and deterministic. For wide data "auto" picks randomized SVD, unseeded.
+        coords[:, :components] = PCA(n_components=components, svd_solver="full").fit_transform(unit)
+    return coords
+
+
+def _tsne(unit: np.ndarray) -> np.ndarray:
+    perplexity = min(TSNE_PERPLEXITY, (len(unit) - 1) / 3)
+    return _manifold.TSNE(
+        n_components=3, perplexity=perplexity, init="pca", random_state=MAP_SEED
+    ).fit_transform(unit)
+
+
+def project(vectors: np.ndarray) -> tuple[np.ndarray, Projection, float | None]:
+    """Distinct embeddings to 3D: (coordinates in [-1, 1], method, trustworthiness).
+
+    PCA always; from TSNE_MIN_POINTS on, t-SNE (seeded) too, and the map keeps whichever kept
+    near neighbours near more faithfully (PCA on a tie). On few points t-SNE is unstable, and on
+    clearly separated groups PCA often wins outright. Fewer than three points, or points that
+    span fewer than three directions, leave the missing axes at 0.
+    """
+    unit = _unit(vectors)
+    candidates: list[tuple[Projection, np.ndarray]] = [("pca", _pca(unit))]
+    if len(unit) >= TSNE_MIN_POINTS:
+        candidates.append(("tsne", _tsne(unit)))
+    scored: list[tuple[Projection, np.ndarray, float | None]] = [
+        (method, coords, _trust(unit, coords)) for method, coords in candidates
+    ]
+    method, coords, trust = max(scored, key=lambda c: -1.0 if c[2] is None else c[2])
+    return _scaled(coords), method, trust
+
+
+def cluster_map(grouping: Grouping, clusters: list[Cluster]) -> ClusterMap | None:
+    """Where each failure sat in the embedding space, by final cluster; None without embeddings.
+
+    `clusters` are the final ones, isolated ones included. Traces with the same embedding become
+    one point per cluster they landed in (masked digits make many failure texts identical).
+    """
+    embedded = grouping.embedded
+    if embedded is None:
+        return None
+    distinct, row_of = np.unique(embedded.vectors, axis=0, return_inverse=True)
+    row_of = np.asarray(row_of).reshape(-1)
+    coords, projection, trust = project(distinct)
+    placed = {t: c for c in clusters for t in c["trace_ids"]}
+
+    points: dict[tuple[int, str], list[int]] = defaultdict(list)
+    for i, s in enumerate(grouping.summaries):
+        points[(int(row_of[i]), placed[s.trace_id]["cluster_id"])].append(i)
+    out = []
+    for (row, cluster_id), members in points.items():
+        first = members[0]
+        x, y, z = (round(float(v), 4) for v in coords[row])
+        out.append(
+            MapPoint(
+                trace_ids=sorted(grouping.summaries[i].trace_id for i in members),
+                x=x,
+                y=y,
+                z=z,
+                cluster_id=cluster_id,
+                stage=placed[grouping.summaries[first].trace_id]["method"],
+                hdbscan_label=int(embedded.labels[first]),
+                membership=round(float(max(embedded.membership[i] for i in members)), 3),
+            )
+        )
+    order = {c["cluster_id"]: i for i, c in enumerate(clusters)}
+    out.sort(key=lambda p: (order[p.cluster_id], p.trace_ids[0]))
+    return ClusterMap(projection=projection, trust=trust, points=out)
