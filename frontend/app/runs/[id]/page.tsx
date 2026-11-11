@@ -1,9 +1,16 @@
 import { Suspense } from "react";
 import { RunView } from "../../_components/run-view";
 
-async function Run({ params }: PageProps<"/runs/[id]">) {
+async function Run({ params, searchParams }: PageProps<"/runs/[id]">) {
   const { id } = await params;
-  return <RunView key={id} runId={id} />;
+  const { cluster } = await searchParams;
+  return (
+    <RunView
+      key={id}
+      runId={id}
+      focusCluster={typeof cluster === "string" ? cluster : null}
+    />
+  );
 }
 
 export default function RunRoute(props: PageProps<"/runs/[id]">) {

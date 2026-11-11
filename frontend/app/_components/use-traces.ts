@@ -1,6 +1,8 @@
 "use client";
 
-import { getTrace, listTraces } from "@/lib/api";
+import { getRunOverview, getTrace, listRuns, listTraces } from "@/lib/api";
+import { clusterIndex, INDEXED_RUNS, type Membership } from "@/lib/clusters";
+import { isAnalyzed } from "@/lib/dashboard";
 import type { TraceDetail } from "@/lib/traces";
 import { useList, useResource } from "./use-list";
 
@@ -33,4 +35,31 @@ function getTraceOnce(traceId: string, signal: AbortSignal) {
 /** One trace, loaded once per id. */
 export function useTrace(traceId: string) {
   return useResource((signal) => getTraceOnce(traceId, signal), true, traceId);
+}
+
+/**
+ * Which clusters each trace landed in, over the newest analyzed runs (`INDEXED_RUNS` run details,
+ * read side by side; a run whose detail cannot be read is left out). Loaded once per page.
+ */
+export function useClusterIndex() {
+  return useResource<Map<string, Membership[]>>(
+    async (signal) => {
+      const runs = (await listRuns(signal))
+        .filter((r) => isAnalyzed(r) && r.clusters > 0)
+        .slice(0, INDEXED_RUNS);
+      const read = await Promise.allSettled(
+        runs.map((r) => getRunOverview(r.run_id, signal)),
+      );
+      return clusterIndex(
+        runs.flatMap((run, i) => {
+          const result = read[i];
+          return result.status === "fulfilled"
+            ? [{ run, overview: result.value }]
+            : [];
+        }),
+      );
+    },
+    true,
+    "clusters",
+  );
 }

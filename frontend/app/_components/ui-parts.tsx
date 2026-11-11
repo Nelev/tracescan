@@ -196,7 +196,7 @@ export function UiBadge({
   return (
     <span
       className={cn(
-        "type-body inline-flex w-fit items-center rounded-full border px-2.5 py-0.5",
+        "type-body inline-flex w-fit items-center border px-2.5 py-0.5",
         pick(BADGE, props.variant, BADGE.default),
       )}
     >
@@ -259,14 +259,14 @@ export function UiTable({
   caption?: Maybe<string>;
 }>) {
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <div className="relative overflow-x-auto rounded-lg border">
       <table className="type-body w-full border-collapse text-left">
         {props.caption && (
           <caption className="type-body p-3 text-left text-muted-foreground">
             {props.caption}
           </caption>
         )}
-        <thead className="border-b bg-muted/40">
+        <thead className="border-b border-rule bg-muted">
           <tr>
             {props.columns.map((column, i) => (
               <th

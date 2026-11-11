@@ -122,7 +122,7 @@ function SpanRow({
         aria-pressed={selected}
         aria-label={`${span.name}, ${formatDuration(row.durationMs)}${notes.length > 0 ? `, ${notes.join(", ")}` : ""}`}
         className={cn(
-          "grid w-full items-center gap-3 px-3 py-1.5 text-left hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none",
+          "grid w-full items-center gap-3 px-3 py-1.5 text-left hover:bg-hover focus-visible:bg-hover focus-visible:outline-none",
           narrow
             ? "grid-cols-[minmax(0,55%)_minmax(0,1fr)_4rem]"
             : "grid-cols-[minmax(0,17rem)_minmax(0,1fr)_4.5rem]",
@@ -156,10 +156,10 @@ function SpanRow({
             </span>
           </span>
         </span>
-        <span className="relative h-2.5 rounded-full bg-foreground/5">
+        <span className="relative h-2.5 bg-track">
           <span
             className={cn(
-              "absolute inset-y-0 min-w-0.5 rounded-full",
+              "absolute inset-y-0 min-w-0.5",
               barColor(span, blamed),
               cited && "ring-2 ring-primary ring-offset-1 ring-offset-card",
             )}

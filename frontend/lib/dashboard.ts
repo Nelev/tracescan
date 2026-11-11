@@ -12,7 +12,7 @@ export const recent = (runs: RunRecord[], now: number, days = 7) =>
   runs.filter((r) => now - at(r.created_at) < days * DAY_MS);
 
 /** A run that finished judging and clustering: it waits for review, or completed. */
-const isAnalyzed = (r: RunRecord) =>
+export const isAnalyzed = (r: RunRecord) =>
   r.status === "review_required" || r.status === "completed";
 
 /** The tiles' figures: runs and failures of the last 7 days, and what waits for a review. */

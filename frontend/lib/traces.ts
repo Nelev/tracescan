@@ -12,6 +12,8 @@ export type SpanStatus = "unset" | "ok" | "error";
 /** One trace in the list: its root span, its spans and its lowest score. */
 export type TraceRow = {
   trace_id: string;
+  /** The target app that sent it. */
+  app: string;
   start_time: string;
   duration_ms: number;
   status: SpanStatus;
@@ -58,6 +60,7 @@ export type SpanNode = {
 
 export type TraceDetail = {
   trace_id: string;
+  app: string;
   tree: SpanNode;
   scores: TraceScore[];
   min_score: number | null;
@@ -74,6 +77,7 @@ function isRow(v: unknown): v is TraceRow {
   return (
     isObj(v) &&
     isText(v.trace_id) &&
+    isText(v.app) &&
     isText(v.start_time) &&
     isNum(v.duration_ms) &&
     isStatus(v.status) &&
@@ -133,6 +137,7 @@ export function parseTraceDetail(body: unknown): TraceDetail | null {
   if (
     !isObj(body) ||
     !isText(body.trace_id) ||
+    !isText(body.app) ||
     !Array.isArray(body.scores) ||
     !body.scores.every(isScore) ||
     !isNumOrNull(body.min_score) ||
@@ -143,6 +148,7 @@ export function parseTraceDetail(body: unknown): TraceDetail | null {
   }
   return {
     trace_id: body.trace_id,
+    app: body.app,
     tree: body.tree,
     scores: body.scores,
     min_score: body.min_score,

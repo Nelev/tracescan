@@ -3,13 +3,55 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
+import { INDEXED_RUNS } from "@/lib/clusters";
 import { formatDuration } from "@/lib/format";
-import { formatWhen } from "@/lib/runs";
+import { formatWhen, shortId } from "@/lib/runs";
 import { formatScore, traceVerdict, waterfall } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
 import { TraceTree, TreeLegend } from "./trace-tree";
-import { useTrace } from "./use-traces";
+import { ClusterLink } from "./traces-list";
+import { useClusterIndex, useTrace } from "./use-traces";
+
+/** The clusters the trace landed in, over the newest analyzed runs, each opening on its run. */
+function Clusters({ traceId }: { traceId: string }) {
+  const index = useClusterIndex();
+  const memberships = index.value?.get(traceId) ?? [];
+  return (
+    <section
+      aria-labelledby="trace-clusters"
+      className="type-body flex flex-wrap items-center gap-x-3 gap-y-2"
+    >
+      <h2 id="trace-clusters" className="type-h4">
+        Clusters
+      </h2>
+      {index.value === null ? (
+        <span className="text-muted-foreground">
+          {index.status === "error" ? "Could not read the runs." : "Loading…"}
+        </span>
+      ) : memberships.length === 0 ? (
+        <span className="text-muted-foreground">
+          In no cluster of the last {INDEXED_RUNS} analyzed runs: it passed, or
+          was not in their window.
+        </span>
+      ) : (
+        <ul className="flex flex-wrap items-center gap-2">
+          {memberships.map((m) => (
+            <li
+              key={`${m.runId}:${m.clusterId}`}
+              className="flex items-center gap-1.5"
+            >
+              <ClusterLink membership={m} />
+              <span className="text-muted-foreground">
+                run {shortId(m.runId)}, {formatWhen(m.createdAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 /** One stored trace on a page of its own, opened on `spanId` when one is given. */
 export function TracePage({
@@ -44,6 +86,7 @@ export function TracePage({
         {trace && (
           <div className="type-body flex flex-wrap items-center gap-x-4 gap-y-2 text-muted-foreground">
             <span>
+              <span className="text-foreground">{trace.app}</span> ·{" "}
               {formatWhen(trace.tree.start_time)} ·{" "}
               {formatDuration(rows[0].durationMs)} · {rows.length}{" "}
               {rows.length === 1 ? "span" : "spans"}
@@ -72,6 +115,7 @@ export function TracePage({
             : "Could not load the trace. Check that the backend is running, then try again."}
         </p>
       )}
+      {trace && <Clusters traceId={traceId} />}
       {trace && (
         <>
           <TreeLegend />

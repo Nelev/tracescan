@@ -169,6 +169,7 @@ class PostgresTraceReader:
             rows.append(
                 TraceRow(
                     trace_id=trace["trace_id"],
+                    app=app,
                     start_time=trace["start_time"],
                     duration_ms=(trace["end_time"] - trace["start_time"]).total_seconds() * 1000,
                     status=trace["status"],
@@ -192,6 +193,12 @@ class PostgresTraceReader:
             tree = await self._tree(conn, trace_id)
             if tree is None:
                 return None
+            # The tree has a root, so its app is there to read.
+            app = (
+                await conn.execute(
+                    select(Span.app).where(Span.trace_id == trace_id, Span.parent_span_id.is_(None))
+                )
+            ).scalar_one()
             rows = await conn.execute(
                 select(Score.evaluator, Score.value, Score.span_id)
                 .where(Score.trace_id == trace_id)
@@ -200,7 +207,12 @@ class PostgresTraceReader:
         scores = [TraceScore(**row, failed=is_failed(row["value"])) for row in rows.mappings()]
         low = min((s.value for s in scores), default=None)
         return TraceDetail(
-            trace_id=trace_id, tree=tree, scores=scores, min_score=low, failed=is_failed(low)
+            trace_id=trace_id,
+            app=app,
+            tree=tree,
+            scores=scores,
+            min_score=low,
+            failed=is_failed(low),
         )
 
     async def _spans(self, conn: AsyncConnection, *where) -> list[SpanNode]:

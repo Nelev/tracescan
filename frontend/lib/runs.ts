@@ -61,8 +61,9 @@ export function parseRuns(body: unknown): RunRecord[] {
   return Array.isArray(body) ? body.filter(isRun) : [];
 }
 
-/** A run's page. */
-export const runPath = (runId: string) => `/runs/${encodeURIComponent(runId)}`;
+/** A run's page, opened on one of its clusters when `clusterId` is given. */
+export const runPath = (runId: string, clusterId: string | null = null) =>
+  `/runs/${encodeURIComponent(runId)}${clusterId ? `?cluster=${encodeURIComponent(clusterId)}` : ""}`;
 
 /** Enough of a run id to tell runs apart in a list. */
 export function shortId(runId: string): string {

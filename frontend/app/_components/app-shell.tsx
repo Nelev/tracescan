@@ -36,15 +36,16 @@ function NavLink({
       aria-current={active ? "page" : undefined}
       title={label}
       className={cn(
-        "type-body flex h-9 items-center gap-3 rounded-md px-2.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active && "bg-primary/10 text-foreground hover:bg-primary/15",
+        "type-body relative flex h-10 items-center gap-3 px-2.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active &&
+          "bg-hover text-foreground before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:bg-foreground",
       )}
     >
       <span className="relative flex">
         <Icon className="size-4 shrink-0" aria-hidden="true" />
         {live && (
           <span
-            className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-info motion-safe:animate-pulse"
+            className="absolute -top-0.5 -right-0.5 size-2 bg-info motion-safe:animate-pulse"
             aria-hidden="true"
           />
         )}
@@ -110,12 +111,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <RunStreamProvider>
       <div className="flex min-h-full flex-1">
-        <aside className="sticky top-0 flex h-screen w-14 shrink-0 flex-col gap-6 border-r bg-card/40 px-2 py-3 lg:w-52 lg:px-3">
+        <aside className="sticky top-0 flex h-screen w-14 shrink-0 flex-col gap-6 border-r bg-background px-2 py-3 lg:w-52 lg:px-3">
           <Link
             href="/"
             className="flex items-center gap-3 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_24px_-4px] shadow-primary">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Radar className="size-4" aria-hidden="true" />
             </span>
             <span className="type-h3 hidden lg:inline">TraceScan</span>
@@ -126,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Suspense>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex h-14 items-center justify-end gap-3 border-b bg-background/70 px-4 backdrop-blur sm:px-6">
+          <header className="sticky top-0 z-20 flex h-14 items-center justify-end gap-3 border-b bg-background px-4 sm:px-6">
             <ServerStatus />
             <NewRun />
           </header>

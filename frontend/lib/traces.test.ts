@@ -14,6 +14,7 @@ import {
 
 const ROW = {
   trace_id: "0af7651916cd43dd8448eb211c80319c",
+  app: "medas",
   start_time: "2026-10-26T07:33:20.123456Z",
   duration_ms: 2000,
   status: "unset",
@@ -49,6 +50,7 @@ const CHILD = {
 
 const DETAIL = {
   trace_id: ROW.trace_id,
+  app: "medas",
   tree: {
     span_id: "b7ad6b7169203331",
     trace_id: ROW.trace_id,
@@ -179,4 +181,10 @@ test("a span's kind comes from the first word of its name", () => {
   assert.equal(spanKind("retrieval record_chunks"), "retrieval");
   assert.equal(spanKind("chatter"), "other");
   assert.equal(spanKind(""), "other");
+});
+
+test("a trace without its app is off contract", () => {
+  const { app: _, ...noApp } = ROW;
+  assert.deepEqual(parseTraces([noApp, ROW]), [ROW]);
+  assert.equal(parseTraceDetail({ ...DETAIL, app: null }), null);
 });

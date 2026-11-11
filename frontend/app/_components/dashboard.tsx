@@ -15,7 +15,7 @@ import {
   outcomes,
   runStats,
 } from "@/lib/dashboard";
-import { formatAge, formatPercent } from "@/lib/format";
+import { formatAge, formatCategory, formatPercent } from "@/lib/format";
 import { formatUsage, type RunOverview, totalUsage } from "@/lib/run-overview";
 import { formatWhen, plural, RUN_STATUS, runPath, shortId } from "@/lib/runs";
 import type { RunRecord, RunStatus } from "@/lib/types";
@@ -38,7 +38,7 @@ function NeedsReview({ runs }: { runs: RunRecord[] }) {
   return (
     <section
       aria-labelledby="needs-review"
-      className="type-body flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2"
+      className="type-body flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-card px-3 py-2"
     >
       <h2
         id="needs-review"
@@ -50,13 +50,13 @@ function NeedsReview({ runs }: { runs: RunRecord[] }) {
           · {plural(proposals, "proposal")}
         </span>
       </h2>
-      <ul className="flex flex-wrap items-center gap-1.5">
+      <ul className="hidden flex-wrap items-center gap-1.5 xl:flex">
         {shown.map((run) => (
           <li key={run.run_id}>
             <Link
               href={runPath(run.run_id)}
               title={`${run.target_app} · ${formatWhen(run.created_at)} · ${plural(run.proposals, "proposal")}`}
-              className="flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {shortId(run.run_id)}
               <span className="text-muted-foreground">{run.proposals}</span>
@@ -108,7 +108,7 @@ function Panel({
     <section
       aria-labelledby={id}
       className={cn(
-        "flex flex-col gap-4 rounded-xl border bg-card p-4",
+        "flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4",
         className,
       )}
     >
@@ -129,26 +129,25 @@ function Categories({ shares }: { shares: CategoryShare[] }) {
   return (
     <ul className="type-body flex flex-col gap-3">
       {shares.map((s) => (
-        <li
-          key={s.category}
-          className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-3"
-        >
-          <span className="truncate font-mono" title={s.category}>
-            {s.category}
+        <li key={s.category} className="flex flex-col gap-1.5">
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="truncate" title={s.category}>
+              {formatCategory(s.category)}
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {plural(s.traces, "trace")} · {plural(s.clusters, "cluster")}
+            </span>
           </span>
-          <span className="h-2.5 rounded-full bg-foreground/5">
+          <span className="h-2 bg-track">
             <span
               className={cn(
-                "block h-full rounded-full",
+                "block h-full",
                 s.category === "undiagnosed"
                   ? "bg-muted-foreground/50"
                   : "bg-primary",
               )}
               style={{ width: `${(s.traces / max) * 100}%` }}
             />
-          </span>
-          <span className="text-right tabular-nums text-muted-foreground">
-            {plural(s.traces, "trace")} · {plural(s.clusters, "cluster")}
           </span>
         </li>
       ))}
@@ -161,24 +160,29 @@ function Trend({ runs }: { runs: RunRecord[] }) {
   const max = Math.max(1, ...runs.map((r) => r.failed_traces));
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative flex h-40 items-end gap-1 border-b border-foreground/15">
+      <div className="relative flex h-40 items-end gap-1 border-b border-rule">
         <span className="type-h4 absolute top-0 left-0">{max}</span>
-        {runs.map((r) => (
+        {runs.map((r, i) => (
           <Link
             key={r.run_id}
             href={runPath(r.run_id)}
-            className="group relative flex h-full min-w-2 flex-1 items-end justify-center focus-visible:outline-none"
+            className="group relative flex h-full min-w-2 flex-1 items-end justify-center focus-visible:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`Run ${shortId(r.run_id)}, ${formatWhen(r.created_at)}: ${plural(r.failed_traces, "failed trace")}, ${plural(r.clusters, "cluster")}`}
           >
             <span
-              className="block w-full max-w-6 rounded-t-[4px] bg-primary/70 transition-colors group-hover:bg-primary group-focus-visible:bg-primary"
+              className="block w-full max-w-6 bg-primary/70 transition-colors group-hover:bg-primary group-focus-visible:bg-primary"
               style={{
                 height: `${Math.max(2, (r.failed_traces / max) * 100)}%`,
               }}
             />
             <span
-              role="tooltip"
-              className="type-body pointer-events-none absolute bottom-full z-10 mb-2 hidden w-max flex-col rounded-md border bg-popover px-2 py-1 shadow-md group-hover:flex group-focus-visible:flex"
+              aria-hidden="true"
+              className={cn(
+                "type-body pointer-events-none absolute bottom-full z-10 mb-2 flex w-max translate-y-1 flex-col border border-rule bg-popover px-2 py-1 tabular-nums opacity-0 transition-[opacity,translate] duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100",
+                // Kept inside the chart at both ends, so it never widens the page.
+                i < runs.length / 3 && "left-0",
+                i >= (runs.length * 2) / 3 && "right-0",
+              )}
             >
               <span className="font-mono">{shortId(r.run_id)}</span>
               <span className="text-muted-foreground">
@@ -223,10 +227,7 @@ function Outcomes({ counts }: { counts: Record<RunStatus, number> }) {
   const shown = OUTCOME_ORDER.filter((s) => counts[s] > 0);
   return (
     <div className="flex flex-col gap-3">
-      <div
-        className="flex h-3 gap-0.5 overflow-hidden rounded-full"
-        aria-hidden="true"
-      >
+      <div className="flex h-3 gap-0.5 overflow-hidden" aria-hidden="true">
         {shown.map((s) => (
           <span
             key={s}
@@ -240,15 +241,12 @@ function Outcomes({ counts }: { counts: Record<RunStatus, number> }) {
           <li
             key={s}
             className={cn(
-              "flex items-center gap-2 rounded-full border px-2.5 py-0.5",
+              "flex items-center gap-2 border px-2.5 py-0.5",
               CHIP_TONE[RUN_STATUS[s].tone],
             )}
           >
             <span
-              className={cn(
-                "size-2 rounded-full",
-                TONE_FILL[RUN_STATUS[s].tone],
-              )}
+              className={cn("size-2", TONE_FILL[RUN_STATUS[s].tone])}
               aria-hidden="true"
             />
             <span className="text-foreground">{RUN_STATUS[s].label}</span>
@@ -267,7 +265,7 @@ function Latest({ run, overview }: { run: RunRecord; overview: RunOverview }) {
   const note = (
     <Link
       href={runPath(run.run_id)}
-      className="text-primary underline-offset-4 hover:underline"
+      className="underline decoration-muted-foreground/60 underline-offset-4 hover:decoration-foreground"
     >
       Run {shortId(run.run_id)}, {formatWhen(run.created_at)}
     </Link>
@@ -278,31 +276,30 @@ function Latest({ run, overview }: { run: RunRecord; overview: RunOverview }) {
         <Categories shares={shares} />
       </Panel>
       <Panel title="Largest clusters" note={note}>
-        <ol className="type-body flex flex-col divide-y">
+        <ol className="type-body flex flex-col">
           {largest.map((c) => (
-            <li
-              key={c.cluster_id}
-              className="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
-            >
-              <span className="w-10 shrink-0 text-right font-mono tabular-nums">
-                {c.trace_ids.length}
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate font-mono" title={c.signature}>
-                  {c.signature}
-                </span>
-                <span className="text-muted-foreground">
-                  {c.diagnosis?.category ?? "undiagnosed"}
-                  {c.diagnosis &&
-                    ` · ${formatPercent(c.diagnosis.confidence)} confidence`}
-                </span>
-              </span>
+            <li key={c.cluster_id}>
               <Link
-                href={runPath(run.run_id)}
-                aria-label={`Open cluster ${c.cluster_id} in its run`}
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                href={runPath(run.run_id, c.cluster_id)}
+                className="group -mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <ArrowRight aria-hidden="true" />
+                <span className="w-10 shrink-0 text-right font-mono tabular-nums">
+                  {c.trace_ids.length}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-mono" title={c.signature}>
+                    {c.signature}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {c.diagnosis?.category ?? "undiagnosed"}
+                    {c.diagnosis &&
+                      ` · ${formatPercent(c.diagnosis.confidence)} confidence`}
+                  </span>
+                </span>
+                <ArrowRight
+                  className="size-4 shrink-0 text-muted-foreground transition-[translate,color] group-hover:translate-x-0.5 group-hover:text-foreground"
+                  aria-hidden="true"
+                />
               </Link>
             </li>
           ))}

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { INDEXED_RUNS, type Membership } from "@/lib/clusters";
 import { formatDuration } from "@/lib/format";
-import { formatWhen, shortId } from "@/lib/runs";
+import { formatWhen, runPath, shortId } from "@/lib/runs";
 import {
   formatScore,
   type TraceRow,
@@ -16,11 +17,13 @@ import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
 import { CELL, HEAD, LINK, NUMERIC } from "./styles";
 import { listFooter } from "./use-list";
-import { useTraceList } from "./use-traces";
+import { useClusterIndex, useTraceList } from "./use-traces";
 
 const COLUMNS = [
   { label: "Started" },
+  { label: "App" },
   { label: "Verdict" },
+  { label: "Cluster" },
   { label: "Duration", numeric: true },
   { label: "Spans", numeric: true },
   { label: "Lowest score", numeric: true },
@@ -29,22 +32,66 @@ const COLUMNS = [
   { label: "Trace" },
 ];
 
-function Row({ trace }: { trace: TraceRow }) {
+/** One cluster a trace is in, as a link that opens that cluster on its run's page. */
+export function ClusterLink({ membership: m }: { membership: Membership }) {
+  return (
+    <Link
+      href={runPath(m.runId, m.clusterId)}
+      title={`${m.signature} · run ${shortId(m.runId)}, ${formatWhen(m.createdAt)}`}
+      className="inline-flex items-baseline gap-1.5 rounded-md border px-2 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span className="font-mono">{m.clusterId}</span>
+      <span className="text-muted-foreground">
+        {m.category ?? "undiagnosed"}
+      </span>
+    </Link>
+  );
+}
+
+function Row({
+  trace,
+  clusters,
+}: {
+  trace: TraceRow;
+  /** Its clusters, newest run first; undefined while the index loads or when it failed. */
+  clusters: Membership[] | null | undefined;
+}) {
   const router = useRouter();
   const { label, tone } = traceVerdict(trace);
   const why = trace.error_type ?? trace.failing_check;
   return (
     <tr
-      className="cursor-pointer border-t hover:bg-foreground/5"
+      className="cursor-pointer border-t hover:bg-hover"
       onClick={() => router.push(tracePath(trace.trace_id))}
     >
       <td className={CELL}>
         <time dateTime={trace.start_time}>{formatWhen(trace.start_time)}</time>
       </td>
+      <td className={cn(CELL, "text-muted-foreground")}>{trace.app}</td>
       <td className={CELL}>
         <Chip tone={tone} size="sm">
           {label}
         </Chip>
+      </td>
+      <td className={CELL}>
+        {clusters === undefined ? (
+          <span className="text-muted-foreground">…</span>
+        ) : clusters === null || clusters.length === 0 ? (
+          ""
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <ClusterLink membership={clusters[0]} />
+            {clusters.length > 1 && (
+              <span
+                className="text-muted-foreground"
+                title="In earlier runs too"
+              >
+                +{clusters.length - 1}
+              </span>
+            )}
+          </span>
+        )}
       </td>
       <td className={cn(CELL, NUMERIC)}>{formatDuration(trace.duration_ms)}</td>
       <td className={cn(CELL, NUMERIC)}>{trace.spans}</td>
@@ -74,6 +121,14 @@ function Row({ trace }: { trace: TraceRow }) {
 export function TracesList() {
   const [failedOnly, setFailedOnly] = useState(false);
   const stored = useTraceList(true, failedOnly);
+  const index = useClusterIndex();
+  // Undefined while the index loads; null when it could not be read (the column stays empty).
+  const clustersOf = (traceId: string) =>
+    index.value
+      ? (index.value.get(traceId) ?? [])
+      : index.status === "error"
+        ? null
+        : undefined;
   const { status, items: traces } = stored;
   return (
     <div className="flex flex-col gap-4">
@@ -81,7 +136,9 @@ export function TracesList() {
         <div className="flex flex-col gap-1">
           <h1>Traces</h1>
           <p className="type-body text-muted-foreground">
-            The spans the target app sent to the collector, newest first.
+            The traces the target apps sent to the collector, newest first, with
+            the cluster each one landed in over the last {INDEXED_RUNS} analyzed
+            runs.
           </p>
         </div>
         <div className="flex gap-2">
@@ -101,7 +158,7 @@ export function TracesList() {
           </Button>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-xl border bg-card">
+      <div className="relative overflow-x-auto rounded-xl border bg-card">
         {status === "error" && (
           <p role="alert" className="type-body px-4 pt-4 text-destructive">
             Could not load the traces. Check that the backend is running, then
@@ -136,7 +193,11 @@ export function TracesList() {
             </thead>
             <tbody>
               {traces.map((trace) => (
-                <Row key={trace.trace_id} trace={trace} />
+                <Row
+                  key={trace.trace_id}
+                  trace={trace}
+                  clusters={clustersOf(trace.trace_id)}
+                />
               ))}
             </tbody>
           </table>

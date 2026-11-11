@@ -52,6 +52,7 @@ async def test_the_list_holds_failed_and_healthy_traces_newest_first(browser):
     healthy, failed = response.json()
 
     assert (healthy["trace_id"], healthy["failed"], healthy["spans"]) == (HEALTHY, False, 1)
+    assert healthy["app"] == failed["app"] == "medas"
     assert healthy["min_score"] == 1.0
     assert healthy["failing_span_id"] is None and healthy["failing_check"] is None
 
@@ -94,6 +95,7 @@ async def test_a_trace_comes_back_as_a_sanitized_tree_with_its_scores(browser):
     detail = response.json()
 
     assert (detail["trace_id"], detail["min_score"], detail["failed"]) == (FAILED, 0.0, True)
+    assert detail["app"] == "medas"
     scores = {s["evaluator"]: (s["value"], s["span_id"]) for s in detail["scores"]}
     # The request went on after the failed tool call: only the tool check blames a span.
     assert scores["tool_error"] == (0.0, CHILD_ID.hex())

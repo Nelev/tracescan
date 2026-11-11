@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, RotateCw } from "lucide-react";
+import { ArrowLeft, RotateCw, UserCheck } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -84,7 +84,14 @@ function noClusters(overview: RunOverview, streaming: boolean): string {
  * agent console beside it. The checkpoint is read again whenever this window's stream says a node
  * ended, when the stream ends, after a review, and on Refresh.
  */
-export function RunView({ runId }: { runId: string }) {
+export function RunView({
+  runId,
+  focusCluster,
+}: {
+  runId: string;
+  /** A cluster to open and scroll to, when the page was linked to it (a trace's cluster). */
+  focusCluster: string | null;
+}) {
   const run = useRun();
   const stream = run.runId === runId ? run : null;
   // This window's stream, while it is still running: the stepper and the cards follow it.
@@ -252,6 +259,7 @@ export function RunView({ runId }: { runId: string }) {
                   <ClusterCard
                     key={cluster.cluster_id}
                     cluster={cluster}
+                    focused={cluster.cluster_id === focusCluster}
                     live={liveDiagnosis(cluster.cluster_id)}
                     proposal={proposals.get(cluster.cluster_id) ?? null}
                     decision={
@@ -312,10 +320,20 @@ function ReviewBar({
   onReload: () => void;
 }) {
   return (
-    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/40 bg-card/95 px-4 py-3 shadow-lg backdrop-blur">
+    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 border border-rule bg-popover px-4 py-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <span className="type-h3 text-warning">
-          Review: {tallyText(progress)}
+        <span className="type-h3 flex items-center gap-2">
+          <UserCheck
+            className={cn(
+              "size-4",
+              progress.complete ? "text-success" : "text-warning",
+            )}
+            aria-hidden="true"
+          />
+          Review
+          <span className="font-normal text-muted-foreground tabular-nums">
+            {tallyText(progress)}
+          </span>
         </span>
         {problem && (
           <p role="alert" className="type-body text-destructive">

@@ -13,7 +13,7 @@ const STATUS: Record<Status, { label: string; box: string; dot: string }> = {
   checking: {
     label: "Checking backend…",
     box: CHIP_TONE.neutral,
-    dot: "animate-pulse bg-muted-foreground",
+    dot: "motion-safe:animate-pulse bg-muted-foreground",
   },
   online: {
     label: "Backend online",
@@ -58,16 +58,11 @@ export function ServerStatus() {
   return (
     <output
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-xs",
+        "type-h4 inline-flex h-7 items-center gap-2 border px-3 text-current",
         box,
       )}
     >
-      <span className="relative flex size-2">
-        {status === "online" && (
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
-        )}
-        <span className={cn("relative inline-flex size-2 rounded-full", dot)} />
-      </span>
+      <span className={cn("inline-flex size-2", dot)} aria-hidden="true" />
       {label}
     </output>
   );

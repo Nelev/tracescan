@@ -19,7 +19,7 @@ function Bar({ stage }: { stage: Stage }) {
     return (
       <span
         className={cn(
-          "block h-1.5 rounded-full",
+          "block h-1.5",
           bar,
           stage.state === "running" && "motion-safe:animate-pulse",
         )}
@@ -27,9 +27,9 @@ function Bar({ stage }: { stage: Stage }) {
     );
   }
   return (
-    <span className="block h-1.5 overflow-hidden rounded-full bg-foreground/10">
+    <span className="block h-1.5 overflow-hidden bg-track">
       <span
-        className={cn("block h-full rounded-full transition-[width]", bar)}
+        className={cn("block h-full transition-[width]", bar)}
         style={{ width: `${Math.round(stage.progress * 100)}%` }}
       />
     </span>
@@ -78,7 +78,7 @@ export function PipelineStepper({ stages }: { stages: Stage[] }) {
                 </Chip>
               )}
             </span>
-            <span className="type-body truncate text-muted-foreground">
+            <span className="type-body truncate text-muted-foreground tabular-nums">
               {stage.detail}
             </span>
           </li>

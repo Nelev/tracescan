@@ -19,7 +19,7 @@ export const CHIP_TONE: Record<StatusTone, string> = {
 
 /** Each tone as a solid fill: the bars of the pipeline and of the run outcomes. */
 export const TONE_FILL: Record<StatusTone, string> = {
-  neutral: "bg-foreground/10",
+  neutral: "bg-track",
   info: "bg-info",
   warning: "bg-warning",
   success: "bg-success",
@@ -53,10 +53,7 @@ function Mark({
   if (tone === "info") {
     return (
       <span
-        className={cn(
-          "size-2 rounded-full bg-current",
-          live && "motion-safe:animate-pulse",
-        )}
+        className={cn("size-2 bg-current", live && "motion-safe:animate-pulse")}
         aria-hidden="true"
       />
     );
@@ -80,7 +77,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border",
+        "inline-flex items-center border",
         SIZE[size].box,
         CHIP_TONE[tone],
       )}
