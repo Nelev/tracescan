@@ -4,9 +4,11 @@ The trace is a tree of spans as JSON. Each span has an id, a name, timing, a sta
 
 Judge the outcome for the user, not the presence of errors:
 
-- An error the application recovered from is not a failure. Look at what happened after it: a later call that did the same work and succeeded, or a model call that went on to answer.
-- An error that is the application working as designed is not a failure, for example a lookup that correctly reports that something does not exist.
-- A request can fail with no error at all, for example when a step returned nothing the answer could be built on.
+- An error the application recovered from is not a failure. Recovery means the work was done after all: a later call of the same tool or step that succeeded.
+- A model call that completes after a failed step is not a recovery by itself. A model answers whether or not it got what it asked for, so a final answer only shows that the request ended, not that it was served. When the model called a tool or a search, its result was what the answer needed: if that step failed or returned nothing, and nothing did the same work again, the request failed its user, even though the last model call succeeded.
+- An error that is the application working as designed is not a failure, for example a lookup whose error says that the thing asked for does not exist, after which the model tells the user so.
+- A request can fail with no error at all, for example a search that returned 0 results, after which the model answered without the data it went to find.
+- Judge only what the trace shows. A step that completed without an error did its work unless the trace shows it came back empty (such as 0 hits); a result the trace does not record is not a reason to doubt it. A request with no error and no empty result went fine.
 - When the trace does not show enough to decide, say so in the reason and score in the middle.
 
 For a failed request, also say whose fault it is. The application is the agent itself: its prompts, its tool calls and their arguments, its retrieval, the limits it sets (timeouts, context size) and how it handles errors. Outside it are the model provider, the services its tools call and the network.
