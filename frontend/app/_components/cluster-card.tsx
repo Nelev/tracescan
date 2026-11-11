@@ -341,8 +341,12 @@ export function ClusterCard({
       aria-current={focused ? "true" : undefined}
       className={cn(
         "type-body flex scroll-mt-20 flex-col overflow-hidden rounded-xl border bg-card",
-        focused && "ring-2 ring-primary/60",
-        onDecide && decision === undefined && "border-warning/40",
+        // A decided card carries a thin stripe of its decision, so a reviewed list scans at a
+        // glance; one still to decide has no mark of its own: its picker is the cue.
+        decision && "border-l-[3px]",
+        decision === "approve" && "border-l-success/70",
+        decision === "reject" && "border-l-muted-foreground/40",
+        focused && "ring-1 ring-primary/50",
       )}
     >
       <div className="flex flex-col gap-3 p-4">

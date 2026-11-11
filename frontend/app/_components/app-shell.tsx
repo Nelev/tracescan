@@ -115,7 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             href="/"
             className="flex items-center gap-3 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_24px_-4px] shadow-primary">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Radar className="size-4" aria-hidden="true" />
             </span>
             <span className="type-h3 hidden lg:inline">TraceScan</span>

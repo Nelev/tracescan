@@ -54,10 +54,11 @@
  *
  * Color roles, one job each:
  *   foreground        primary text          muted-foreground  secondary text, overlines
- *   background < card < muted   surfaces, page to inset
- *   primary (electric blue)     the one accent: actions, focus, key metric
- *   info / warning / success / destructive / stopped   status only, never decoration (chip.tsx):
- *     info         under way, nothing to do (a lighter blue than primary, so not a button)
+ *   muted < background < card < popover   surfaces: inset, page, card, floating
+ *   primary (periwinkle)        the one accent: actions, focus, key metric, selection
+ *   info / warning / success / destructive / stopped   status only, never decoration (chip.tsx);
+ *   on small marks (chips, icons, counts, a thin stripe), never as a large border or fill:
+ *     info         under way, nothing to do (a cyan-slate, so it never reads as a button)
  *     warning      waiting for a person: the only color that asks for action
  *     success      ended well            destructive  ended badly
  *     stopped      cut short by choice (cancelled, aborted): an orange between warning's amber
@@ -129,30 +130,34 @@
 
 .dark {
   color-scheme: dark;
-  /* Surfaces step up from the page: background < card < muted. Hue 265 tints them navy. */
-  --background: oklch(0.13 0.025 265);
-  --foreground: oklch(0.97 0.01 265);
-  --card: oklch(0.18 0.03 265);
-  --card-foreground: oklch(0.97 0.01 265);
-  --popover: oklch(0.2 0.03 265);
-  --popover-foreground: oklch(0.97 0.01 265);
-  /* Electric blue accent. */
-  --primary: oklch(0.62 0.25 264);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.25 0.04 265);
-  --secondary-foreground: oklch(0.97 0.01 265);
-  --muted: oklch(0.145 0.025 265);
-  --muted-foreground: oklch(0.72 0.03 265);
-  --accent: oklch(0.28 0.08 264);
-  --accent-foreground: oklch(0.97 0.01 265);
-  --destructive: oklch(0.7 0.19 22);
-  --success: oklch(0.78 0.17 160);
-  --info: oklch(0.78 0.14 255);
-  --warning: oklch(0.82 0.15 80);
-  --stopped: oklch(0.76 0.16 50);
-  --border: oklch(0.75 0.08 265 / 16%);
-  --input: oklch(0.75 0.08 265 / 20%);
-  --ring: oklch(0.72 0.2 262);
+  /* Calm graphite: surfaces step up from the page (muted < background < card < popover) with
+     barely any tint, so the accent and the status colors are the only color on screen.
+     Contrast (WCAG) on a card: foreground 15.5, muted-foreground 7.2, primary 7.1, every status
+     color at least 6.5; primary-foreground on primary 7.6. */
+  --background: oklch(0.165 0.008 260);
+  --foreground: oklch(0.95 0.005 260);
+  --card: oklch(0.205 0.009 260);
+  --card-foreground: oklch(0.95 0.005 260);
+  --popover: oklch(0.235 0.01 260);
+  --popover-foreground: oklch(0.95 0.005 260);
+  /* Periwinkle accent: soft enough to sit beside text, with dark text on its fills. */
+  --primary: oklch(0.72 0.12 268);
+  --primary-foreground: oklch(0.17 0.02 268);
+  --secondary: oklch(0.26 0.01 260);
+  --secondary-foreground: oklch(0.95 0.005 260);
+  --muted: oklch(0.145 0.008 260);
+  --muted-foreground: oklch(0.72 0.012 260);
+  --accent: oklch(0.27 0.02 268);
+  --accent-foreground: oklch(0.95 0.005 260);
+  /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
+  --destructive: oklch(0.71 0.14 22);
+  --success: oklch(0.77 0.11 155);
+  --info: oklch(0.78 0.08 225);
+  --warning: oklch(0.82 0.1 78);
+  --stopped: oklch(0.76 0.1 52);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.72 0.12 268);
 }
 
 @layer base {
@@ -161,14 +166,15 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* Faint blue glow from the top edge plus a dot grid, fixed so cards scroll over it. */
+    /* A faint accent glow from the top edge and a barely visible dot grid, fixed so cards
+       scroll over them: texture, not decoration. */
     background-image:
       radial-gradient(
         60rem 28rem at 50% -8rem,
-        oklch(0.62 0.25 264 / 0.2),
+        oklch(0.72 0.12 268 / 0.07),
         transparent 70%
       ),
-      radial-gradient(oklch(0.8 0.08 265 / 0.1) 1px, transparent 1px);
+      radial-gradient(oklch(1 0 0 / 0.04) 1px, transparent 1px);
     background-size:
       100% 100%,
       22px 22px;

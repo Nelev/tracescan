@@ -38,7 +38,7 @@ function NeedsReview({ runs }: { runs: RunRecord[] }) {
   return (
     <section
       aria-labelledby="needs-review"
-      className="type-body flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2"
+      className="type-body flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-card px-3 py-2"
     >
       <h2
         id="needs-review"

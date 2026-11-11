@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, RotateCw } from "lucide-react";
+import { ArrowLeft, RotateCw, UserCheck } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -320,10 +320,20 @@ function ReviewBar({
   onReload: () => void;
 }) {
   return (
-    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/40 bg-card/95 px-4 py-3 shadow-lg backdrop-blur">
+    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-popover/95 px-4 py-3 shadow-lg backdrop-blur">
       <div className="flex min-w-0 flex-col gap-1">
-        <span className="type-h3 text-warning">
-          Review: {tallyText(progress)}
+        <span className="type-h3 flex items-center gap-2">
+          <UserCheck
+            className={cn(
+              "size-4",
+              progress.complete ? "text-success" : "text-warning",
+            )}
+            aria-hidden="true"
+          />
+          Review
+          <span className="font-normal text-muted-foreground">
+            {tallyText(progress)}
+          </span>
         </span>
         {problem && (
           <p role="alert" className="type-body text-destructive">
