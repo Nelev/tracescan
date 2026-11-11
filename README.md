@@ -1,370 +1,451 @@
 # TraceScan
 
-TraceScan triages the failures of an LLM application. It reads the app's failed traces, groups them into clusters, asks a model to diagnose each cluster with cited spans, and drafts one GitHub issue and one regression case per cluster. A person approves or rejects each draft, and only approved drafts are written.
+TraceScan triages the failures of an LLM application. The application sends its traces to TraceScan over OpenTelemetry. On each run, TraceScan reads the traces of a time window, has a small model judge which requests failed, groups the failures into clusters, and has a larger model diagnose each cluster with cited spans. It then drafts one GitHub issue and one regression case per cluster. A person approves or rejects each draft, and only approved drafts are written.
 
-It is the AI Engineering capstone. The first target app is **Medas**, a clinician-facing RAG assistant.
+It is the AI Engineering capstone. The first target app is **Medas**, a clinician-facing RAG assistant, which is instrumented in its own repo (`medas-api/tracing/` in `Nelev/medas`).
 
 ## Status
 
-The pipeline runs end to end on synthetic traces, as a dry run.
+The pipeline runs end to end, on synthetic traces and on real Medas traffic, as a dry run.
 
 | Part | State |
 | --- | --- |
-| Graph: collect, cluster, diagnose, draft, review, apply | Working |
-| Graph: `reproduce_failure`, `match_known_issues` | Not built, not in the graph |
+| OTLP collector (`POST /v1/traces` into the `spans` table) | Working, minimal: localhost and synthetic or test traffic only |
 | Trace MCP server (read-only, sanitized, budgeted) | Working, over the Postgres reader |
-| OTLP collector (`POST /v1/traces` into the `spans` table) | Working, minimal: localhost and synthetic traffic only |
-| Postgres trace reader | The only trace source. A trace is failed when its lowest score is low. No read-only role yet |
-| Trace judge (`agent/judge.py`, `agent/nodes/score_trace.py`) | Working: in each run, a small model judges every trace in the window and says which failed (it replaced the heuristic scoring job). Not yet measured with the eval |
-| Writes | Dry run only: local files under `backend/out/`. GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
-| Run console (Next.js) | Working: start a run, watch it, list runs, review proposals |
-| Eval on seeded traces (`backend/eval/`) | Working: ground truth, runner, coded scores and a judge for the root cause, on plain faults and hard cases (look-alikes, false positives, a failure with no error). It shows the diagnoses hold up and the clustering mixes look-alike failures |
-| Medas instrumentation | Working, in the Medas repo (`medas-api/tracing/`): one trace per agent run, exported to the collector, with no patient text on any span. Checked with a real signed-in request |
+| Graph: collect, judge, cluster, diagnose, draft, review, apply | Working |
+| Graph: `reproduce_failure`, `match_known_issues` | Not built, not in the graph |
+| Writes | Dry run only: local files under `backend/out/`. The GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
+| Run console (Next.js) | Working: start and watch a run, list runs, open a run, browse traces, review proposals |
+| Medas instrumentation | Working, in the Medas repo: one trace per agent run, no patient text on any span |
+| Eval on seeded traces (`backend/eval/`) | Working. The trace judge's own accuracy is not measured yet |
 | Fault-injection eval in Medas | Not built |
 
-`PLAN.md` holds the scope and the task order.
+`PLAN.md` holds the scope and the task order. `CLAUDE.md` has detailed notes on every module.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    medas["Medas<br/>(OpenTelemetry)"] -- "OTLP protobuf<br/>POST /v1/traces" --> collector
+    subgraph target["Target app (Medas)"]
+        sdk["OpenTelemetry SDK<br/>BatchSpanProcessor<br/>OTLPSpanExporter"]
+    end
 
-    subgraph backend["FastAPI backend"]
+    subgraph backend["TraceScan backend (FastAPI)"]
         collector["Collector<br/>api/traces.py"]
+        browser["Trace browser API<br/>api/trace_browser.py"]
         api["Runs API + SSE<br/>api/runs.py"]
+        uispec["UI spec call<br/>api/ui_spec.py"]
         runs["Runs module<br/>runs/"]
-        agent["LangGraph graph<br/>agent/"]
-        api --> runs --> agent
+        graph["LangGraph graph<br/>agent/"]
+        api --> runs --> graph
+        api --> uispec
     end
 
-    subgraph pg["Postgres"]
-        spans[("spans")]
-        app[("runs, reviews")]
-        cp[("graph checkpoints")]
-    end
-
-    subgraph mcp["Trace MCP server (stdio subprocess, one per run)"]
-        tools["3 read-only tools<br/>+ TraceGuard"]
-        reader["TraceReader"]
+    subgraph mcp["Trace MCP server<br/>(stdio subprocess, one per run)"]
+        tools["search_traces<br/>get_trace_tree<br/>get_span<br/>+ TraceGuard"]
+        reader["PostgresTraceReader<br/>read-only transactions"]
         tools --> reader
     end
 
+    subgraph pg["Postgres"]
+        spans[("spans<br/>scores")]
+        apptables[("runs<br/>reviews")]
+        cp[("graph checkpoints")]
+    end
+
     ui["Run console<br/>Next.js"]
-    llm["OpenRouter<br/>diagnoser model"]
+    llm["OpenRouter<br/>judge, diagnoser,<br/>UI spec models"]
     out[["out/issues/*.md<br/>out/regression_cases.jsonl"]]
 
-    collector --> spans
+    sdk -- "OTLP/HTTP protobuf<br/>POST /v1/traces" --> collector
+    collector -- "INSERT … ON CONFLICT DO NOTHING" --> spans
     spans --> reader
-    agent -- "TraceClient" --> tools
-    agent --> llm
-    agent -- "apply_actions (dry run)" --> out
-    agent --> cp
-    runs --> app
-    ui -- "/api/* rewritten to /v1/*" --> api
+    browser -- "read-only engine" --> spans
+    graph -- "TraceClient (MCP)" --> tools
+    graph --> llm
+    uispec --> llm
+    graph -- "checkpointer" --> cp
+    runs --> apptables
+    graph -- "apply_actions (dry run)" --> out
+    ui -- "/api/* → /v1/*" --> api
+    ui -- "/api/traces" --> browser
 ```
 
-The dotted arrow is the missing piece: the collector stores spans, but the reader that would serve them to the graph is not written.
+What each part owns:
 
-The parts and what each one owns:
-
-- **`backend/agent/`** is the graph. It reaches traces only through the MCP client. It imports `trace_store.models` and nothing else from the server side, and no database driver; `tests/test_boundaries.py` enforces this.
-- **`backend/trace_store/`** is the server side of trace access: the contracts (`models.py`), the `TraceReader` protocol, the Postgres reader, the MCP server and its guard.
+- **`backend/api/traces.py`** is the collector: it takes OTLP exports and writes span rows. It does nothing else on the way in: no scoring, no filtering beyond the app allowlist.
+- **`backend/trace_store/`** is the server side of trace access: the contracts (`models.py`), the `TraceReader` protocol and `build_tree`, the Postgres reader, the sanitizer, the MCP server and its guard.
+- **`backend/agent/`** is the graph. It reaches traces only through the MCP client (`mcp_client.py`). It imports `trace_store.models` and nothing else from the server side, and no database driver; `tests/test_boundaries.py` enforces this.
 - **`backend/runs/`** is the only code that knows a run is a graph thread. It starts runs, reads their status from the checkpoint, and resumes them at the review. Callers never get raw graph state.
-- **`backend/api/`** is HTTP and server-sent events over the runs module, plus the collector.
-- **`backend/db/`** and **`backend/migrations/`** hold the application's own tables (SQLAlchemy and Alembic). LangGraph's checkpointer creates and owns its own tables in the same database.
+- **`backend/api/`** is also HTTP and server-sent events over the runs module, and the read-only trace browser API.
+- **`backend/db/`** and **`backend/migrations/`** hold the application's own tables (SQLAlchemy 2 and Alembic). LangGraph's checkpointer creates and owns its tables in the same database.
 - **`frontend/`** is one page, the run console.
 
-## Trace structure
+## Traces and spans
 
-A trace is one request to the target app. It is a tree of spans. TraceScan uses two views of it, both defined in `backend/trace_store/models.py`.
+A **trace** is one request to the target app: in Medas, one agent run. It is a tree of **spans**, one per step. Spans of the same trace share a `trace_id`; each span points at its parent with `parent_span_id`, and the root span has none.
 
-### TraceSummary
+### What a Medas trace looks like
 
-One row per failed trace, small enough to cluster without fetching the tree:
+Span names and attributes follow the OpenTelemetry [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
 
-```json
-{
-  "trace_id": "tr_retrieval_miss",
-  "app": "medas",
-  "start_time": "2026-11-05T09:00:00Z",
-  "duration_ms": 2400.0,
-  "status": "error",
-  "error_message": "answer not grounded in retrieved context",
-  "failing_span_id": "sp_rm_retrieve",
-  "failing_span_name": "retrieve",
-  "min_score": 0.1,
-  "signature": "retrieve returned 0 relevant chunks; llm answered without sources"
-}
+| Span name | Kind | What it is | Attributes |
+| --- | --- | --- | --- |
+| `invoke_agent medas` | server | The whole request, the root | `gen_ai.operation.name`, `gen_ai.agent.name` |
+| `chat <model>` | client | One model call | `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` |
+| `execute_tool <tool>` | internal | One tool call | `gen_ai.tool.name`, `gen_ai.tool.type` |
+| `retrieval <source>` | client | A vector search inside a tool | `gen_ai.data_source.id`, `retrieval.hits` (how many passages came back) |
+
+A failed span has status `error`, an `error.type` attribute (the exception's type) and, when the step raised, an `exception` event with `exception.type`. A Medas tool that catches a source's failure and tells the model about it without raising still gets status `error`, with `error.type` `ToolReportedError`. No prompt, answer, tool argument, tool result or passage text is put on any span.
+
+A seeded trace whose record store is down:
+
+```
+invoke_agent medas                      [error]  error.type=sqlalchemy.exc.OperationalError
+├── chat openai/gpt-4.1-mini            [unset]  gen_ai.usage.input_tokens=2130
+└── execute_tool search_patient_record  [error]  error.type=sqlalchemy.exc.OperationalError
+    └── retrieval record_chunks         [error]  error.type=sqlalchemy.exc.OperationalError
 ```
 
-`search_traces` returns every trace in the window, failed or not: which ones failed is the trace judge's call (see below). A failed trace's summary then gets its failing span, error and `signature` (the blamed step and its error type) from the judge's verdict. `signature` has no clinical content and is what the clustering embeds.
+### The two views TraceScan reads
 
-### SpanNode
+Both are Pydantic models in `backend/trace_store/models.py`.
 
-One span, with its children nested under it:
+**`SpanNode`**: one span with its children nested under it, as `get_trace_tree` returns it.
 
 | Field | Meaning |
 | --- | --- |
-| `span_id`, `trace_id`, `parent_span_id` | Identity and position in the tree. The root has no parent |
-| `name` | The step: `medas.request`, `retrieve`, `chat gpt-4o`, `execute_tool lookup_dosage` |
-| `kind` | OpenTelemetry span kind: `server`, `client`, `internal` |
+| `span_id`, `trace_id`, `parent_span_id` | Identity and position in the tree (hex: 16 and 32 characters) |
+| `name` | The step, such as `execute_tool search_pubmed` |
+| `kind` | OpenTelemetry span kind: `server`, `client`, `internal`, … |
 | `start_time`, `end_time` | Timezone-aware timestamps |
-| `status`, `status_message` | `unset`, `ok` or `error`, and the error text |
-| `attributes` | Key and value pairs, such as `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `retrieval.hits` |
-| `events` | Timestamped events on the span, each with its own attributes |
-| `children` | The child spans, ordered by start time |
+| `status`, `status_message` | `unset`, `ok` or `error`, and the error text if any |
+| `attributes` | Key and value pairs (scalars and arrays) |
+| `events` | Timestamped events, each `{name, time, attributes}` |
+| `children` | Child spans, ordered by start time |
 
-A seeded trace whose record store is down, as a tree:
+`build_tree` in `trace_store/reader.py` nests the flat rows under their parents, and refuses a trace with more than one root, a missing parent, or spans of two traces. A trace that is not whole yet (no root, or a missing parent) has no tree.
 
-```
-invoke_agent medas                      [error]  connection to the record store was refused
-├── chat openai/gpt-4.1-mini            [unset]  gen_ai.usage.input_tokens=2130
-└── execute_tool search_patient_record  [error]  connection to the record store was refused
-    └── retrieval record_chunks         [error]  connection to the record store was refused
-```
+**`TraceSummary`**: one small row per trace, from the root span only, as `search_traces` returns it:
 
-`build_tree` in `reader.py` nests flat span rows under their parents, and refuses a trace with more than one root, a missing parent, or spans from two traces.
-
-### Where traces are stored
-
-- **The `spans` table**, written by the collector: one row per span, keyed by `trace_id` and `span_id`, with `app`, `name`, `kind`, timing, status, and `attributes` and `events` as JSONB. There is no `traces` table: a trace is the spans that share a `trace_id`.
-- **The `scores` table**: one row per trace and check, with a value (0.0 bad, 1.0 fine) and the span the check blames, if any. Ids and numbers only. The trace browser reads it; nothing writes it since the heuristic scoring job was removed, so new traces show as unscored.
-
-## How traces get in: the collector
-
-`POST /v1/traces` accepts an OpenTelemetry trace export (OTLP over HTTP), which is the default output of the OpenTelemetry exporters: an uncompressed binary protobuf `ExportTraceServiceRequest`.
-
-```mermaid
-flowchart LR
-    a["Medas OTel exporter"] -- "application/x-protobuf" --> b["POST /v1/traces"]
-    b --> c{"content type<br/>is protobuf?"}
-    c -- no --> e1["415"]
-    c -- yes --> d["decode(body)"]
-    d -- "not an export" --> e2["400"]
-    d --> f["keep spans whose<br/>service.name is in ALLOWED_APPS"]
-    f --> g["INSERT ... ON CONFLICT DO NOTHING<br/>into spans"]
-    g -- "database error" --> e3["503"]
-    g --> h["200, empty<br/>ExportTraceServiceResponse"]
+```json
+{
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "app": "medas",
+  "start_time": "2026-11-11T09:00:00Z",
+  "duration_ms": 2400.0,
+  "status": "error",
+  "signature": "invoke_agent medas"
+}
 ```
 
-`decode` in `backend/api/traces.py` is a pure function that turns the export into rows:
+Once the trace judge says a trace failed, `join_scores` fills in its failure fields from the blamed span: `failing_span_id`, `failing_span_name`, `error_message` (the status message), `min_score` (the judge's score) and a new `signature`, the blamed step and its error type (`execute_tool search_pubmed httpx.ReadTimeout`). The signature holds names only, no message and no attribute value, and is what the clustering embeds.
 
-- Trace and span ids become hex strings (32 and 16 characters).
-- The status code becomes `unset`, `ok` or `error`; the span kind becomes a word such as `server`.
-- Attributes become plain JSON: scalars and arrays are kept, any other value becomes null.
-- Spans of an app outside `ALLOWED_APPS` (only `medas`) are dropped without an error.
+## How an app sends traces
 
-A span that is already stored is left alone, so an exporter's retry changes nothing. A database failure is logged by exception type only, because a database error quotes the row.
+Any app can send traces with a stock OpenTelemetry SDK and the OTLP/HTTP exporter. Three things are required:
 
-The collector is the simplest version on purpose. It has no authentication, no body size limit, and strips nothing: clinical text is stored as sent. Use it only on localhost with synthetic traffic.
+1. **Protocol:** OTLP over HTTP with binary protobuf (`http/protobuf`), uncompressed, to `POST <backend>/v1/traces`. gRPC and the JSON encoding are not accepted.
+2. **Resource:** `service.name` must be an app in `ALLOWED_APPS` (`backend/trace_store/const.py`, only `medas` today). Spans of any other service are dropped without an error.
+3. **Content:** names, counts, model ids, token usage and error types. The collector strips nothing, so the app itself must keep personal and clinical text off its spans.
 
-## How traces get out: the MCP server
+In Python, as Medas does it (`medas-api/tracing/runtime.py`):
 
-The graph never queries a database. It reads traces through a read-only [FastMCP](https://gofastmcp.com) server, `backend/trace_store/mcp_server.py`.
+```python
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-```mermaid
-sequenceDiagram
-    participant G as Graph node
-    participant C as TraceClient
-    participant S as MCP server (subprocess, stdio)
-    participant R as TraceReader
+provider = TracerProvider(resource=Resource({"service.name": "medas"}))
+provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:8010/v1/traces"))
+)
+tracer = provider.get_tracer("medas.tracing")
 
-    Note over C,S: one subprocess and one session per run
-    G->>C: search_traces(app, since, until)
-    C->>S: tools/call
-    S->>S: TraceGuard counts the call, logs tool and argument hash
-    S->>S: validate arguments, check app allowlist
-    S->>R: search_traces(query)
-    R-->>S: TraceSummary rows
-    S->>S: truncate free text
-    S-->>C: structured result
-    C-->>G: list of TraceSummary
-    G->>C: get_trace_tree(trace_id)
-    C->>S: tools/call
-    S->>R: get_trace_tree(trace_id)
-    R-->>S: SpanNode tree
-    S->>S: redact and truncate attributes
-    S-->>C: structured result
-    C-->>G: SpanNode
+with tracer.start_as_current_span("invoke_agent medas") as root:
+    root.set_attribute("gen_ai.operation.name", "invoke_agent")
+    ...
+provider.shutdown()  # at app shutdown: send what is still queued
 ```
 
-`TraceClient` is `backend/agent/mcp_client.py`.
+`BatchSpanProcessor` sends spans in batches from a background thread, so a request never waits for the collector, and a collector that is down loses spans, not requests. Medas builds its spans from LangChain's callbacks (`TraceHandler` in `medas-api/tracing/handler.py`), so the agent code knows nothing of tracing; tracing is off unless `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set.
 
-### The tools
+Any other language works the same way with the standard exporter variables:
 
-| Tool | Input | Returns |
-| --- | --- | --- |
-| `search_traces` | `TraceQuery`: `app`, optional `since` (inclusive) and `until` (exclusive), `limit` (default 50, at most 200) | Every trace with a root span, as `TraceSummary` rows, newest first |
-| `get_trace_tree` | `trace_id` | The whole span tree, string attributes cut to 200 characters |
-| `get_span` | `trace_id`, `span_id` | One span without children, string attributes cut to 2,000 characters |
+```bash
+OTEL_SERVICE_NAME=medas
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:8010/v1/traces
+```
 
-The graph uses the first two. `get_span` is served but `TraceClient` does not call it yet.
+To run Medas and TraceScan side by side on one machine, run TraceScan on ports 8010 and 3010 (see [Running it](#running-it)).
 
-### The reader
+### The OTLP protocol, as the collector reads it
 
-The server's tools only call the three methods of the `TraceReader` protocol, so the data source can change without touching the tools. The one implementation in the app is `PostgresTraceReader`, over `spans` (and `scores`, for the trace browser only); the server's own tests use a small in-memory one. `search_traces` reads root spans only: ids, timing, the root's status, and its name as the signature. Its session is read-only, but a dedicated read-only role does not exist yet.
-
-### Which traces failed: the trace judge
-
-A request can fail without an error (a retrieval that finds nothing) and an error can be harmless (a call that was retried and worked), so "has an error span" is the wrong test for failed. Each run asks a small model (`TRACE_JUDGE_MODEL`, Haiku by default) about every trace in its window, one call per trace, in parallel branches (`score_trace`). The judge sees the sanitized span tree and answers with a reason, a score (0.0 failed its user, 1.0 went fine; failed at 0.5 or below, decided by the code), the span where the failure started (checked against the tree: asked once more, then the deepest error span), and whether the fault is the app's, external, or unclear. The verdicts stay in the run's state; nothing is written back to the trace store. This replaced a heuristic scoring job that scored each trace with fixed checks when it was stored.
-
-### What the server enforces
-
-- **Read-only.** There are no write tools.
-- **Sanitizing.** Only allowlisted attribute keys leave the server with their value: `gen_ai.request.*`, `gen_ai.response.*`, `gen_ai.usage.*`, and a few structural keys such as `retrieval.hits` and `exception.type`. Every other key keeps its name but its value becomes `[redacted]`, so a new Medas attribute is hidden until someone allows it. For example, `app.question` always reaches the agent as `[redacted]`. Status messages are the diagnoser's evidence, so they are truncated, not redacted.
-- **Argument checks.** `search_traces` serves only `ALLOWED_APPS`. Trace and span ids must match `^[A-Za-z0-9_.-]{1,64}$`, checked by pydantic before the tool runs.
-- **Budget.** `TraceGuard` allows 500 tool calls per server process (one search, a tree per judged trace, and the diagnoser's). `TraceClient` starts a fresh subprocess for each run, so that is a per-run budget. Rejected calls count too.
-- **Audit log.** Every call is logged to stderr with the tool, the outcome and a hash of the arguments. Raw arguments, results and exception messages are never logged.
-
-Two known limits: FastMCP's own "Invalid arguments" warning repeats a rejected id on stderr, and `get_trace_tree` and `get_span` take only ids, so only the Postgres reader scopes them to an app.
-
-The session cannot outlive one graph invocation, so the resume after the human review opens no session. It gets `ClosedTraces`, whose every call raises, because that part of the run must read no traces.
-
-## The agent graph
-
-One LangGraph `StateGraph` over a shared `TriageState`, built by `build_graph` in `backend/agent/graph.py`.
+The body is one `ExportTraceServiceRequest` protobuf message (from `opentelemetry-proto`). Its shape, and what the collector keeps of it:
 
 ```mermaid
 flowchart TD
-    start([START]) --> collect[collect_traces]
-    collect -- "no traces" --> stop([END])
-    collect -- "one Send per trace" --> judge["score_trace × T<br/>(the trace judge)"]
-    judge --> joins[join_scores]
-    joins -- "no failed traces" --> stop
-    joins --> cluster[cluster_failures]
-    cluster -- "no clusters" --> stop
-    cluster -- "one Send per cluster" --> diagnose["diagnose_cluster × N<br/>(parallel, at most 4 at once)"]
-    diagnose --> draft[draft_proposals]
-    draft --> review["human_review<br/>(interrupt: the run pauses)"]
-    review -- "nothing approved" --> stop
-    review -- "at least one approval" --> apply["apply_actions<br/>(dry run)"]
-    apply --> stop
+    req["ExportTraceServiceRequest"] --> rs["resource_spans[]"]
+    rs --> res["resource.attributes<br/><b>service.name</b> → app<br/>(must be in ALLOWED_APPS)"]
+    rs --> ss["scope_spans[]<br/>(one per instrumentation scope)"]
+    ss --> sp["spans[]"]
+    sp --> f1["trace_id: 16 bytes → 32 hex chars<br/>span_id, parent_span_id: 8 bytes → 16 hex chars"]
+    sp --> f2["name, kind (enum → server, client, internal, …)"]
+    sp --> f3["start/end_time_unix_nano → timestamptz (µs)"]
+    sp --> f4["status.code (enum → unset, ok, error)<br/>status.message"]
+    sp --> f5["attributes: KeyValue[] of AnyValue<br/>→ JSON: string, bool, int, double, array; else null"]
+    sp --> f6["events[]: name, time, attributes"]
 ```
 
-### Nodes
+The exchange:
 
-**`collect_traces`** asks the MCP server for the failed traces of `target_app`, optionally inside a `since`/`until` window, and stores the summaries as plain dicts in `failed_traces`. It uses the query's default limit, so a run sees at most the 50 newest failures. If nothing failed, the run ends.
+```mermaid
+sequenceDiagram
+    participant A as App (OTel SDK)
+    participant C as Collector POST /v1/traces
+    participant P as Postgres (spans)
 
-**`cluster_failures`** groups the summaries with embeddings and HDBSCAN (see the next section). It makes no model call. It writes `clusters` and `unclustered`. Each unclustered trace also becomes a one-trace cluster with method `isolated`, so it is diagnosed like any other; there is no cap on these yet.
+    A->>C: Content-Type: application/x-protobuf<br/>ExportTraceServiceRequest
+    alt another content type
+        C-->>A: 415
+    else body is not an export
+        C-->>A: 400
+    else
+        C->>C: decode(body): rows for allowed apps only
+        C->>P: INSERT … ON CONFLICT DO NOTHING
+        alt database error
+            C-->>A: 503 (logged by exception type only)
+        else
+            C-->>A: 200, empty ExportTraceServiceResponse
+        end
+    end
+```
 
-**`diagnose_cluster`** runs once per cluster, in parallel. A router sends each cluster as a `ClusterTask`, which holds the cluster, not the whole state. The node:
+`decode` is pure and `store_spans` returns how many spans were new. A span already stored is left alone, so an exporter's retry changes nothing.
 
-1. Fetches the span trees of the cluster's exemplars (the 3 newest traces) through the MCP server.
-2. Makes one structured-output call that returns a `Diagnosis`: a category, a root cause, a suggested fix, a confidence between 0 and 1, and at least one piece of evidence (a trace id, a span id and a note). The system prompt is `agent/taxonomy.md`, which defines the ten categories.
-3. Checks the evidence. Every cited span must be a span of the trees the model was shown. If one is not, the model is asked once more with the valid ids listed. If it still cites spans it was not shown, those are dropped, the confidence is capped at 0.3, and with no real citation left the cluster's own first failing span is cited. The stored diagnosis records the outcome in `evidence_check`: `valid`, `corrected` or `unsupported`.
-4. Records its spend: one `{cluster_id, calls, tokens, cost_usd}` entry in `model_usage` over all its attempts, failed or not.
+The collector is the simplest version on purpose: no authentication, no body size limit, no partial-success count, and nothing stripped. Use it only on localhost.
 
-Each cluster has a budget: 3 model calls, 100,000 tokens and 0.50 USD. A transient model error (408, 429, 5xx, a timeout, a dropped connection) with budget left is retried inside the node after a wait that doubles each time. The trees are fetched once, and a failing fetch is not retried. Any other error, or an empty budget, puts the cluster id in `diagnosis_failures`. A failure is logged by exception type only.
+## How traces are stored
 
-`draft_proposals` runs once, after every diagnose branch is done. `reproduce_failure` (replay exemplar inputs against the target app) and `match_known_issues` (compare clusters with earlier issues) are planned and not in the graph; until the reproducer exists every diagnosis is `unverified`, and no cluster is dropped for not reproducing.
+Traces live in the application's Postgres, in the same database as the run tables and the graph checkpoints.
 
-**`draft_proposals`** builds one `Proposal` per cluster, in cluster order, with no model call. The issue is markdown rendered with plain f-strings from the cluster and its diagnosis. A diagnosed cluster also gets a `RegressionCase` that holds ids only: the exemplar traces and the cited spans, never span text. A cluster without a diagnosis gets a stub proposal, so a failed cluster still reaches the reviewer. An evidence check other than `valid` is flagged in the issue body.
+**`spans`** (migration `0003`), written by the collector, one row per span:
 
-**`human_review`** pauses the run with `interrupt({"cluster_ids": [...]})`. The value holds ids only, because it is saved in the checkpoint and streamed. The run resumes on the same thread with one decision per proposal, `approve` or `reject`. If nothing is approved, the run ends without writing.
+| Column | Type | Note |
+| --- | --- | --- |
+| `trace_id` | `varchar(32)` | Primary key, with `span_id` |
+| `span_id` | `varchar(16)` | |
+| `parent_span_id` | `varchar(16)` | Null on the root |
+| `app` | `varchar` | The resource's `service.name` |
+| `name`, `kind` | `varchar` | |
+| `start_time`, `end_time` | `timestamptz` | |
+| `status` | `varchar(10)` | Checked: `unset`, `ok` or `error` |
+| `status_message` | `varchar` | |
+| `attributes` | `jsonb` | |
+| `events` | `jsonb` | A list of `{name, time, attributes}` |
 
-**`apply_actions`** is the only node that writes. For each approved proposal, the dry run writes `out/issues/<cluster_id>.md` and appends the regression case as one JSON line to `out/regression_cases.jsonl`, then returns the list of written paths as `actions_log`. With `dry_run` off it raises before any write, because the real writers do not exist.
+An index on `(app, start_time DESC)` serves the window queries. There is no `traces` table: a trace is the spans that share a `trace_id`, and its summary comes from its root span.
 
-### State
+**`scores`** (migration `0004`): one row per trace and check (`trace_id`, `evaluator`, `value` from 0.0 bad to 1.0 fine, the blamed `span_id`, `scored_at`). The trace browser reads it. Nothing writes it for now: which traces failed is decided by the trace judge inside each run, and its verdicts stay in the run's state.
 
-`TriageState` (`agent/state.py`) holds plain dicts, so checkpoints serialize without registering models:
+**Reading.** `PostgresTraceReader` (`trace_store/postgres_reader.py`) is the only reader. Its engine opens every transaction read-only (a dedicated read-only role is planned, not created yet). It serves only `ALLOWED_APPS`. The trace MCP server uses it for the graph, and the trace browser API uses it for the console's Traces tab.
+
+## How the graph reads traces: the MCP server
+
+The graph never queries the database. It reads traces through a read-only [FastMCP](https://gofastmcp.com) server, `backend/trace_store/mcp_server.py`, which `TraceClient` starts as a stdio subprocess, one per run.
+
+| Tool | Input | Returns |
+| --- | --- | --- |
+| `search_traces` | `TraceQuery`: `app`, optional `since` (inclusive) and `until` (exclusive), `limit` (at most 200) | Every trace with a root span in the window, as `TraceSummary` rows, newest first |
+| `get_trace_tree` | `trace_id` | The whole `SpanNode` tree, string attributes cut to 200 characters |
+| `get_span` | `trace_id`, `span_id` | One span without children, string attributes cut to 2,000 characters (served, not used by the graph yet) |
+
+What the server enforces:
+
+- **Read-only.** There are no write tools, and the reader's transactions are read-only.
+- **Sanitizing.** Only allowlisted attribute keys keep their value: `gen_ai.request.*`, `gen_ai.response.*`, `gen_ai.usage.*`, and structural keys such as `gen_ai.tool.name`, `retrieval.hits`, `error.type` and `exception.type`. Every other key keeps its name and reads `[redacted]`, so a new attribute is hidden until someone allows it. Status messages are truncated, not redacted.
+- **Argument checks.** `search_traces` serves only `ALLOWED_APPS`; ids must match `^[A-Za-z0-9_.-]{1,64}$`, checked by pydantic before the tool runs.
+- **Budget.** `TraceGuard` allows 500 tool calls per server process, which is one run: one search, one tree per judged trace, and the diagnoser's exemplar trees.
+- **Audit log.** Every call is logged on stderr with the tool, the outcome and a hash of the arguments, never the raw arguments, results or exception messages.
+
+The session cannot outlive one graph invocation, so the resume after the human review opens none: it gets `ClosedTraces`, whose every call raises.
+
+## The agent graph
+
+One LangGraph `StateGraph` over `TriageState`, built by `build_graph` in `backend/agent/graph.py`. Two steps fan out with `Send`: the trace judge runs once per trace, the diagnoser once per cluster.
+
+```mermaid
+flowchart TD
+    start([START]) --> collect["collect_traces<br/>search_traces: every trace in the window"]
+    collect -- "no traces" --> stop([END])
+    collect -- "one Send(TraceTask) per trace" --> judge["score_trace × T<br/>trace judge, up to 16 at once"]
+    judge --> joins["join_scores<br/>barrier: failed traces, newest first"]
+    joins -- "nothing failed" --> stop
+    joins --> cluster["cluster_failures<br/>embeddings + HDBSCAN, no model call"]
+    cluster -- "no clusters" --> stop
+    cluster -- "one Send(ClusterTask) per cluster" --> diagnose["diagnose_cluster × N<br/>diagnoser, at most 4 at once"]
+    diagnose --> draft["draft_proposals<br/>issue + regression case per cluster"]
+    draft --> review["human_review<br/>interrupt: the run pauses"]
+    review -- "nothing approved" --> stop
+    review -- "at least one approve" --> apply["apply_actions<br/>dry run: local files"]
+    apply --> stop
+
+    classDef llm fill:#1e3a8a,stroke:#60a5fa,color:#fff
+    classDef human fill:#78350f,stroke:#f59e0b,color:#fff
+    class judge,diagnose llm
+    class review human
+```
+
+Blue nodes call a model; the amber node waits for a person. `reproduce_failure` (replay exemplars against the app) and `match_known_issues` (compare with earlier issues) are planned before `draft_proposals` and not built; until the reproducer exists every diagnosis is `unverified`, and no cluster is dropped for not reproducing.
+
+### The nodes
+
+**`collect_traces`** (`nodes/collect_traces.py`) calls `search_traces` for `target_app` in the optional `since`/`until` window, up to `MAX_JUDGED_TRACES` (200) newest traces, failed or not. It stores them as plain dicts in `traces`. An empty window ends the run.
+
+**`score_trace`** (`nodes/score_trace.py`, `judge.py`) is the trace judge, one parallel branch per trace with a `TraceTask` holding only that trace. "Has an error span" is the wrong test for failed: a retrieval can find nothing without an error, and an error can be harmless (a retried call, a lookup that correctly finds nothing). So the branch fetches the sanitized tree and makes one structured call on `TRACE_JUDGE_MODEL` (Haiku by default) with `judge_prompt.md`. The model answers a `TraceVerdict`: a reason, a score from 0.0 to 1.0, the span where the failure started, and whose fault it is (`app`, `external` or `unclear`). The code decides "failed" (score at most 0.5). A failed verdict must blame a span of the tree: if it does not, the model is asked once more with the valid ids, then the code blames the deepest error span (`blame_check`: `valid`, `corrected` or `fallback`). A failed verdict also gets the blamed span's name, error type and status message. Any error puts the trace id in `judge_failures`; every branch appends its spend to `judge_usage`. Budget per trace: 3 calls, 20,000 tokens, 0.05 USD.
+
+**`join_scores`** (`graph.py`) is the barrier after the judge branches. It keeps the traces whose verdict says failed, turns each into a `TraceSummary` with the failure fields and the step-and-error signature (`judge.failed_summary`), and writes `failed_traces`, newest first. Nothing failed: the run ends.
+
+**`cluster_failures`** (`nodes/cluster_failures.py`, `clustering.py`) groups the failed traces with code, not model calls (see the next section), off the event loop. It writes `clusters` and `unclustered`, and turns each unclustered trace into a one-trace cluster (`method` `isolated`), so every failure is diagnosed.
+
+**`diagnose_cluster`** (`nodes/diagnose_cluster.py`) runs once per cluster with a `ClusterTask` holding only the cluster, at most 4 at once. See [How a cluster is diagnosed](#how-a-cluster-is-diagnosed).
+
+**`draft_proposals`** (`nodes/draft_proposals.py`, `proposals.py`) runs once after every diagnose branch, with no model call. It renders one `Proposal` per cluster in cluster order: a title (`[<category>] <signature>`) and a markdown issue with the sections Summary, Evidence, Suspected cause, Suggested fix and Verification status. A diagnosed cluster also gets a `RegressionCase` of ids only (exemplar traces and cited spans, never span text). A cluster whose diagnosis failed gets a stub proposal (`[undiagnosed] …`), so it still reaches the reviewer. An evidence check other than `valid` is flagged in the body.
+
+**`human_review`** (`graph.py`) pauses the run with `interrupt({"cluster_ids": [...]})`, ids only, since the value is checkpointed and streamed. The run resumes on the same thread with `Command(resume={cluster_id: "approve" | "reject"})`, one decision per proposal. Nothing approved: the run ends without writing.
+
+**`apply_actions`** (`nodes/apply_actions.py`, `actions.py`) is the only node that writes, and only approved proposals. As a dry run it writes `out/issues/<cluster_id>.md` and appends each regression case as one JSON line to `out/regression_cases.jsonl`, and returns the paths as `actions_log`. With `dry_run` off it raises before any write, because the real writers do not exist.
+
+### State and context
+
+`TriageState` (`agent/state.py`) holds plain dicts, so checkpoints serialize without registered models. Fields filled by parallel branches are append-only (`Annotated[list, operator.add]`).
 
 | Field | Written by | Content |
 | --- | --- | --- |
 | `target_app`, `since`, `until` | the caller | What to triage |
-| `failed_traces` | `collect_traces` | `TraceSummary` dicts |
+| `traces` | `collect_traces` | Every `TraceSummary` in the window |
+| `verdicts`, `judge_failures`, `judge_usage` | `score_trace` (append) | One verdict per judged trace; traces whose judging failed; spend per trace |
+| `failed_traces` | `join_scores` | Failed traces with their failure fields |
 | `clusters`, `unclustered` | `cluster_failures` | `Cluster` dicts; trace ids that fit no group |
-| `diagnoses`, `diagnosis_failures`, `model_usage` | `diagnose_cluster` | Append-only lists, merged across the parallel branches |
-| `reproductions`, `known_matches` | the placeholders | Fixed values for now |
+| `diagnoses`, `diagnosis_failures`, `model_usage` | `diagnose_cluster` (append) | One diagnosis per cluster; clusters that failed; spend per cluster |
 | `proposals` | `draft_proposals` | `Proposal` dicts |
 | `decisions` | `human_review` | Cluster id to `approve` or `reject` |
 | `actions_log` | `apply_actions` | Paths written, relative to the output folder |
 
-Per-run resources (the trace session, the embedder, the chat model, `dry_run`, the output folder) are not in state. They travel in `TraceContext`, passed at invoke time.
+Per-run resources are not in state. They travel in `TraceContext` (`agent/context.py`), passed at invoke time: the trace session, the embedder, the diagnoser's and the judge's chat models, the diagnose semaphore, `dry_run` and the output folder.
 
-### Failure categories
+## How failures become clusters
 
-`retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, the three MAST top-level categories `system_design`, `inter_agent_misalignment` and `task_verification`, and `unknown`. The list is closed, and `agent/taxonomy.md` defines each one with a synthetic example.
-
-## How clusters are found
-
-Clustering is code, not model calls: `cluster_summaries` in `backend/agent/clustering.py` is pure and synchronous. Model calls happen once per cluster, never once per trace, so the cost of a run follows the number of distinct problems, not the number of failures.
+Clustering is code: `cluster_summaries` in `backend/agent/clustering.py` is pure and synchronous. Model calls happen once per cluster, so the diagnoser's cost follows the number of distinct problems, not the number of failures.
 
 ```mermaid
 flowchart TD
-    a["Failed traces<br/>(TraceSummary)"] --> b{"fewer than 6?"}
+    a["Failed traces<br/>(TraceSummary from join_scores)"] --> b{"fewer than 6?"}
 
-    b -- no --> c["Failure text per trace:<br/>step, error, signature<br/>digits masked as #"]
-    c --> d["Local embedding model<br/>bge-small-en-v1.5, 384 numbers per trace"]
+    b -- no --> c["Failure text per trace:<br/>'step: error message | signature'<br/>digits masked as #"]
+    c --> d["Local embedding model<br/>bge-small-en-v1.5 (fastembed, CPU)<br/>384 numbers per trace"]
     d --> e["HDBSCAN, cosine distance<br/>min_cluster_size 3, min_samples 4"]
     e -- "dense groups" --> f["Clusters<br/>method: hdbscan"]
     e -- "noise" --> g["Regroup by failing step<br/>and normalised error"]
 
-    b -- "yes: skip embedding,<br/>everything goes to stage two" --> g
+    b -- "yes: skip embedding" --> g
 
-    g -- "group of 3 or more<br/>(any size in a small run)" --> h["Clusters<br/>method: step_error"]
-    g -- "smaller group" --> i["Unclustered trace ids"]
+    g -- "3 or more traces<br/>(any size in a small run)" --> h["Clusters<br/>method: step_error"]
+    g -- "fewer" --> i["Unclustered trace ids"]
     i --> j["One-trace clusters<br/>method: isolated"]
 
     f --> k["Sort biggest first,<br/>name c0, c1, …"]
     h --> k
     k --> l["clusters"]
-    j -- "numbered after the real clusters" --> l
+    j -- "numbered after the others" --> l
 ```
 
-Step by step:
-
-1. **Failure text.** Each trace becomes one short string, `<failing step>: <error message> | <signature>`, built only from fields already on the summary. Scores and timings are left out, and digits are masked as `#`, so values that differ between traces do not split one cause.
-2. **Embedding.** `BAAI/bge-small-en-v1.5` runs locally through [fastembed](https://github.com/qdrant/fastembed) (ONNX Runtime on the CPU, about 65 MB, no API key). Similar failures get nearby vectors. The node runs it with `asyncio.to_thread`, off the event loop.
-3. **HDBSCAN.** It finds dense groups without being told how many there are, and labels failures that fit no group as noise. The thresholds were tuned on a synthetic set of 26 summaries; `agent/const.py` records what was tried.
-4. **Second stage.** HDBSCAN cannot see a single dense group: it labels the whole group noise. One fault often causes most of a run's failures, so the noise is regrouped by failing step and normalised error (digits and quoted values masked, so `missing 'dose'` and `missing 'unit'` count as one error). A group of 3 or more becomes a cluster.
-5. **Small runs.** With fewer than 6 failed traces HDBSCAN has too little to work with. Embedding is skipped, the model is not loaded, and every step-and-error group becomes a cluster, because nothing can be called noise from so little data. The built-in fixture has two failed traces, so a run on it takes this path and yields two `step_error` clusters.
+1. **Failure text.** Each failed trace becomes one short string, `<failing step>: <error message> | <signature>`, from fields already on the summary. Digits are masked as `#`, so values that differ between traces do not split one cause. Scores and timings are left out.
+2. **Embedding.** `BAAI/bge-small-en-v1.5` runs locally through [fastembed](https://github.com/qdrant/fastembed) (ONNX Runtime, about 65 MB, no API key), so similar failures get nearby vectors.
+3. **HDBSCAN** finds dense groups without being told how many, and labels failures that fit none as noise. The thresholds were tuned on a synthetic set; `agent/const.py` records what was tried.
+4. **Second stage.** HDBSCAN cannot see one single dense group (it labels it all noise), and one fault often causes most of a run's failures. So the noise is regrouped by failing step and normalised error (quoted values and digits masked, so `missing 'dose'` and `missing 'unit'` are one error). A group of 3 or more becomes a cluster.
+5. **Small runs.** With fewer than 6 failed traces, embedding is skipped and every step-and-error group becomes a cluster, since nothing can be called noise from so little data.
 6. **Isolated failures.** A trace that fits no group becomes a cluster of one, so it is still diagnosed.
 
-A `Cluster` holds `cluster_id` (`c0`, `c1`, … by size, stable for the same input), `trace_ids`, `signature` (the most common "failing step: normalised error" among its traces), `exemplar_trace_ids` (the 3 newest traces, which the diagnoser reads) and `method`.
+A `Cluster` holds `cluster_id` (`c0`, `c1`, … by size, stable for the same input), `trace_ids`, `signature` (the most common "step: normalised error" among its traces), `exemplar_trace_ids` (the 3 newest traces, which the diagnoser reads) and `method` (`hdbscan`, `step_error` or `isolated`).
 
-### The embedding model
+The model weights are not in the repo. The first run with 6 or more failures downloads them into `FASTEMBED_CACHE_PATH` (default: a `fastembed_cache` folder in the system temp dir, which a reboot may clear; `$HOME/.cache/fastembed` lasts). Once cached, `HF_HUB_OFFLINE=1` stops any contact with Hugging Face.
 
-The weights are not in the repo. The first run with 6 or more failed traces downloads the model from Hugging Face and caches it in `FASTEMBED_CACHE_PATH`, or in a `fastembed_cache` folder in the system temp dir when that is not set. A reboot usually clears the temp dir, so point the variable at a lasting folder such as `$HOME/.cache/fastembed`. Once cached, the model loads without a network; `HF_HUB_OFFLINE=1` stops any contact with Hugging Face.
+## How a cluster is diagnosed
+
+The diagnoser is a plain structured-output call, not a tool-using agent: the node fetches the evidence itself and hands it to the model.
+
+```mermaid
+flowchart TD
+    t["ClusterTask (one cluster)"] --> s["Wait for one of 4 diagnose slots"]
+    s --> f["Fetch the exemplar trees<br/>get_trace_tree × 3 (sanitized)"]
+    f -- "fetch fails" --> fail["diagnosis_failures"]
+    f --> p["Prompt: taxonomy.md as system,<br/>cluster size + signature + exemplar trees"]
+    p --> m["with_structured_output(Diagnosis)<br/>DIAGNOSER_MODEL via OpenRouter"]
+    m -- "transient error (408, 429, 5xx, timeout)<br/>and budget left" --> w["wait, doubling"] --> m
+    m -- "other error / no budget" --> fail
+    m --> c{"every cited span<br/>in the trees shown?"}
+    c -- yes --> v["evidence_check: valid"]
+    c -- "no, budget left" --> r["Ask again,<br/>listing the valid ids"]
+    r --> c2{"all valid now?"}
+    c2 -- yes --> co["evidence_check: corrected"]
+    c2 -- no --> u["evidence_check: unsupported<br/>drop invalid citations,<br/>confidence capped at 0.3,<br/>none left → cite the cluster's first failing span"]
+    c -- "no, budget spent" --> u
+    v --> out["diagnoses + model_usage"]
+    co --> out
+    u --> out
+    fail --> usage["model_usage (failed spend counts too)"]
+```
+
+1. **Evidence.** The node fetches the span trees of the cluster's 3 exemplar traces once, through the MCP server, so the model sees only sanitized attributes.
+2. **The call.** One `with_structured_output(Diagnosis)` call on `DIAGNOSER_MODEL` (Sonnet by default), with `agent/taxonomy.md` as the system prompt. A `Diagnosis` holds a `category` from the closed taxonomy, a `root_cause`, a `suggested_fix`, a `confidence` from 0 to 1, and at least one `Evidence` (a trace id, a span id and a note). The code sets `cluster_id` itself.
+3. **Citation check.** Every cited span must be a span of the trees the model was shown. If not, the model is asked once more with the valid ids. If it still cites spans it was not shown, they are dropped and the confidence is capped at 0.3; with no real citation left, the cluster's first failing span is cited. The result's `evidence_check` (`valid`, `corrected`, `unsupported`) is set by the code, never by the model.
+4. **Retries and budget.** Each cluster has 3 model calls, 100,000 tokens and 0.50 USD. A transient error is retried after a doubling wait while the budget holds; the SDK's own retries are off, so all retrying is here. Any other error, or an empty budget, puts the cluster in `diagnosis_failures`, logged by exception type only. The node appends one `{cluster_id, calls, tokens, cost_usd}` entry to `model_usage` over all its attempts, with the cost OpenRouter reports.
+
+The failure categories: `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, the MAST top-level `system_design`, `inter_agent_misalignment` and `task_verification`, and `unknown`. `agent/taxonomy.md` defines each one.
 
 ## Runs, review and the API
 
-A run is one graph thread. Its state is checkpointed in Postgres, so a run that waits for review survives a restart. A `runs` row indexes it (status, counts, who started it), and `reviews` keeps one row per decided proposal. These tables hold ids, counts and decisions only, no issue text.
+A run is one graph thread. Its state is checkpointed in Postgres (`AsyncPostgresSaver`), so a run that waits for review survives a restart. A `runs` row indexes it (window, status, counts, who started it) and `reviews` keeps one row per decided proposal: ids, counts and decisions only, no issue text. A run's status is `in_progress`, `review_required`, `completed`, `failed` or `aborted`; closing the stream before the review aborts the run.
 
 | Endpoint | What it does |
 | --- | --- |
 | `GET /health` | Liveness |
 | `POST /v1/traces` | The collector |
-| `POST /v1/runs/stream` | Starts a run and streams it as server-sent events. Body: `target_app`, optional `since` and `until` |
+| `GET /v1/traces`, `GET /v1/traces/{trace_id}` | The trace browser: trace rows, and one sanitized tree with its scores |
+| `POST /v1/runs/stream` | Starts a run (`target_app`, optional `since`, `until`) and streams it as server-sent events |
 | `GET /v1/runs` | The newest runs: ids, starter, status, counts |
 | `GET /v1/runs/{run_id}` | One run: status, summary and proposals |
+| `GET /v1/runs/{run_id}/detail` | One run's pipeline and clusters with their diagnoses and spend |
 | `POST /v1/runs/{run_id}/review` | Resumes a paused run with one decision per proposal |
 
-The stream sends `run_started`, then `progress` events (node, cluster id, counts; never state), one `proposal` event per draft, and last `review_required`, `run_completed` or `run_failed`. After most messages comes a `ui_spec`: a small model writes a UI description of the message, which the console draws.
+The stream sends `run_started`, `progress` events (node, counts; never state), one `proposal` event per draft, and last `review_required`, `run_completed` or `run_failed`. Behind most messages comes a `ui_spec`: a small model (`UI_SPEC_MODEL`) describes the message as a [json-render](https://github.com/vercel-labs/json-render) spec, which the console checks and draws.
 
-A run's status is one of `in_progress`, `review_required`, `completed`, `failed` or `aborted`. Closing the stream before the review aborts the run. A review holds a row lock for the length of the resume, so a second review of the same run gets a `409`, and the decisions and the new status are committed together.
-
-There is no login. The `X-User-Name` header is recorded as the starter or reviewer, not verified; without it the name is `local`.
+A review holds a row lock for the length of the resume, so a second review of the same run gets a `409`, and the decisions and the new status are committed together. There is no login: the `X-User-Name` header is recorded, not verified (`local` without one).
 
 ## The run console
 
-`frontend/` is one Next.js page with a form to start a run and a console with four tabs:
+`frontend/` is one Next.js page: a form to start a run over a console with six tabs.
 
-- **Runs** lists past runs. A run that waits for review has a Review button.
+- **Runs** lists past runs; a run that waits for review has a Review button.
+- **Run** shows one run: the pipeline node by node, and each cluster with its diagnosis, cited spans (each opens under Traces), traces and spend.
+- **Traces** lists stored traces and opens one as a waterfall with a side panel for the picked span.
 - **Console** draws the run's messages from the `ui_spec` events.
 - **Raw events** shows the stream exactly as received.
-- **Review** shows each proposal's issue with an Approve or Reject choice, and sends all decisions at once.
+- **Review** shows each proposal's issue with Approve or Reject, and sends all decisions at once.
 
-The page talks to the backend through a Next rewrite (`/api/*` to `/v1/*`), because the backend has no CORS.
+The page reaches the backend through a Next rewrite (`/api/*` to `/v1/*`), because the backend has no CORS.
 
 ## Safety rules
 
 - Trace access is read-only and goes through the MCP server only.
-- Raw span attributes do not reach the agent unless their key is allowlisted.
+- Span attributes reach a model only if their key is allowlisted.
 - All writes happen in `apply_actions`, and only for proposals a person approved.
 - `dry_run` is on by default and set by the server (`DRY_RUN`), never by a request.
-- Logs carry exception types and argument hashes, not messages or content.
-- The issue text is the diagnoser's own prose. Nothing checks it for clinical content, so the human review is the gate. `backend/out/` is gitignored for the same reason.
+- Logs carry exception types and argument hashes, never messages or content.
+- The issue text is the diagnoser's own prose. Nothing checks it for clinical content, so the human review is the gate; `backend/out/` is gitignored for the same reason.
 
 ## Running it
 
@@ -382,9 +463,9 @@ Install the backend and create its environment file:
 cd backend && uv sync && cp .env.example .env
 ```
 
-Edit `backend/.env`: set `OPENROUTER_API_KEY`, and set `DATABASE_URL` to `postgresql://postgres:tracescan@127.0.0.1:5433/postgres` for the compose database.
+Edit `backend/.env`: set `OPENROUTER_API_KEY`, and set `DATABASE_URL` and `TRACE_DATABASE_URL` to `postgresql://postgres:tracescan@127.0.0.1:5433/postgres` for the compose database.
 
-Create the tables. The app does not migrate by itself and refuses to start before this has run:
+Create the tables (the app never migrates by itself and refuses to start before this):
 
 ```bash
 cd backend && uv run --env-file .env alembic upgrade head
@@ -402,39 +483,32 @@ Start the frontend, then open `http://localhost:3000`:
 cd frontend && npm install && npm run dev
 ```
 
-Start a run for `medas` from the page. It reads the stored traces (seed a day of them first, see below), diagnoses each cluster with the real model, and waits for your review. Approved proposals are written under `backend/out/`.
-
-### Environment variables
-
-| Variable | Required | Meaning |
-| --- | --- | --- |
-| `DATABASE_URL` | yes | Postgres for the checkpoints and the application's tables |
-| `TRACE_DATABASE_URL` | yes | Where the trace server reads spans and scores: the same database, meant for a read-only role |
-| `OPENROUTER_API_KEY` | yes | The diagnoser's and the UI model's key |
-| `DIAGNOSER_MODEL` | no | OpenRouter slug; default `anthropic/claude-sonnet-5-5` |
-| `UI_SPEC_MODEL` | no | OpenRouter slug; default `anthropic/claude-haiku-5.5` |
-| `JUDGE_MODEL` | no | The eval's judge; default `openai/gpt-6.1-sol` |
-| `DRY_RUN` | no | On by default. Off is refused at startup |
-| `FASTEMBED_CACHE_PATH` | no | Where the embedding model is cached |
-| `BACKEND_URL` | no | For the frontend; default `http://localhost:8000` |
-
-### Other entry points
-
-Run the trace MCP server by itself over stdio (it needs `TRACE_DATABASE_URL`):
-
-```bash
-cd backend && uv run --env-file .env python -m trace_store.mcp_server
-```
-
-Fill `spans` with a day of synthetic Medas traffic, most of it failed, so a run can read from Postgres before Medas is instrumented:
+With no real app sending traces, seed a day of synthetic Medas traffic (48 traces, healthy and failed):
 
 ```bash
 cd backend && uv run --env-file .env python -m scripts.seed_traces
 ```
 
-The day ends now unless `--end` gives another time; the same `--end` twice adds nothing. Runs read them only when `TRACE_DATABASE_URL` is set.
+**Next to Medas.** Medas uses ports 8000, 3000 and 5433 too. Run TraceScan's backend on 8010 and its frontend on 3010 (the `backend-8010` and `frontend-3010` entries in `.claude/launch.json`; build the frontend with `BACKEND_URL=http://localhost:8010` first), set Medas's `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to `http://localhost:8010/v1/traces`, and move Medas's database with `DATABASE_PORT` in `medas-api/.env`.
 
-Run the eval on a seeded day (it needs `DATABASE_URL`, `TRACE_DATABASE_URL` and `OPENROUTER_API_KEY`). The first command seeds a fixed day, runs the triage up to the review pause and saves a results file under `backend/out/eval/`; the second has a model of another vendor grade each root cause from 0 to 2 against `eval/judge_rubric.md`; the third prints the scores:
+### Environment variables
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | Postgres for the checkpoints, the run tables and the collector's writes |
+| `TRACE_DATABASE_URL` | yes | Where the trace server and trace browser read spans: the same database, meant for a read-only role |
+| `OPENROUTER_API_KEY` | yes | The key for every model call |
+| `DIAGNOSER_MODEL` | no | Default `anthropic/claude-sonnet-5-5` |
+| `TRACE_JUDGE_MODEL` | no | The per-trace judge; default `anthropic/claude-haiku-5.5` |
+| `UI_SPEC_MODEL` | no | Default `anthropic/claude-haiku-5.5` |
+| `JUDGE_MODEL` | no | The eval's grader (not the trace judge); default `openai/gpt-6.1-sol` |
+| `DRY_RUN` | no | On by default. Off is refused at startup |
+| `FASTEMBED_CACHE_PATH` | no | Where the embedding model is cached |
+| `BACKEND_URL` | no | For the frontend; default `http://localhost:8000` |
+
+### The eval
+
+The eval runs the triage on a seeded day whose answers are known (it needs `DATABASE_URL`, `TRACE_DATABASE_URL` and `OPENROUTER_API_KEY`). The first command seeds a fixed day and runs up to the review pause, the second has a model of another vendor grade each root cause against `eval/judge_rubric.md`, the third prints the scores (detection, purity, separation, recall, category and cause accuracy, evidence validity, cost):
 
 ```bash
 cd backend && uv run --env-file .env python -m eval.run
@@ -448,52 +522,17 @@ cd backend && uv run --env-file .env python -m eval.judge
 cd backend && uv run python -m eval.metrics
 ```
 
-A seeded day is 48 traces of twelve kinds (`COUNTS` in `scripts/seed_traces.py`, answers in `eval/ground_truth.py`):
-
-| Kind | Traces | What it tests |
-| --- | --- | --- |
-| `healthy` | 8 | Nothing wrong: nothing should be proposed |
-| `source_timeout`, `tool_arguments`, `context_overflow`, `store_down` | 6, 5, 5, 1 | Plain faults, each with its own exception; `store_down` happens once |
-| `model_unavailable` | 5 | One cause with two faces: the provider answers with a 5xx or does not answer at all |
-| `tight_timeout` | 3 | A look-alike: the same step and exception as `source_timeout`, another cause (the tool's own 1 second timeout) |
-| `double_failure` | 2 | Two errors in one request; the first one in the trace is not the cause |
-| `unexplained` | 3 | Only the root span fails: the right answer is `unknown`, not a guess |
-| `silent_no_hits` | 4 | A false negative: the retrieval finds nothing and no span fails |
-| `retried_ok`, `not_found` | 3, 3 | False positives: an error span in a request that worked as it should |
-
-The scores of one run on `anthropic/claude-sonnet-5-5`, judged by `openai/gpt-6.1-sol`, before and after the scoring job (different seeded days, so read the comparison per row with the notes):
-
-| Score | Meaning | Before | With scores |
-| --- | --- | --- | --- |
-| Trace recall | Traces of a fault that reached a cluster at all | 30/34 | 34/34 |
-| False alarms | Clusters that hold a trace with no fault | 1 | 0 |
-| Detection | Seeded faults that are the majority of a diagnosed cluster | 6/9 | 5/9 |
-| Purity | Traces that belong to their cluster's majority fault | 24/36 | 23/34 |
-| Separation | Faults whose traces sit in one cluster that holds nothing else | 3/9 | 2/9 |
-| Rare-failure recall | Faults seeded once that still got a diagnosis | 1/1 | 0/1 |
-| Category accuracy | Diagnoses of a fault with its expected category | 6/6 | 4/5 |
-| Evidence valid, relevant | Citations are real spans; they include the failing span | 6/6, 6/6 | 5/5, 5/5 |
-| Cause accuracy | Diagnoses of a fault the judge scored 2: they name the injected cause | 6/6 | 5/5 |
-| Cost and time | One run | 6 calls, $0.10, 11 s | 5 calls, $0.10, 16 s |
-
-What it shows: the scoring job did what it was built for. The four failures with no error are now collected, and the six harmless requests with an error span are left out. What remains is the clustering, which now has every fault in front of it and still groups by failing step: the three kinds of PubMed timeout share a cluster, every chat failure shares another, and the silent retrieval misses share one with the single store outage, so the rare fault lost its own diagnosis. The diagnoser noticed that last cluster was mixed and answered `unknown` at 0.4 confidence instead of naming one cause. A diagnosis is judged against its cluster's majority fault, so cause accuracy says nothing about the faults buried in a mixed cluster: detection, purity and separation do. The judge's agreement with a person's grades (`python -m eval.judge --human c0=2 c1=1 ...`) is not measured yet.
-
-[docs/eval-notes.md](docs/eval-notes.md) is the log of the eval experiments: the setup, both runs of the first one (plain faults, then the hard cases), the clusters it produced, the findings, the limits and what to do next.
+A seeded day has twelve kinds of traces (`COUNTS` in `scripts/seed_traces.py`, answers in `eval/ground_truth.py`): healthy requests, plain faults, and hard cases (a look-alike timeout, a fault with two faces, a request with two errors of which the first is not the cause, a failure at the root only, a retrieval that silently finds nothing, and harmless error spans). [docs/eval-notes.md](docs/eval-notes.md) logs every experiment and its results.
 
 ## Tests and checks
 
 Backend (what CI runs):
 
 ```bash
-cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest
+cd backend && uv run ruff check . && uv run ruff format --check . && uv run pyright -p .. && uv run pytest
 ```
 
-Tests never call a model and never download the embedding model: they use a fake chat model and `HashingEmbedder` from `tests/fakes.py`. Two groups of tests are opt-in (the diagnoser on the real model is the eval, `python -m eval.run`):
-
-| Setting | Runs |
-| --- | --- |
-| `TEST_DATABASE_URL=...` | The Postgres tests: persistence, the run store, the collector, the reader, the trace browser, the trace client and the eval runner. CI sets it, with a Postgres service |
-| `RUN_SLOW=1 uv run pytest -k fastembed` | Clustering with the real embedding model (downloads it once) |
+Tests never call a model and never download the embedding model: they use fake chat models and `HashingEmbedder` from `tests/fakes.py`. The Postgres tests run with `TEST_DATABASE_URL` (CI sets it); `RUN_SLOW=1 uv run pytest -k fastembed` repeats the clustering check with the real embedding model.
 
 Frontend:
 
@@ -505,11 +544,13 @@ cd frontend && npm run lint && npx tsc --noEmit && npm test && npm run build
 
 | Path | Content |
 | --- | --- |
-| `backend/agent/` | The graph, its nodes, clustering, the diagnoser's guards, the MCP client |
-| `backend/trace_store/` | Trace contracts, Postgres reader, MCP server, guard |
+| `backend/agent/` | The graph, its nodes, the trace judge, clustering, the diagnoser's guards, the MCP client |
+| `backend/trace_store/` | Trace contracts, Postgres reader, sanitizer, MCP server, guard |
 | `backend/runs/` | Run lifecycle and the run store |
-| `backend/api/` | Runs API, the SSE stream, the UI spec call, the collector |
+| `backend/api/` | The collector, the trace browser, the runs API and SSE stream, the UI spec call |
 | `backend/db/`, `backend/migrations/` | Tables and Alembic migrations |
+| `backend/scripts/seed_traces.py` | Synthetic Medas traffic |
+| `backend/eval/` | Ground truth, eval runner, grader, metrics |
 | `backend/main.py` | The FastAPI app and its startup wiring |
 | `backend/tests/` | Tests and shared fakes |
 | `frontend/` | The run console |
