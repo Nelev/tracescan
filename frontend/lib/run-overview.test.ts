@@ -41,6 +41,9 @@ const ISOLATED = {
 
 const SUMMARY = {
   run_id: "r1",
+  traces: 10,
+  judged: 9,
+  judge_failures: 1,
   failed_traces: 4,
   clusters: 2,
   unclustered: 1,
@@ -48,6 +51,19 @@ const SUMMARY = {
   diagnosis_failures: 1,
   proposals: 2,
   actions_log: [],
+};
+
+/** A run that found no failures: everything after the judge is zero. */
+const NOTHING_FAILED = {
+  ...SUMMARY,
+  judged: 10,
+  judge_failures: 0,
+  failed_traces: 0,
+  clusters: 0,
+  unclustered: 0,
+  diagnoses: 0,
+  diagnosis_failures: 0,
+  proposals: 0,
 };
 
 const PAUSED = {
@@ -96,6 +112,7 @@ test("one cluster off contract makes the whole run unreadable", () => {
 test("a paused run waits at the review, with the unbuilt stages shown as such", () => {
   assert.deepEqual(states(read(PAUSED)), {
     collect: "done",
+    judge: "done",
     cluster: "done",
     diagnose: "done",
     reproduce: "not_built",
@@ -104,7 +121,9 @@ test("a paused run waits at the review, with the unbuilt stages shown as such", 
     review: "waiting",
     apply: "pending",
   });
-  const [, cluster, diagnose] = pipeline(read(PAUSED));
+  const [collect, judge, cluster, diagnose] = pipeline(read(PAUSED));
+  assert.equal(collect.detail, "10 traces");
+  assert.equal(judge.detail, "9 judged · 4 failed · 1 not judged");
   assert.equal(cluster.detail, "2 clusters · 1 isolated");
   assert.equal(diagnose.detail, "1 diagnosed · 1 failed");
 });
@@ -129,25 +148,33 @@ test("a reviewed run is done end to end, with the decisions counted", () => {
 });
 
 test("a run that found nothing skips everything after the collection", () => {
-  const empty = {
-    ...SUMMARY,
-    failed_traces: 0,
-    clusters: 0,
-    unclustered: 0,
-    diagnoses: 0,
-    diagnosis_failures: 0,
-    proposals: 0,
-  };
   const s = states(
-    read({
-      status: "completed",
-      summary: empty,
-      clusters: [],
-    }),
+    read({ status: "completed", summary: NOTHING_FAILED, clusters: [] }),
   );
   assert.equal(s.collect, "done");
   assert.equal(s.cluster, "skipped");
   assert.equal(s.apply, "skipped");
+});
+
+test("an empty window is collected and has nothing to judge", () => {
+  const none = { ...NOTHING_FAILED, traces: 0, judged: 0 };
+  const s = states(read({ status: "completed", summary: none, clusters: [] }));
+  assert.equal(s.collect, "done");
+  assert.equal(s.judge, "skipped");
+  assert.equal(s.cluster, "skipped");
+});
+
+test("a run whose traces are being judged is running at the judge", () => {
+  const o = read({
+    status: "in_progress",
+    summary: { ...NOTHING_FAILED, judged: 0 },
+    clusters: [],
+  });
+  const s = states(o);
+  assert.equal(s.collect, "done");
+  assert.equal(s.judge, "running");
+  assert.equal(s.cluster, "pending");
+  assert.equal(pipeline(o).find((st) => st.key === "judge")?.detail, "—");
 });
 
 test("a failed or aborted run marks the stage it stopped at", () => {
@@ -162,6 +189,7 @@ test("a failed or aborted run marks the stage it stopped at", () => {
     read({ status: "failed", summary: early, clusters: [] }),
   );
   assert.equal(failed.collect, "done");
+  assert.equal(failed.judge, "done");
   assert.equal(failed.cluster, "failed");
   assert.equal(failed.diagnose, "pending");
   const aborted = states(

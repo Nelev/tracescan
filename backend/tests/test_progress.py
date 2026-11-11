@@ -32,9 +32,9 @@ TREES = {
 }
 
 
-async def stream_progress(model) -> tuple[list[ProgressEvent], dict]:
+async def stream_progress(model, traces=None) -> tuple[list[ProgressEvent], dict]:
     """Run the graph through the v3 event stream; return its progress events and final state."""
-    context = fake_context(FakeTraces(FAILURES, TREES), model)
+    context = fake_context(traces or FakeTraces(FAILURES, TREES), model)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the v3 protocol is flagged experimental
         stream = await build_graph().astream_events(
@@ -54,8 +54,11 @@ async def test_reports_each_node_and_one_branch_per_cluster():
 
     (collected,) = of(events, "node_finished", "collect_traces")
     assert collected["counts"] == {"traces": 2}
-    # One judge branch per trace, and none of them reports: the join after them gives the count.
-    assert not [e for e in events if e["node"] == "score_trace"]
+    # One judge branch per trace; none reports its own start or end, only how many are judged.
+    judging = [e for e in events if e["node"] == "score_trace"]
+    assert judging == [
+        {"event": "node_progress", "node": "score_trace", "counts": {"done": 1, "total": 2}}
+    ]
     (scored,) = of(events, "node_finished", "join_scores")
     assert scored["counts"] == {"failed_traces": 2}
     (clustered,) = of(events, "node_finished", "cluster_failures")
@@ -115,6 +118,26 @@ async def test_progress_events_never_carry_trace_or_span_content():
     wire = json.dumps(events)
     for secret in ("empty result", "context length", "t1", "t2", "retrieve", "medas"):
         assert secret not in wire
+
+
+@pytest.mark.anyio
+async def test_judging_reports_each_quarter_but_the_last():
+    ids = [f"t{i}" for i in range(9)]
+    traces = FakeTraces(
+        [summary(i, failing_span_name="retrieve") for i in ids], {i: span_tree(i) for i in ids}
+    )
+    events, _ = await stream_progress(fake_model(), traces)
+
+    judged = [e["counts"] for e in events if e["event"] == "node_progress"]
+    # 9 traces: a quarter is passed at 3, 5 and 7; the 9th is join_scores starting.
+    assert judged == [{"done": n, "total": 9} for n in (3, 5, 7)]
+    first_judged = events.index(next(e for e in events if e["event"] == "node_progress"))
+    collected = of(events, "node_finished", "collect_traces")[0]
+    assert (
+        events.index(collected)
+        < first_judged
+        < events.index(of(events, "node_started", "join_scores")[0])
+    )
 
 
 def test_every_counted_key_is_a_state_field():
