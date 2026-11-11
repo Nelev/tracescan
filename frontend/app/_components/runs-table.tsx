@@ -3,7 +3,7 @@ import { formatWhen, formatWindow, RUN_STATUS, shortId } from "@/lib/runs";
 import type { RunRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
-import { PANE_HEIGHT } from "./console-styles";
+import { CELL, NUMERIC, PANE_HEIGHT } from "./console-styles";
 import type { RunsState } from "./use-runs";
 
 const COLUMNS = [
@@ -18,9 +18,6 @@ const COLUMNS = [
   { label: "Run" },
   { label: "Review" },
 ];
-
-const CELL = "px-4 py-2 whitespace-nowrap";
-const NUMERIC = "text-right tabular-nums";
 
 function Row({
   run,
@@ -78,7 +75,8 @@ export function RunsTable({
   status,
   runs,
   onReview,
-}: Pick<RunsState, "status" | "runs"> & {
+}: Pick<RunsState, "status"> & {
+  runs: RunRecord[];
   onReview: (runId: string) => void;
 }) {
   return (

@@ -115,7 +115,7 @@ export function RunPanel() {
       pick(set)(e.target.value);
 
   return (
-    <Card className="gap-0 py-0">
+    <Card className="flex-1 gap-0 py-0">
       <form
         className="flex flex-wrap items-end gap-x-6 gap-y-4 border-b p-6"
         onSubmit={(e) => {

@@ -7,6 +7,12 @@ import {
 } from "./review";
 import { parseRuns } from "./runs";
 import { readSse, type SseMessage } from "./sse";
+import {
+  parseTraceDetail,
+  parseTraces,
+  type TraceDetail,
+  type TraceRow,
+} from "./traces";
 import type { RunRecord, RunRequest } from "./types";
 
 /**
@@ -122,6 +128,36 @@ export function reviewRun(
       body: JSON.stringify({ decisions }),
     },
     parseReviewResult,
+  );
+}
+
+const TRACES_PATH = "/api/traces";
+
+/**
+ * The newest stored traces, newest first, failed or not (only failed ones with `failedOnly`).
+ * Throws `RunError` when the list cannot be read.
+ */
+export function listTraces(
+  failedOnly: boolean,
+  signal: AbortSignal,
+): Promise<TraceRow[]> {
+  const query = new URLSearchParams({ limit: "200" });
+  if (failedOnly) query.set("failed_only", "true");
+  return fetchJson(`${TRACES_PATH}?${query}`, { signal }, parseTraces);
+}
+
+/**
+ * One trace: its span tree, already sanitized by the server, and its scores. Throws `RunError`:
+ * 404 for a trace the server does not have whole.
+ */
+export function getTrace(
+  traceId: string,
+  signal: AbortSignal,
+): Promise<TraceDetail> {
+  return fetchJson(
+    `${TRACES_PATH}/${encodeURIComponent(traceId)}`,
+    { signal },
+    parseTraceDetail,
   );
 }
 

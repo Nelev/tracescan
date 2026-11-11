@@ -222,7 +222,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 - [x] Human review gate with approve or reject per proposal
 - [x] Draft issues written to markdown files (dry run)
 - [ ] Fault-injection eval with six seeded bugs, varied inputs, healthy control runs and the metrics table; proposals marked unverified
-- [ ] Minimal trace viewer in Next.js: plain trace list and span tree
+- [x] Minimal trace viewer in Next.js: plain trace list and span tree
 
 **Stretch (if time allows)**
 
@@ -303,7 +303,7 @@ Do these in order and stop where time runs out; each one is useful on its own.
 - [x] **Review screen.** Approve or reject per proposal, then resume the paused thread with the decisions. It is the Review tab of the run console (`frontend/app/_components/review-pane.tsx`), over `GET /v1/runs/{run_id}` and `POST /v1/runs/{run_id}/review`. Done when approving in the UI produces the same actions as the review API (there is no CLI).
 - [ ] **Results page.** The fault-injection metrics table and a chart per metric. Done when it reads the saved eval results file.
 - [ ] **Replace the CLI in the demo.** Record the review step in the UI instead of the terminal. Done when the demo video shows the dashboard.
-- [ ] **Trace viewer (part of the MVP).** A plain trace list and a span-tree view of one trace, nothing more, read from the trace store. Done when a failing Medas trace can be inspected without Jaeger.
+- [x] **Trace viewer (part of the MVP).** A plain trace list and a span-tree view of one trace, nothing more, read from the trace store. It is the Traces tab of the run console (`frontend/app/_components/traces-pane.tsx`), over `GET /v1/traces` and `GET /v1/traces/{trace_id}` (`backend/api/trace_browser.py`, read-only, attributes sanitized like the MCP server's). Done when a failing Medas trace can be inspected without Jaeger: checked on 2026-11-11 with the real Medas trace and a failed tool-schema trace.
 
 ### Phase 5 · Ship (days 15–16)
 

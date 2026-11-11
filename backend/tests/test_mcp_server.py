@@ -11,8 +11,9 @@ from trace_store.const import (
     REDACTED,
     TRUNCATION_SUFFIX,
 )
-from trace_store.mcp_server import build_server, sanitize_span, sanitize_summary
+from trace_store.mcp_server import build_server
 from trace_store.models import SpanNode, TraceSummary
+from trace_store.sanitize import sanitize_span, sanitize_summary
 
 T0 = datetime(2026, 11, 5, 9, tzinfo=UTC)
 LONG = MAX_ATTR_CHARS_TREE + 1  # over the tree limit, well under the single-span limit
