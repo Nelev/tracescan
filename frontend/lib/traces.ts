@@ -64,7 +64,7 @@ export type TraceDetail = {
   failed: boolean;
 };
 
-const isNum = (v: unknown): v is number =>
+export const isNum = (v: unknown): v is number =>
   typeof v === "number" && Number.isFinite(v);
 const isNumOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 const isStatus = (v: unknown): v is SpanStatus =>

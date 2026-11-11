@@ -375,6 +375,59 @@ async def test_an_unknown_run_is_404_and_a_malformed_id_422(client):
     assert (await client.post(f"/v1/runs/{uuid4()}/review", json=review)).status_code == 404
 
 
+# --- GET /v1/runs/{run_id}/detail
+
+
+@pytest.mark.anyio
+async def test_the_detail_of_a_paused_run_shows_each_cluster_and_its_diagnosis(client):
+    use_diagnosed_run(attributes={"patient": PHI})
+    run_id = await start(client)
+
+    response = await client.get(f"/v1/runs/{run_id}/detail")
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"status", "summary", "clusters"}
+    assert body["status"] == "review_required" and body["summary"]["clusters"] == 1
+    (cluster,) = body["clusters"]
+    assert cluster["cluster_id"] == "c0"
+    assert sorted(cluster["trace_ids"]) == ["tr_1", "tr_2"]
+    assert set(cluster["exemplar_trace_ids"]) <= {"tr_1", "tr_2"}
+    assert (cluster["diagnosis_failed"], cluster["decision"]) == (False, None)
+    assert cluster["verification"] == "unverified"
+    assert cluster["usage"]["calls"] >= 1
+    diagnosis = cluster["diagnosis"]
+    assert diagnosis["category"] == DIAGNOSIS.category
+    # Citations are span ids of the cluster's own traces, checked by code.
+    assert diagnosis["evidence_check"] == "valid"
+    assert {e["trace_id"] for e in diagnosis["evidence"]} <= {"tr_1", "tr_2"}
+    assert PHI not in response.text  # span content stays in the trace store
+
+
+@pytest.mark.anyio
+async def test_the_detail_shows_the_decision_once_the_run_is_reviewed(client):
+    use_diagnosed_run()
+    run_id = await start(client)
+    review = {"decisions": {"c0": "approve"}}
+    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 200
+
+    body = (await client.get(f"/v1/runs/{run_id}/detail")).json()
+    assert body["status"] == "completed"
+    assert body["clusters"][0]["decision"] == "approve"
+
+
+@pytest.mark.anyio
+async def test_the_detail_of_a_run_with_nothing_found_has_no_clusters(client):
+    run_id = await start(client)
+    body = (await client.get(f"/v1/runs/{run_id}/detail")).json()
+    assert (body["status"], body["clusters"]) == ("completed", [])
+
+
+@pytest.mark.anyio
+async def test_the_detail_of_an_unknown_run_is_404_and_a_malformed_id_422(client):
+    assert (await client.get(f"/v1/runs/{uuid4()}/detail")).status_code == 404
+    assert (await client.get("/v1/runs/not-a-uuid/detail")).status_code == 422
+
+
 # --- POST /v1/runs/{run_id}/review
 
 

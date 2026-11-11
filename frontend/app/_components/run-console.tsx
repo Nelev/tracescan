@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
 import { PANE_HEIGHT, PANE_SLOT } from "./console-styles";
 import { ReviewPane } from "./review-pane";
+import { RunPane } from "./run-pane";
 import { RunsTable } from "./runs-table";
 import { TracesPane } from "./traces-pane";
 import { listFooter } from "./use-list";
@@ -207,7 +208,7 @@ function ScrollPane({
   );
 }
 
-type Tab = "console" | "raw" | "runs" | "traces" | "review";
+type Tab = "console" | "raw" | "runs" | "run" | "traces" | "review";
 
 /**
  * The page's whole output: the messages the server streams, drawn from the UI specs its model
@@ -268,13 +269,34 @@ export function RunConsole({
   // the one it left, and Refresh is there for a newer one.
   const stored = useTraceList(tab === "traces", failedOnly);
 
+  // The run shown under Run: one picked under Runs, else this page's run once the server names it.
+  const [shownRun, setShownRun] = useState<string | null>(null);
+  const detailId = shownRun ?? runId;
+
+  function openRun(id: string) {
+    setShownRun(id);
+    setTab("run");
+  }
+
+  function openTraceAt(traceId: string, spanId: string | null) {
+    setOpenTrace({ traceId, spanId });
+    setTab("traces");
+  }
+
   function openReview(id: string) {
     setPicked(id);
     setTab("review");
   }
 
+  // The Run tab stays mounted, so following a cited span to Traces and back keeps its place and
+  // loads nothing again. It loads again only when what it shows can change: a review was taken,
+  // or this page's own run moved on.
+  const [reviews, setReviews] = useState(0);
+  const detailReload = `${reviews}:${detailId === runId ? phase : ""}`;
+
   function reviewed(id: string) {
     setPicked(id); // keeps the outcome on screen once this page's run no longer waits
+    setReviews((n) => n + 1);
     onReviewed(id);
   }
 
@@ -286,6 +308,7 @@ export function RunConsole({
         : listFooter(stored, failedOnly ? "failed trace" : "trace");
     }
     if (tab === "review") return reviewId ? `Run ${reviewId}` : "No run open";
+    if (tab === "run") return detailId ? `Run ${detailId}` : "No run open";
     return PHASE[phase].footer(events);
   }
 
@@ -325,6 +348,7 @@ export function RunConsole({
           <h2 className="sr-only">Run output</h2>
           <TabsList aria-label="Run output">
             <TabsTrigger value="runs">Runs</TabsTrigger>
+            <TabsTrigger value="run">Run</TabsTrigger>
             <TabsTrigger value="traces">Traces</TabsTrigger>
             <TabsTrigger value="console">Console</TabsTrigger>
             <TabsTrigger value="raw">Raw events</TabsTrigger>
@@ -427,8 +451,25 @@ export function RunConsole({
           <RunsTable
             status={recorded.status}
             runs={recorded.items}
+            onOpen={openRun}
             onReview={openReview}
           />
+        </TabsContent>
+        <TabsContent value="run" keepMounted className={PANE_SLOT}>
+          {detailId ? (
+            <RunPane
+              key={detailId}
+              runId={detailId}
+              visible={tab === "run"}
+              reloadOn={detailReload}
+              onOpenTrace={openTraceAt}
+              onReview={openReview}
+            />
+          ) : (
+            <p className="type-body p-4 text-muted-foreground">
+              No run is open. Pick one under Runs, or start a run.
+            </p>
+          )}
         </TabsContent>
         <TabsContent value="traces" className={PANE_SLOT}>
           <TracesPane

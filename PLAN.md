@@ -231,7 +231,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 - [ ] Real GitHub issue creation
 - [ ] MAST-Data agreement study
 - [ ] Scheduled daily triage run and a deployed demo
-- [ ] Next.js review dashboard over the FastAPI backend (runs list and review screen built; run detail and results pages open)
+- [ ] Next.js review dashboard over the FastAPI backend (runs list, run detail, trace viewer and review screen built; results page open)
 - [ ] LLM judge for groundedness in the scoring job
 
 The phases below are in working days, since no start date is fixed yet.
@@ -299,7 +299,7 @@ Do these in order and stop where time runs out; each one is useful on its own.
 
 - [x] **Scaffold the app.** Next.js with the App Router and TypeScript in `frontend/`: a single run-console page that streams a run from the FastAPI backend through a `/api` rewrite. It does not use `@langchain/langgraph-sdk` or a LangGraph server, and holds no server keys. Done when the home page lists existing runs (each run is a graph thread).
 - [x] **Runs page.** Each triage run with its window, status (running, waiting for review, done, failed, aborted) and number of clusters. It is the Runs tab of the run console (`frontend/app/_components/runs-table.tsx`), over `GET /v1/runs`. Done when a new run appears without a restart.
-- [ ] **Run detail page.** Clusters with trace counts, each diagnosis with category, confidence and cited spans linked to the trace in the trace viewer, plus verification status. Done when every field in the state shows up somewhere.
+- [x] **Run detail page.** Clusters with trace counts, each diagnosis with category, confidence and cited spans linked to the trace in the trace viewer, plus verification status. Done when every field in the state shows up somewhere. It is the Run tab of the run console (`frontend/app/_components/run-pane.tsx`), over `GET /v1/runs/{run_id}/detail`, with the pipeline drawn node by node; the proposals' text and the actions log stay under Review, and `reproductions` and `known_matches` have no node yet (drawn as Not built). Checked on 2026-11-11 on a real run of 50 failed traces in 8 clusters.
 - [x] **Review screen.** Approve or reject per proposal, then resume the paused thread with the decisions. It is the Review tab of the run console (`frontend/app/_components/review-pane.tsx`), over `GET /v1/runs/{run_id}` and `POST /v1/runs/{run_id}/review`. Done when approving in the UI produces the same actions as the review API (there is no CLI).
 - [ ] **Results page.** The fault-injection metrics table and a chart per metric. Done when it reads the saved eval results file.
 - [ ] **Replace the CLI in the demo.** Record the review step in the UI instead of the terminal. Done when the demo video shows the dashboard.

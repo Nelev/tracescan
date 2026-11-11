@@ -5,6 +5,7 @@ import {
   type ReviewResult,
   type RunDetail,
 } from "./review";
+import { parseRunOverview, type RunOverview } from "./run-overview";
 import { parseRuns } from "./runs";
 import { readSse, type SseMessage } from "./sse";
 import {
@@ -108,6 +109,14 @@ export function listRuns(signal: AbortSignal): Promise<RunRecord[]> {
 /** A run's status and proposals. Throws `RunError`: 404 for a run the server does not know. */
 export function getRun(runId: string, signal: AbortSignal): Promise<RunDetail> {
   return fetchJson(runPath(runId), { signal }, parseRunDetail);
+}
+
+/** What a run found, cluster by cluster. Throws `RunError`: 404 for a run the server does not know. */
+export function getRunOverview(
+  runId: string,
+  signal: AbortSignal,
+): Promise<RunOverview> {
+  return fetchJson(`${runPath(runId)}/detail`, { signal }, parseRunOverview);
 }
 
 /**

@@ -31,7 +31,11 @@ export const isRunStatus = (v: unknown): v is RunStatus =>
   isText(v) && Object.hasOwn(RUN_STATUS, v);
 export const isTextOrNull = (v: unknown): v is string | null =>
   v === null || isText(v);
-const isCount = (v: unknown): v is number => Number.isInteger(v);
+export const isCount = (v: unknown): v is number => Number.isInteger(v);
+
+/** "1 run", "3 runs": a count with its noun. */
+export const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n} ${n === 1 ? one : many}`;
 
 function isRun(row: unknown): row is RunRecord {
   if (typeof row !== "object" || row === null) return false;
