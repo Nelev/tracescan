@@ -1,9 +1,8 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Check, ChevronRight, X } from "lucide-react";
 import {
   type KeyboardEvent,
-  useEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -68,7 +67,8 @@ type Props = {
  * The run's findings, readable at a glance: every finding as one compact row (its kind, the error
  * seen, its size as a bar, how sure the diagnosis is, where its decision stands), and the picked
  * one in full beside the list on a wide screen, under its own row otherwise. Up and Down move
- * through the rows; the detail steps to the previous, the next, or the next one still to decide.
+ * through the rows; one button steps to the next finding still to decide (else simply the next),
+ * wrapping to the first after the last.
  * It opens on the finding the page asked for, else the first one to decide, else the first.
  */
 export function FindingsBrowser({
@@ -91,10 +91,13 @@ export function FindingsBrowser({
       clusters[0].cluster_id,
   );
   const rows = useRef(new Map<string, HTMLButtonElement>());
-
-  useEffect(() => {
+  // A new ask moves the selection in the same render, not in an effect after it, so the detail
+  // never shows the old finding for a frame.
+  const [lastAsk, setLastAsk] = useState(ask);
+  if (ask !== lastAsk) {
+    setLastAsk(ask);
     if (ask) setSelected(ask.clusterId);
-  }, [ask]);
+  }
 
   const index = Math.max(
     0,
@@ -102,11 +105,14 @@ export function FindingsBrowser({
   );
   const current = clusters[index];
   const maxTraces = Math.max(...clusters.map((c) => c.trace_ids.length));
+  // The others in order from the current one, wrapping to the first after the last.
+  const after = [...clusters.slice(index + 1), ...clusters.slice(0, index)];
   const nextUndecided = deciding
-    ? [...clusters.slice(index + 1), ...clusters.slice(0, index)].find(
-        (c) => decisionOf(c) === undefined,
-      )
+    ? after.find((c) => decisionOf(c) === undefined)
     : undefined;
+  // One button: the next finding still to decide while there is one, else simply the next.
+  const next = nextUndecided ?? after[0];
+  const decided = clusters.filter((c) => decisionOf(c) !== undefined).length;
 
   function select(clusterId: string, focusRow = false) {
     setSelected(clusterId);
@@ -136,31 +142,24 @@ export function FindingsBrowser({
         <span className="type-h4 mr-auto">
           Finding {index + 1} of {clusters.length}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={index === 0}
-          onClick={() => select(clusters[index - 1].cluster_id)}
-        >
-          <ChevronLeft aria-hidden="true" />
-          Previous
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={index === clusters.length - 1}
-          onClick={() => select(clusters[index + 1].cluster_id)}
-        >
-          Next
-          <ChevronRight aria-hidden="true" />
-        </Button>
-        {nextUndecided && (
+        {next && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => select(nextUndecided.cluster_id)}
+            onClick={() => select(next.cluster_id)}
           >
-            Next to decide
+            {deciding && (
+              <span className="flex items-center gap-1 text-success tabular-nums">
+                <Check className="size-4" aria-hidden="true" />
+                <span aria-hidden="true">
+                  {decided} / {clusters.length}
+                </span>
+                <span className="sr-only">
+                  {decided} of {clusters.length} decided,
+                </span>
+              </span>
+            )}
+            {nextUndecided ? "Next to decide" : "Next"}
             <ChevronRight aria-hidden="true" />
           </Button>
         )}
