@@ -7,12 +7,15 @@ import {
   type ProgressData,
 } from "./progress.ts";
 import {
+  confidenceLevel,
   emptyOverview,
   formatUsage,
   parseRunOverview,
   pipeline,
   type RunOverview,
+  signatureParts,
   totalUsage,
+  verificationText,
 } from "./run-overview.ts";
 
 const CLUSTER = {
@@ -307,4 +310,37 @@ test("the cluster map is read with the run, and missing reads as none", () => {
     }),
     null,
   );
+});
+
+test("a signature splits into the failing step and its error", () => {
+  assert.deepEqual(
+    signatureParts(
+      "execute_tool search_pubmed: search_pubmed timed out after #.#s",
+    ),
+    {
+      step: "execute_tool search_pubmed",
+      error: "search_pubmed timed out after #.#s",
+    },
+  );
+  // Only the first ": " splits: the error may hold more.
+  assert.deepEqual(signatureParts("chat gpt: error code: # - too long"), {
+    step: "chat gpt",
+    error: "error code: # - too long",
+  });
+  assert.deepEqual(signatureParts("invoke_agent medas"), {
+    step: "invoke_agent medas",
+    error: "",
+  });
+});
+
+test("confidence reads as high, medium or low", () => {
+  assert.equal(confidenceLevel(0.8), "high");
+  assert.equal(confidenceLevel(0.75), "high");
+  assert.equal(confidenceLevel(0.5), "medium");
+  assert.equal(confidenceLevel(0.3), "low");
+});
+
+test("an unverified cluster reads as not reproduced yet", () => {
+  assert.equal(verificationText("unverified"), "not reproduced yet");
+  assert.equal(verificationText("reproduced"), "reproduced");
 });

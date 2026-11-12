@@ -1,19 +1,32 @@
 "use client";
 
-import { ArrowLeft, RotateCw, UserCheck } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  Check,
+  ListChecks,
+  RotateCw,
+  UserCheck,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { getRunOverview } from "@/lib/api";
 import { tally, tallyText } from "@/lib/review";
 import {
+  type ClusterDetail,
+  clusterTitle,
   emptyOverview,
   formatUsage,
   pipeline,
   type RunOverview,
+  signatureParts,
   totalUsage,
 } from "@/lib/run-overview";
 import { plural, RUN_STATUS, type StatusTone, shortId } from "@/lib/runs";
+import type { Decision } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AgentConsole } from "./agent-console";
 import { Chip } from "./chip";
@@ -21,6 +34,7 @@ import { ClusterCard, type LiveDiagnosis } from "./cluster-card";
 import { ClusterMapPanel } from "./cluster-map-panel";
 import { PipelineStepper } from "./pipeline-stepper";
 import { type RunStream, useRun } from "./run-stream";
+import { TypingDots } from "./typing-dots";
 import { useResource } from "./use-list";
 import { useReview } from "./use-review";
 
@@ -62,6 +76,16 @@ function statusOf(
   if (stream?.phase === "lost")
     return { label: "Connection lost", tone: "destructive" };
   return overview ? RUN_STATUS[overview.status] : null;
+}
+
+/** The run page's two views: the live map and console, and the findings to read and review. */
+type RunTab = "activity" | "findings";
+
+/** Why the map tab shows no map, in a sentence. */
+function noMap(overview: RunOverview, streaming: boolean): string {
+  if (streaming) return "The map appears once the failed traces are clustered.";
+  if (overview.clusters.length === 0) return noClusters(overview, false);
+  return "No cluster map: the run had too few failed traces to embed, or was clustered before the map existed.";
 }
 
 /** Why a run shows no clusters, in a sentence. */
@@ -108,8 +132,14 @@ export function RunView({
   const [finding, setFinding] = useState(
     focusCluster === null ? null : { clusterId: focusCluster, ask: 0 },
   );
+  // A run streaming in this window opens on its map and console; any other, or a page linked to
+  // a cluster, opens on its findings.
+  const [tab, setTab] = useState<RunTab>(
+    focusCluster === null && streaming ? "activity" : "findings",
+  );
 
   function openFinding(clusterId: string) {
+    setTab("findings");
     setFinding((f) => ({ clusterId, ask: (f?.ask ?? 0) + 1 }));
   }
 
@@ -141,6 +171,13 @@ export function RunView({
     review.state.step === "open" &&
     review.state.detail.status === "review_required";
 
+  const progress =
+    decidable && review.state.step === "open"
+      ? tally(review.state.detail.proposals, review.decisions)
+      : null;
+  const toDecide = progress
+    ? progress.total - progress.approved - progress.rejected
+    : 0;
   const status = statusOf(detail.value, stream);
   const clusters = overview?.clusters ?? [];
   const usage = totalUsage(clusters);
@@ -218,36 +255,73 @@ export function RunView({
             <PipelineStepper stages={pipeline(overview, live)} />
           </section>
 
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
-            <div className="flex min-w-0 flex-col gap-6">
-              {clusters.length > 0 &&
-                (overview.cluster_map ? (
-                  <ClusterMapPanel
-                    map={overview.cluster_map}
-                    clusters={clusters}
-                    selected={mapCluster}
-                    onSelect={setMapCluster}
-                    onOpenFinding={openFinding}
-                  />
-                ) : (
-                  !streaming && (
-                    <p className="type-body text-muted-foreground">
-                      No cluster map: the run had too few failed traces to
-                      embed, or was clustered before the map existed.
+          <Tabs value={tab} onValueChange={(value) => setTab(value as RunTab)}>
+            <TabsList aria-label="Run views">
+              <TabsTab value="activity">
+                <Activity className="size-4" aria-hidden="true" />
+                Map &amp; console
+                {streaming && <TypingDots label="(the run is streaming)" />}
+              </TabsTab>
+              <TabsTab value="findings">
+                <ListChecks className="size-4" aria-hidden="true" />
+                Findings
+                <span className="type-body rounded-full bg-secondary px-2 tabular-nums text-secondary-foreground">
+                  {clusters.length}
+                </span>
+                {/* On a phone the review bar carries the count, and the tab row stays one line. */}
+                {toDecide > 0 && (
+                  <span className="hidden sm:inline-flex">
+                    <Chip tone="warning" size="sm">
+                      {toDecide} to decide
+                    </Chip>
+                  </span>
+                )}
+              </TabsTab>
+            </TabsList>
+
+            {/* Both panels stay mounted, so the map keeps its view and the console its place. */}
+            <TabsPanel value="activity" keepMounted>
+              <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
+                <div className="min-w-0">
+                  {overview.cluster_map && clusters.length > 0 ? (
+                    <ClusterMapPanel
+                      map={overview.cluster_map}
+                      clusters={clusters}
+                      selected={mapCluster}
+                      onSelect={setMapCluster}
+                      onOpenFinding={openFinding}
+                    />
+                  ) : (
+                    <p className="type-body rounded-xl border border-dashed p-4 text-muted-foreground">
+                      {noMap(overview, streaming)}
                     </p>
-                  )
-                ))}
+                  )}
+                </div>
+                <div className={cn(stream && "h-96 xl:h-[calc(100vh-15rem)]")}>
+                  <AgentConsole runId={runId} />
+                </div>
+              </div>
+            </TabsPanel>
+
+            <TabsPanel value="findings" keepMounted>
               <section
                 aria-labelledby="findings"
-                className="flex min-w-0 flex-col gap-3"
+                className="flex min-w-0 flex-col gap-4"
               >
-                <h2 id="findings" className="flex items-baseline gap-2">
-                  Findings
-                  <span className="type-body text-muted-foreground">
-                    {clusters.length > 0 &&
-                      `${plural(clusters.length, "cluster")} of ${plural(overview.summary.failed_traces, "failed trace")}`}
-                  </span>
-                </h2>
+                <div className="flex flex-col gap-1">
+                  <h2 id="findings" className="flex items-baseline gap-2">
+                    Findings
+                    <span className="type-body font-normal text-muted-foreground">
+                      {clusters.length > 0 &&
+                        `${plural(clusters.length, "finding")} from ${plural(overview.summary.failed_traces, "failed trace")}`}
+                    </span>
+                  </h2>
+                  <p className="type-body max-w-prose text-muted-foreground">
+                    {decidable
+                      ? "Each finding groups failed traces that share one cause. Approve the ones worth an issue, reject the rest, then submit your decisions together."
+                      : "Each finding groups failed traces that share one cause: what went wrong, how to fix it, and the evidence it rests on."}
+                  </p>
+                </div>
                 {review.state.step === "unavailable" && (
                   <div className="flex flex-wrap items-center gap-3">
                     <p role="alert" className="type-body text-destructive">
@@ -284,37 +358,48 @@ export function RunView({
                     {noClusters(overview, streaming)}
                   </p>
                 ) : (
-                  clusters.map((cluster) => (
-                    <ClusterCard
-                      key={cluster.cluster_id}
-                      cluster={cluster}
-                      focus={
-                        finding?.clusterId === cluster.cluster_id
-                          ? finding.ask
-                          : null
-                      }
-                      live={liveDiagnosis(cluster.cluster_id)}
-                      proposal={proposals.get(cluster.cluster_id) ?? null}
-                      decision={
+                  <div className="grid items-start gap-6 xl:grid-cols-[15rem_minmax(0,1fr)]">
+                    <FindingsIndex
+                      clusters={clusters}
+                      decisionOf={(c) =>
                         decidable
-                          ? review.decisions[cluster.cluster_id]
-                          : (cluster.decision ?? undefined)
+                          ? review.decisions[c.cluster_id]
+                          : (c.decision ?? undefined)
                       }
-                      onDecide={
-                        decidable
-                          ? (d) => review.decide(cluster.cluster_id, d)
-                          : null
-                      }
-                      deciding={sending}
+                      deciding={decidable}
+                      live={liveDiagnosis}
                     />
-                  ))
+                    <div className="flex min-w-0 flex-col gap-4">
+                      {clusters.map((cluster) => (
+                        <ClusterCard
+                          key={cluster.cluster_id}
+                          cluster={cluster}
+                          focus={
+                            finding?.clusterId === cluster.cluster_id
+                              ? finding.ask
+                              : null
+                          }
+                          live={liveDiagnosis(cluster.cluster_id)}
+                          proposal={proposals.get(cluster.cluster_id) ?? null}
+                          decision={
+                            decidable
+                              ? review.decisions[cluster.cluster_id]
+                              : (cluster.decision ?? undefined)
+                          }
+                          onDecide={
+                            decidable
+                              ? (d) => review.decide(cluster.cluster_id, d)
+                              : null
+                          }
+                          deciding={sending}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 )}
-                {review.state.step === "open" && decidable && (
+                {progress && review.state.step === "open" && (
                   <ReviewBar
-                    progress={tally(
-                      review.state.detail.proposals,
-                      review.decisions,
-                    )}
+                    progress={progress}
                     problem={review.state.problem}
                     sending={sending}
                     onSubmit={() => void review.submit()}
@@ -322,20 +407,85 @@ export function RunView({
                   />
                 )}
               </section>
-            </div>
-            {/* Beside the findings on a wide screen, above them otherwise: a live run is read there. */}
-            <div
-              className={cn(
-                "order-first xl:sticky xl:top-20 xl:order-none",
-                stream && "h-80 xl:h-[calc(100vh-6.5rem)]",
-              )}
-            >
-              <AgentConsole runId={runId} />
-            </div>
-          </div>
+            </TabsPanel>
+          </Tabs>
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * The findings at a glance, beside the cards on a wide screen: each one's title, size and where
+ * its decision stands, linking to its card. Hidden below `xl`, where the cards are the list.
+ */
+function FindingsIndex({
+  clusters,
+  decisionOf,
+  deciding,
+  live,
+}: {
+  clusters: ClusterDetail[];
+  decisionOf: (cluster: ClusterDetail) => Decision | undefined;
+  /** The run waits for review: an undecided finding is marked as such. */
+  deciding: boolean;
+  live: (clusterId: string) => "queued" | "diagnosing" | null;
+}) {
+  return (
+    <nav
+      aria-label="Findings in this run"
+      className="sticky top-20 hidden flex-col gap-1 xl:flex"
+    >
+      <h3 className="type-h4 px-2 pb-1">In this run</h3>
+      <ol className="flex flex-col gap-0.5">
+        {clusters.map((c) => {
+          const decision = decisionOf(c);
+          const state = live(c.cluster_id);
+          return (
+            <li key={c.cluster_id}>
+              <a
+                href={`#finding-${c.cluster_id}`}
+                className="type-body flex min-h-10 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{clusterTitle(c)}</span>
+                  <span
+                    className="truncate font-mono text-muted-foreground"
+                    title={c.signature}
+                  >
+                    {signatureParts(c.signature).step}
+                  </span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {plural(c.trace_ids.length, "trace")}
+                    {state === "diagnosing" && " · diagnosing"}
+                    {state === "queued" && " · queued"}
+                  </span>
+                </span>
+                {decision === "approve" ? (
+                  <Check
+                    className="size-4 shrink-0 text-success"
+                    aria-label="approved"
+                  />
+                ) : decision === "reject" ? (
+                  <X
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-label="rejected"
+                  />
+                ) : (
+                  deciding && (
+                    <span
+                      className="size-2 shrink-0 rounded-full bg-warning"
+                      role="img"
+                      aria-label="to decide"
+                    />
+                  )
+                )}
+              </a>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 

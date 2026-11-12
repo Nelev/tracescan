@@ -16,10 +16,14 @@ import { formatPercent } from "@/lib/format";
 import { issueSections, type Proposal } from "@/lib/review";
 import {
   type ClusterDetail,
+  type ConfidenceLevel,
   clusterTitle,
+  confidenceLevel,
   type EvidenceCheck,
   formatUsage,
   METHOD_LABEL,
+  signatureParts,
+  verificationText,
 } from "@/lib/run-overview";
 import { plural, type StatusTone, shortId } from "@/lib/runs";
 import { tracePath } from "@/lib/traces";
@@ -30,10 +34,17 @@ import { SEGMENT_ITEM, SEGMENT_LIST } from "./styles";
 import { TraceTree } from "./trace-tree";
 import { useTrace } from "./use-traces";
 
+/** The code's check of the diagnosis's citations, as a reviewer would say it. */
 const CHECK: Record<EvidenceCheck, { label: string; tone: StatusTone }> = {
-  valid: { label: "Evidence valid", tone: "success" },
-  corrected: { label: "Evidence corrected", tone: "neutral" },
-  unsupported: { label: "Evidence unsupported", tone: "destructive" },
+  valid: { label: "Citations check out", tone: "success" },
+  corrected: { label: "Citations corrected", tone: "neutral" },
+  unsupported: { label: "Citations not found", tone: "destructive" },
+};
+
+const CONFIDENCE: Record<ConfidenceLevel, string> = {
+  high: "High confidence",
+  medium: "Medium confidence",
+  low: "Low confidence",
 };
 
 /** Where a cluster's diagnosis stands while the run streams. */
@@ -289,13 +300,53 @@ function NoDiagnosis({
   );
 }
 
+/** A labelled part of a finding: an overline heading and its content. */
+function Part({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-1.5">
+      <h4>{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+/** How sure the diagnoser is, as a short meter and in words. */
+function Confidence({ value }: { value: number }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span
+        className="h-1.5 w-16 overflow-hidden rounded-full bg-track"
+        aria-hidden="true"
+      >
+        <span
+          className="block h-full rounded-full bg-primary"
+          style={{ width: `${value * 100}%` }}
+        />
+      </span>
+      <span>
+        <span className="text-foreground">
+          {CONFIDENCE[confidenceLevel(value)]}
+        </span>{" "}
+        · {formatPercent(value)}
+      </span>
+    </span>
+  );
+}
+
 /**
- * One cluster of failed traces and what the run made of it. Closed, it reads as a finding: the
- * diagnosed category, the root cause in a sentence or two, the failing step, and one line of
- * facts (size, confidence, evidence check). Opened from its footer, it shows the suggested fix,
- * the evidence as span trees, and the drafted issue and the cluster's traces folded away. The
- * diagnosis is the model's own prose, possibly clinical: shown, never logged. While the run waits
- * for review the header takes the reviewer's decision.
+ * One finding: a cluster of failed traces and what the run made of it, read top to bottom as a
+ * reviewer would ask. The header says what kind of failure it is, how many traces it holds and at
+ * which step they fail; then the error seen, what went wrong, how to fix it, and how sure the
+ * diagnosis is, all shown at once. The evidence (cited spans drawn as span trees), the drafted
+ * issue, the cluster's traces and its technical facts sit behind one toggle. The diagnosis is
+ * the model's own prose, possibly clinical: shown, never logged. While the run waits for review
+ * the header takes the reviewer's decision.
  */
 export function ClusterCard({
   cluster,
@@ -331,45 +382,54 @@ export function ClusterCard({
     ref.current?.scrollIntoView({ block: "start" });
   }, [focus]);
   const { diagnosis } = cluster;
+  const { step, error } = signatureParts(cluster.signature);
   const exemplars = new Set(cluster.exemplar_trace_ids);
   const shown = cluster.trace_ids.slice(0, MAX_TRACE_CHIPS);
   const hidden = cluster.trace_ids.length - shown.length;
   const detailsId = `cluster-${cluster.cluster_id}-details`;
   const cites = diagnosis?.evidence.length ?? 0;
   const check = diagnosis ? CHECK[diagnosis.evidence_check] : null;
+  const toggle = expanded
+    ? "Hide the evidence"
+    : diagnosis
+      ? [
+          `See the evidence · ${plural(cites, "cited span")}`,
+          proposal && "drafted issue",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : `See the ${plural(cluster.trace_ids.length, "trace")}`;
 
   return (
     <article
       ref={ref}
+      id={`finding-${cluster.cluster_id}`}
       aria-labelledby={`cluster-${cluster.cluster_id}`}
       aria-current={focused ? "true" : undefined}
       className={cn(
         "surface type-body flex scroll-mt-20 flex-col overflow-hidden rounded-xl border",
-        // A decided card carries a thin stripe of its decision, so a reviewed list scans at a
+        // A decided finding carries a thin stripe of its decision, so a reviewed list scans at a
         // glance; one still to decide has no mark of its own: its picker is the cue.
-        decision && "border-l-[3px]",
+        decision && "border-l-2",
         decision === "approve" && "border-l-success/70",
         decision === "reject" && "border-l-muted-foreground/40",
         focused && "ring-1 ring-primary/50",
       )}
     >
-      <div className="flex flex-col gap-3 p-4">
-        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <h3
-              id={`cluster-${cluster.cluster_id}`}
-              className="type-h2 flex flex-wrap items-baseline gap-x-2"
-            >
+      <div className="flex flex-col gap-4 p-4 sm:p-5">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
+            <h3 id={`cluster-${cluster.cluster_id}`} className="type-h2">
               {clusterTitle(cluster)}
-              <span className="type-body font-normal text-muted-foreground">
-                {plural(cluster.trace_ids.length, "failed trace")}
-              </span>
             </h3>
-            <p
-              className="truncate font-mono text-muted-foreground"
-              title={cluster.signature}
-            >
-              {cluster.signature}
+            <p className="text-muted-foreground">
+              <span className="text-foreground tabular-nums">
+                {plural(cluster.trace_ids.length, "failed trace")}
+              </span>{" "}
+              · failing at{" "}
+              <code className="font-mono text-foreground [overflow-wrap:anywhere]">
+                {step}
+              </code>
             </p>
           </div>
           {onDecide ? (
@@ -388,39 +448,44 @@ export function ClusterCard({
           )}
         </header>
 
+        {error && (
+          <Part title="Error seen">
+            <p className="rounded-lg bg-muted px-3 py-2 font-mono [overflow-wrap:anywhere]">
+              {error}
+            </p>
+          </Part>
+        )}
+
         {diagnosis ? (
-          <p className={cn("text-pretty", !expanded && "line-clamp-2")}>
-            {diagnosis.root_cause}
-          </p>
+          <>
+            <Part title="What went wrong">
+              <p className="max-w-prose">{diagnosis.root_cause}</p>
+            </Part>
+            <section
+              aria-labelledby={`fix-${cluster.cluster_id}`}
+              className="ai-context flex gap-3 rounded-r-lg p-3"
+            >
+              <Wrench
+                className="mt-0.5 size-4 shrink-0 text-primary"
+                aria-hidden="true"
+              />
+              <div className="flex flex-col gap-1.5">
+                <h4 id={`fix-${cluster.cluster_id}`}>How to fix it</h4>
+                <p className="max-w-prose">{diagnosis.suggested_fix}</p>
+              </div>
+            </section>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-muted-foreground">
+              <Confidence value={diagnosis.confidence} />
+              {check && (
+                <Chip tone={check.tone} size="sm">
+                  {check.label}
+                </Chip>
+              )}
+            </div>
+          </>
         ) : (
           <NoDiagnosis cluster={cluster} live={live} />
         )}
-
-        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
-          {diagnosis && (
-            <li className="flex items-center gap-2">
-              <span
-                className="h-1.5 w-12 overflow-hidden bg-track"
-                aria-hidden="true"
-              >
-                <span
-                  className="block h-full bg-primary"
-                  style={{ width: `${diagnosis.confidence * 100}%` }}
-                />
-              </span>
-              {formatPercent(diagnosis.confidence)} confident
-            </li>
-          )}
-          {check && (
-            <li>
-              <Chip tone={check.tone} size="sm">
-                {check.label}
-              </Chip>
-            </li>
-          )}
-          <li>{METHOD_LABEL[cluster.method]}</li>
-          <li className="font-mono">{cluster.cluster_id}</li>
-        </ul>
       </div>
 
       <button
@@ -429,17 +494,13 @@ export function ClusterCard({
         aria-controls={detailsId}
         onClick={() => setExpanded((on) => !on)}
         className={cn(
-          "flex w-full items-center justify-between gap-3 border-t px-4 py-2.5 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none",
+          "flex min-h-11 w-full items-center justify-between gap-3 border-t px-4 py-2.5 text-left text-primary transition-colors hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none sm:px-5",
           expanded && "bg-primary/5",
         )}
       >
         <span className="type-h3 flex items-center gap-2 text-primary">
           <Search className="size-4" aria-hidden="true" />
-          {expanded
-            ? "Hide the evidence"
-            : diagnosis
-              ? `Show the evidence and the fix · ${plural(cites, "cited span")}`
-              : "Show the traces"}
+          {toggle}
         </span>
         <ChevronDown
           className={cn(
@@ -453,23 +514,8 @@ export function ClusterCard({
       {expanded && (
         <div
           id={detailsId}
-          className="flex flex-col gap-5 border-t bg-background/20 p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200"
+          className="flex flex-col gap-5 border-t bg-background/20 p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200 sm:p-5"
         >
-          {diagnosis && (
-            <section
-              aria-label="Suggested fix"
-              className="ai-context flex gap-3 rounded-r-lg p-3"
-            >
-              <Wrench
-                className="mt-0.5 size-4 shrink-0 text-primary"
-                aria-hidden="true"
-              />
-              <div className="flex flex-col gap-1">
-                <h4 className="type-h3">Suggested fix</h4>
-                <p>{diagnosis.suggested_fix}</p>
-              </div>
-            </section>
-          )}
           {cluster.exemplar_trace_ids.length > 0 && (
             <Evidence cluster={cluster} />
           )}
@@ -489,7 +535,7 @@ export function ClusterCard({
               </More>
             )}
             <More
-              title={`All ${plural(cluster.trace_ids.length, "trace")} in the cluster`}
+              title={`All ${plural(cluster.trace_ids.length, "trace")} in this finding`}
             >
               <ul className="flex flex-wrap gap-1.5">
                 {shown.map((traceId) => (
@@ -517,9 +563,13 @@ export function ClusterCard({
               </ul>
             </More>
           </div>
-          <p className="type-h4 flex flex-wrap gap-x-4 gap-y-1">
-            <span>Diagnosis: {formatUsage(cluster.usage)}</span>
-            <span>{cluster.verification}</span>
+          <p className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+            <span>
+              Cluster <span className="font-mono">{cluster.cluster_id}</span>
+            </span>
+            <span>grouped by {METHOD_LABEL[cluster.method]}</span>
+            <span>diagnosis {formatUsage(cluster.usage)}</span>
+            <span>{verificationText(cluster.verification)}</span>
           </p>
         </div>
       )}
