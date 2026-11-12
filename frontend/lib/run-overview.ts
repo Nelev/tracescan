@@ -23,6 +23,8 @@ export type ClusterDiagnosis = {
   confidence: number;
   evidence: Evidence[];
   evidence_check: EvidenceCheck;
+  /** Healthy calls of the failing step the diagnoser was shown; null or missing for older runs. */
+  healthy_twins?: number | null;
 };
 
 export type ClusterUsage = { calls: number; tokens: number; cost_usd: number };
@@ -114,6 +116,16 @@ export function confidenceLevel(confidence: number): ConfidenceLevel {
 export function verificationText(verification: string): string {
   return verification === "unverified" ? "not reproduced yet" : verification;
 }
+
+/** What the diagnoser had to compare the failure with; null when the run did not record it. */
+export function healthyTwinsText(
+  count: number | null | undefined,
+): string | null {
+  if (count == null) return null;
+  return count === 0
+    ? "no healthy calls to compare with"
+    : `compared with ${plural(count, "healthy call")}`;
+}
 const CHECKS = new Set(["valid", "corrected", "unsupported"]);
 
 function isEvidence(v: unknown): v is Evidence {
@@ -129,7 +141,8 @@ function isDiagnosis(v: unknown): v is ClusterDiagnosis {
     isNum(v.confidence) &&
     Array.isArray(v.evidence) &&
     v.evidence.every(isEvidence) &&
-    CHECKS.has(v.evidence_check as string)
+    CHECKS.has(v.evidence_check as string) &&
+    (v.healthy_twins == null || isCount(v.healthy_twins))
   );
 }
 
