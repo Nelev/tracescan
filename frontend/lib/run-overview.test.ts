@@ -10,6 +10,7 @@ import {
   confidenceLevel,
   emptyOverview,
   formatUsage,
+  healthyTwinsText,
   parseRunOverview,
   pipeline,
   type RunOverview,
@@ -343,4 +344,26 @@ test("confidence reads as high, medium or low", () => {
 test("an unverified cluster reads as not reproduced yet", () => {
   assert.equal(verificationText("unverified"), "not reproduced yet");
   assert.equal(verificationText("reproduced"), "reproduced");
+});
+
+test("the healthy calls the diagnoser compared with read in words, older runs say nothing", () => {
+  assert.equal(healthyTwinsText(3), "compared with 3 healthy calls");
+  assert.equal(healthyTwinsText(1), "compared with 1 healthy call");
+  assert.equal(healthyTwinsText(0), "no healthy calls to compare with");
+  assert.equal(healthyTwinsText(null), null);
+  assert.equal(healthyTwinsText(undefined), null);
+});
+
+test("a diagnosis's healthy-twin count is a count, null, or missing", () => {
+  const withCount = (healthy_twins: unknown) =>
+    parseRunOverview({
+      ...PAUSED,
+      clusters: [
+        { ...CLUSTER, diagnosis: { ...CLUSTER.diagnosis, healthy_twins } },
+      ],
+    });
+  assert.equal(withCount(2)?.clusters[0].diagnosis?.healthy_twins, 2);
+  assert.notEqual(withCount(null), null);
+  assert.notEqual(parseRunOverview(PAUSED), null);
+  assert.equal(withCount("3"), null);
 });
