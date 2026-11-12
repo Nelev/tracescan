@@ -53,7 +53,10 @@ function Mark({
   if (tone === "info") {
     return (
       <span
-        className={cn("size-2 bg-current", live && "motion-safe:animate-pulse")}
+        className={cn(
+          "size-2 rounded-full bg-current",
+          live && "motion-safe:animate-pulse",
+        )}
         aria-hidden="true"
       />
     );
@@ -77,7 +80,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        "inline-flex items-center border",
+        "inline-flex items-center rounded-full border",
         SIZE[size].box,
         CHIP_TONE[tone],
       )}

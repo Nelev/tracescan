@@ -5,6 +5,7 @@ import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useRun } from "./run-stream";
+import { TypingDots } from "./typing-dots";
 import type { ConsoleLine, Tone } from "./use-run-stream";
 
 // The messages draw with json-render, zod and the package's components: their own chunk, which
@@ -105,19 +106,14 @@ export function AgentConsole({ runId }: { runId: string }) {
     <section
       aria-labelledby="agent-console"
       className={cn(
-        "flex flex-col overflow-hidden border bg-muted",
+        "surface flex flex-col overflow-hidden rounded-xl border",
         mine && "h-full min-h-[20rem]",
       )}
     >
       <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
         <h2 id="agent-console" className="flex items-center gap-2">
           Agent console
-          {running && (
-            <span
-              className="size-2 bg-info motion-safe:animate-pulse"
-              aria-hidden="true"
-            />
-          )}
+          {running && <TypingDots label="(the run is streaming)" />}
         </h2>
         {mine && (
           <Button
@@ -157,9 +153,14 @@ export function AgentConsole({ runId }: { runId: string }) {
           )}
           {run.messages.length === 0 ? (
             <p className="type-body p-4 text-muted-foreground">
-              {running
-                ? "Waiting for the first message…"
-                : "The run sent no message that could be shown."}
+              {running ? (
+                <span className="inline-flex items-center gap-2">
+                  Waiting for the first message
+                  <TypingDots label="" />
+                </span>
+              ) : (
+                "The run sent no message that could be shown."
+              )}
             </p>
           ) : (
             <UiMessages messages={run.messages} />

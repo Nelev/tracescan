@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "./_components/app-shell";
 import "./globals.css";
@@ -16,6 +16,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "TraceScan",
   description: "Triage LLM app failures: cluster, diagnose, and draft issues.",
+};
+
+/** Dark only: the browser draws its own chrome, form controls and scrollbars dark too. */
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "black",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -111,7 +111,7 @@ export function ClusterMapPanel({
   return (
     <section
       aria-labelledby="cluster-map"
-      className="flex flex-col gap-3 border bg-card p-4"
+      className="surface flex flex-col gap-3 rounded-xl border p-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
@@ -142,7 +142,7 @@ export function ClusterMapPanel({
                     key={v}
                     className={cn(
                       SEGMENT_ITEM,
-                      view === v && "bg-background text-foreground",
+                      view === v && "bg-card text-foreground shadow-xs",
                     )}
                   >
                     <input
@@ -176,7 +176,7 @@ export function ClusterMapPanel({
                 aria-pressed={on}
                 onClick={() => toggle(id)}
                 className={cn(
-                  "type-body inline-flex items-center gap-1.5 border px-2 py-1 transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "type-body inline-flex items-center gap-1.5 rounded-md border px-2 py-1 transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   on
                     ? "border-foreground text-foreground"
                     : "text-muted-foreground",
@@ -205,7 +205,7 @@ export function ClusterMapPanel({
           <div
             role="img"
             aria-label={`3D map of ${plural(traceCount(points), "failed trace")} in ${plural(onMap.length, "cluster")}. The table view lists the same points.`}
-            className="relative isolate h-80 border md:h-[26rem]"
+            className="relative isolate h-80 overflow-hidden rounded-lg border md:h-[26rem]"
           >
             {webgl && (
               <SceneBoundary onError={() => setSceneFailed(true)}>
@@ -347,7 +347,7 @@ function PointTable({
   onToggle: (clusterId: string) => void;
 }) {
   return (
-    <div className="max-h-[26rem] overflow-auto border">
+    <div className="max-h-[26rem] overflow-auto rounded-lg border">
       <table className="type-body w-full">
         <caption className="sr-only">
           The map's points: one row per distinct failure in a cluster

@@ -196,7 +196,7 @@ export function UiBadge({
   return (
     <span
       className={cn(
-        "type-body inline-flex w-fit items-center border px-2.5 py-0.5",
+        "type-body inline-flex w-fit items-center rounded-full border px-2.5 py-0.5",
         pick(BADGE, props.variant, BADGE.default),
       )}
     >

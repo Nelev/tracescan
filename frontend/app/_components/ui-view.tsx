@@ -73,10 +73,13 @@ export function UiMessages({ messages }: { messages: UiMessage[] }) {
       <ol
         role="log"
         aria-label="Messages from the run"
-        className="flex flex-col gap-3 p-4"
+        className="flex flex-col gap-(--message-gap) p-4"
       >
         {messages.map((message) => (
-          <li key={message.id}>
+          <li
+            key={message.id}
+            className="ai-context rounded-r-lg py-2 pr-2 pl-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300"
+          >
             <Message message={message} />
           </li>
         ))}

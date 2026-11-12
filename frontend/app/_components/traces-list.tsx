@@ -158,7 +158,7 @@ export function TracesList() {
           </Button>
         </div>
       </div>
-      <div className="relative overflow-x-auto rounded-xl border bg-card">
+      <div className="surface relative overflow-x-auto rounded-xl border">
         {status === "error" && (
           <p role="alert" className="type-body px-4 pt-4 text-destructive">
             Could not load the traces. Check that the backend is running, then

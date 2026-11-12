@@ -58,11 +58,14 @@ export function ServerStatus() {
   return (
     <output
       className={cn(
-        "type-h4 inline-flex h-7 items-center gap-2 border px-3 text-current",
+        "type-h4 inline-flex h-7 items-center gap-2 rounded-full border px-3 text-current",
         box,
       )}
     >
-      <span className={cn("inline-flex size-2", dot)} aria-hidden="true" />
+      <span
+        className={cn("inline-flex size-2 rounded-full", dot)}
+        aria-hidden="true"
+      />
       {label}
     </output>
   );

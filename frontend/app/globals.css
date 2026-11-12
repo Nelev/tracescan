@@ -5,9 +5,9 @@
    draw the part of a server UI spec that ui-parts.tsx does not, are found here. */
 @source "../node_modules/@json-render/shadcn/dist/*.mjs";
 
-/* Light and dark follow the system setting: the tokens below switch under the same media query,
-   so shadcn's `dark:` variants and our tokens always agree. */
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* Dark only (Dark Mode OLED): the app never draws a light theme, so shadcn's `dark:` variants
+   always apply and agree with the tokens below. */
+@custom-variant dark (&:where(:root, :root *));
 
 @theme inline {
   --color-background: var(--background);
@@ -45,25 +45,35 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  /* Swiss style: no elevation. Layers are told apart by a hairline and a surface step, so the
-     whole shadow scale (ours and the json-render components') is flat. */
-  --shadow-2xs: 0 0 #0000;
-  --shadow-xs: 0 0 #0000;
-  --shadow-sm: 0 0 #0000;
-  --shadow-md: 0 0 #0000;
-  --shadow-lg: 0 0 #0000;
-  --shadow-xl: 0 0 #0000;
-  --shadow-2xl: 0 0 #0000;
+  --color-primary-hover: var(--primary-hover);
+  --color-sidebar: var(--sidebar);
+  --color-ai-surface: var(--ai-surface);
+  /* OLED: shadows do not show on black, so depth is a surface step, a faint light rim on what
+     floats, and a soft glow on the accent (`shadow-glow`). The json-render components' shadow-*
+     classes pick up the same scale. */
+  --shadow-glow: var(--glow-primary);
+  --shadow-2xs: var(--elevation-0);
+  --shadow-xs: var(--elevation-0);
+  --shadow-sm: var(--elevation-1);
+  --shadow-md: var(--elevation-2);
+  --shadow-lg: var(--elevation-3);
+  --shadow-xl: var(--elevation-3);
+  --shadow-2xl: var(--elevation-3);
   /* Motion: one duration and easing for every state change (hover, press, open). */
   --default-transition-duration: 150ms;
   --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /*
- * Design system: Minimalism and Swiss style
+ * Design system: Dark Mode (OLED)
  *
- * Grid, hairlines, flush type and one ink. Square corners (--radius 0), no shadows, no gradients
- * or textures; hierarchy comes from size, weight and space, not from color or depth.
+ * Dark only. A true black page (OLED pixels off) with slate-tinted panels one step above it, text
+ * in a dimmed off-white (low white emission), one indigo accent, and a near-white focus ring.
+ * Depth is a surface step and a hairline, never a drop shadow; the accent may carry a soft glow
+ * (`shadow-glow`) on hover and on live marks. What the agent wrote (the console's messages, a
+ * suggested fix) reads as a context card: the `ai-surface` tint with a left accent line. Motion
+ * is functional only (typing dots, a short reveal), still under prefers-reduced-motion.
+ * Rounded corners (--radius 0.75rem), pills for chips and badges.
  *
  * Type: four sizes. Weights: 400 body, 500 emphasis and small headings, 600 for h1 and h2.
  * Use these, not text-xs/lg/3xl.
@@ -74,13 +84,17 @@
  *   body 14/22 400  paragraphs and log text
  *
  * Color roles, one job each:
- *   foreground        ink                   muted-foreground  secondary text, overlines
- *   muted < background = card < popover   surfaces (light: inset gray, white, white, white)
+ *   foreground        dimmed off-white ink  muted-foreground  secondary text, overlines
+ *   background        true black            sidebar           the nav rail, black like the page
+ *   card / popover    panels / what floats over content, one and two steps above black
+ *   muted             an inset well inside a panel
+ *   ai-surface        what the agent wrote: console messages, the suggested fix
  *   border            hairlines between regions   rule  the strong line under a heading or axis
- *   input             control outlines (3:1 against the page)
+ *   input             control outlines (3:1 against any surface)
+ *   ring              the focus ring: near white, the brightest thing on the page
  *   hover / track     a row or button under the pointer / the empty part of a bar
- *   primary           the ink itself (black on light, white on dark): actions, focus, selection,
- *                     key metric; the interface has no decorative hue
+ *   primary           the one accent, indigo: actions, selection, the AI's marks, chart bars;
+ *                     primary-hover is a filled action under the pointer, glow-primary its glow
  *   info / warning / success / destructive / stopped   status only, never decoration (chip.tsx);
  *   on small marks (chips, icons, counts, a thin stripe), never as a large border or fill:
  *     info         under way, nothing to do
@@ -89,9 +103,9 @@
  *     stopped      cut short by choice (cancelled, aborted)
  *     a status that is nothing (idle) is muted-foreground
  *
- * Contrast (WCAG, measured on the page and on muted): light: foreground 19.4, muted-foreground
- * 7.1, every status color at least 4.9, input 3.9. Dark: foreground 17.5, muted-foreground 7.7,
- * every status color at least 7.0, input 3.5.
+ * Contrast (WCAG, the lowest over background, card, popover, muted, ai-surface, secondary and
+ * accent): foreground 13.1, muted-foreground 6.0, primary 7.0, every status color at least 5.9,
+ * input 3.6, ring 14.7, ink on primary 8.8 (on primary-hover 11.0).
  */
 @utility type-h1 {
   font-size: 1.75rem;
@@ -129,66 +143,81 @@
   font-weight: 400;
 }
 
-:root {
-  color-scheme: light;
-  --radius: 0rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.16 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.16 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0 0);
-  --primary: oklch(0.16 0 0);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.95 0 0);
-  --secondary-foreground: oklch(0.16 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.46 0 0);
-  --accent: oklch(0.95 0 0);
-  --accent-foreground: oklch(0.16 0 0);
-  --border: oklch(0.89 0 0);
-  --rule: oklch(0.16 0 0);
-  --input: oklch(0.6 0 0);
-  --ring: oklch(0.16 0 0);
-  --hover: oklch(0.16 0 0 / 5%);
-  --track: oklch(0.16 0 0 / 8%);
-  --destructive: oklch(0.53 0.19 27);
-  --success: oklch(0.5 0.12 155);
-  --info: oklch(0.5 0.09 235);
-  --warning: oklch(0.52 0.11 70);
-  --stopped: oklch(0.54 0.15 45);
+/* A panel: the card on a hairline (the element's own `border`) and the faintest elevation. */
+@utility surface {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--elevation-1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --background: oklch(0.14 0 0);
-    --foreground: oklch(0.97 0 0);
-    --card: oklch(0.17 0 0);
-    --card-foreground: oklch(0.97 0 0);
-    --popover: oklch(0.2 0 0);
-    --popover-foreground: oklch(0.97 0 0);
-    --primary: oklch(0.97 0 0);
-    --primary-foreground: oklch(0.14 0 0);
-    --secondary: oklch(0.24 0 0);
-    --secondary-foreground: oklch(0.97 0 0);
-    --muted: oklch(0.12 0 0);
-    --muted-foreground: oklch(0.72 0 0);
-    --accent: oklch(0.24 0 0);
-    --accent-foreground: oklch(0.97 0 0);
-    --border: oklch(0.29 0 0);
-    --rule: oklch(0.97 0 0);
-    --input: oklch(0.52 0 0);
-    --ring: oklch(0.97 0 0);
-    --hover: oklch(1 0 0 / 6%);
-    --track: oklch(1 0 0 / 10%);
-    /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
-    --destructive: oklch(0.71 0.14 22);
-    --success: oklch(0.77 0.11 155);
-    --info: oklch(0.78 0.08 225);
-    --warning: oklch(0.82 0.1 78);
-    --stopped: oklch(0.76 0.1 52);
+/* What floats over content: menus, tooltips, sticky bars. */
+@utility surface-raised {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--elevation-2);
+}
+
+/* What the agent wrote, as a context card: the AI tint and a left accent line. */
+@utility ai-context {
+  background-color: var(--ai-surface);
+  border-left: 2px solid var(--primary);
+}
+
+/* The typing indicator: three dots that rise in turn while the agent works (typing-dots.tsx). */
+@utility typing-dot {
+  width: var(--typing-dot-size);
+  height: var(--typing-dot-size);
+  border-radius: 9999px;
+  background-color: currentColor;
+  animation: typing 1.2s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    opacity: 0.7;
   }
+}
+
+:root {
+  color-scheme: dark;
+  --radius: 0.75rem;
+  --background: oklch(0 0 0);
+  --foreground: oklch(0.93 0.008 265);
+  --card: oklch(0.16 0.008 265);
+  --card-foreground: oklch(0.93 0.008 265);
+  --popover: oklch(0.2 0.01 265);
+  --popover-foreground: oklch(0.93 0.008 265);
+  --sidebar: oklch(0 0 0);
+  --primary: oklch(0.75 0.14 277);
+  --primary-hover: oklch(0.81 0.11 277);
+  --primary-foreground: oklch(0.12 0.02 277);
+  --secondary: oklch(0.23 0.01 265);
+  --secondary-foreground: oklch(0.93 0.008 265);
+  --muted: oklch(0.11 0.006 265);
+  --muted-foreground: oklch(0.7 0.015 265);
+  --accent: oklch(0.25 0.03 277);
+  --accent-foreground: oklch(0.93 0.008 265);
+  --ai-surface: oklch(0.19 0.03 277);
+  --border: oklch(0.3 0.01 265);
+  --rule: oklch(0.7 0.015 265);
+  --input: oklch(0.57 0.01 265);
+  --ring: oklch(0.97 0 0);
+  --hover: oklch(1 0 0 / 6%);
+  --track: oklch(1 0 0 / 10%);
+  /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
+  --destructive: oklch(0.71 0.14 22);
+  --success: oklch(0.77 0.11 155);
+  --info: oklch(0.78 0.08 225);
+  --warning: oklch(0.82 0.1 78);
+  --stopped: oklch(0.76 0.1 52);
+  --elevation-0: 0 0 #0000;
+  --elevation-1: 0 0 #0000;
+  --elevation-2:
+    0 0 0 1px oklch(1 0 0 / 6%), 0 16px 40px -12px oklch(0 0 0 / 90%);
+  --elevation-3:
+    0 0 0 1px oklch(1 0 0 / 8%), 0 24px 56px -16px oklch(0 0 0 / 95%);
+  --glow-primary: 0 0 16px -2px oklch(0.75 0.14 277 / 45%);
+  /* The agent's messages and its typing indicator. */
+  --message-gap: 1rem;
+  --typing-dot-size: 0.375rem;
 }
 
 @layer base {
@@ -203,6 +232,9 @@
   }
   body {
     @apply bg-background text-foreground type-body;
+  }
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 25%, transparent);
   }
   /* The body text style goes on <body>, not <html>: on <html> its 0.875rem would become the
      root size, so every rem (type sizes, spacing, control heights) would shrink by 1/8. */
@@ -233,5 +265,18 @@
   }
   h4 {
     @apply type-h4;
+  }
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-35%);
+    opacity: 1;
   }
 }
