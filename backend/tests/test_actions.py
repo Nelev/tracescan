@@ -1,13 +1,14 @@
-"""The dry-run writer and the apply_actions node, on a temporary directory."""
+"""The dry-run writer and the apply_actions node, on a temporary directory. The GitHub writer
+has its own tests (test_github.py)."""
 
 import json
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from langgraph.runtime import Runtime
+from langgraph.runtime import ExecutionInfo, Runtime
 
-from agent.actions import REGRESSION_FILE, require_dry_run, write_dry_run
+from agent.actions import REGRESSION_FILE, write_dry_run
 from agent.context import TraceContext
 from agent.nodes.apply_actions import apply_actions
 from agent.schemas import Proposal, RegressionCase, SpanRef
@@ -77,15 +78,11 @@ def test_a_cluster_id_that_is_not_a_safe_file_name_is_refused_before_any_write(
     assert files_under(tmp_path) == []  # nothing in the directory, and nothing escaped it
 
 
-def test_only_a_dry_run_is_allowed_until_the_real_writers_exist():
-    require_dry_run(True)
-    with pytest.raises(NotImplementedError):
-        require_dry_run(False)
-
-
-def runtime(tmp_path: Path, *, dry_run: bool = True) -> Runtime[TraceContext]:
-    context = replace(fake_context(FakeTraces()), dry_run=dry_run, out_dir=tmp_path)
-    return Runtime(context=context)
+def runtime(tmp_path: Path, *, dry_run: bool = True, **context) -> Runtime[TraceContext]:
+    """A node's runtime on thread `run-1`, the way a run with a checkpointer gives it."""
+    run = replace(fake_context(FakeTraces()), dry_run=dry_run, out_dir=tmp_path, **context)
+    info = ExecutionInfo(checkpoint_id="", checkpoint_ns="", task_id="", thread_id="run-1")
+    return Runtime(context=run, execution_info=info)
 
 
 def state(decisions: dict) -> TriageState:
@@ -97,13 +94,17 @@ def state(decisions: dict) -> TriageState:
     }
 
 
-def test_the_node_writes_only_the_approved_proposals(tmp_path):
-    result = apply_actions(state({"c0": "reject", "c1": "approve"}), runtime(tmp_path))
+@pytest.mark.anyio
+async def test_the_node_writes_only_the_approved_proposals(tmp_path):
+    result = await apply_actions(state({"c0": "reject", "c1": "approve"}), runtime(tmp_path))
     assert files_under(tmp_path) == ["issues/c1.md", REGRESSION_FILE]
     assert result["actions_log"][0] == "[dry-run] wrote issues/c1.md"
 
 
-def test_the_node_refuses_to_run_with_dry_run_off_and_writes_nothing(tmp_path):
-    with pytest.raises(NotImplementedError):
-        apply_actions(state({"c0": "approve", "c1": "approve"}), runtime(tmp_path, dry_run=False))
+@pytest.mark.anyio
+async def test_the_node_refuses_dry_run_off_without_github_and_writes_nothing(tmp_path):
+    with pytest.raises(RuntimeError):
+        await apply_actions(
+            state({"c0": "approve", "c1": "approve"}), runtime(tmp_path, dry_run=False)
+        )
     assert files_under(tmp_path) == []

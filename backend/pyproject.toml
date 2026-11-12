@@ -9,6 +9,8 @@ dependencies = [
     "fastapi[standard]",
     "fastembed>=0.9.1",
     "fastmcp>=3.4,<4",
+    "githubkit>=0.17.1",
+    "httpx2>=2.16.0",
     "langchain-mcp-adapters>=0.3.2",
     "langchain-openrouter>=0.2.9",
     "langchain-postgres==0.0.19",

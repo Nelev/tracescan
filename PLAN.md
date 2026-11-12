@@ -109,7 +109,7 @@ The trace reader is a small MCP server built with FastMCP on top of the trace st
 
 The human gate is LangGraph's `interrupt()` in the `human_review` node. The graph pauses with the list of proposals, the reviewer resumes it with an approve or reject per cluster, and only approved items reach `apply_actions`. If nothing is approved, the graph ends without writing anything.
 
-A `dry_run` setting makes `apply_actions` log what it would do instead of calling GitHub. The server sets it (an environment variable, on by default) and no request can turn it off. It is used for demos and eval runs.
+A `dry_run` setting makes `apply_actions` write local files (`out/issues/`) instead of calling GitHub. The server sets it (an environment variable, on by default) and no request can turn it off. It is used for demos and eval runs.
 
 ## Tracing stack
 
@@ -228,7 +228,7 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 
 - [ ] Replay-based reproducer in a sandbox
 - [ ] Known-issues memory with semantic matching
-- [ ] Real GitHub issue creation
+- [x] Real GitHub issue creation
 - [ ] MAST-Data agreement study
 - [ ] Scheduled daily triage run and a deployed demo
 - [ ] Next.js review dashboard over the FastAPI backend (runs list, run detail, trace viewer and review screen built; results page open)
@@ -292,7 +292,7 @@ Do these in order and stop where time runs out; each one is useful on its own.
 
 - [ ] **Build the reproducer.** Run Medas in Docker, replay each cluster's exemplar inputs three times, and set confirmed, flaky or unconfirmed. Failures that do not reproduce stay in the proposal as unconfirmed, which matters for intermittent timeouts. A reproduced failure confirms the symptom, not the proposed root cause, so the diagnosis keeps its own confidence. Done when an injected fault shows as confirmed and an intermittent timeout shows as flaky or unconfirmed instead of disappearing.
 - [ ] **Add known-issues memory.** Index cluster signatures in the store with embeddings and match by semantic search above a threshold. Done when a second run on the same fault updates the existing issue instead of creating a new one.
-- [ ] **Connect GitHub.** A fine-grained token scoped to a test repo; create issues and add comments for updates. Done when an approved proposal opens a real issue in the test repo.
+- [x] **Connect GitHub.** A fine-grained token scoped to a test repo; create issues and add comments for updates. Done when an approved proposal opens a real issue in the test repo. Issues are created (`agent/github.py`, githubkit, a private repo checked at startup, a hidden marker so a retried review opens no duplicate) and were checked against a real test repo; comments for updates wait for the known-issues memory, which is what knows an issue already exists.
 - [ ] **Run the MAST-Data study.** Write an adapter from MAST-Data traces to `TraceSummary`, run the diagnoser on the 21 MAST-Data-human traces, and compute accuracy and Cohen's kappa. Done when the numbers are in the results table next to the paper's.
 
 **Review UI (Next.js).** Built ahead of the stretch phase as one run-console page; the run detail and results pages are not scheduled yet.
@@ -335,7 +335,7 @@ The biggest risk is not the agent logic but producing enough realistic failing t
 | Building the tracing stack takes time | About 3–4 days less for stretch goals | Keep the store to three tables and the MCP server to three tools; real GitHub issues and MAST-Data stay stretch only |
 | Diagnoser overconfident on vague clusters | False positives filed | Require cited evidence; show verification status and confidence on every proposal; grade root cause, not symptom, in the eval |
 | Pydantic objects in checkpoints | LangGraph warns and will block later | Solved: state stores plain dicts. Keep it that way for new fields |
-| Proposal text echoes clinical content | The diagnoser sees span attributes, and its prose (cause, fix, evidence notes) goes into the issue body | Regression cases and evidence carry ids only; the run stream sends each proposal, issue text included, to the browser of whoever runs the triage and nothing logs it; dry run by default and the human review gate come before any write; add a PII scan of proposal text before real GitHub issues |
+| Proposal text echoes clinical content | The diagnoser sees span attributes, and its prose (cause, fix, evidence notes) goes into the issue body | Regression cases and evidence carry ids only; the run stream sends each proposal, issue text included, to the browser of whoever runs the triage and nothing logs it; dry run by default and the human review gate come before any write; real issues go only to a private repo (checked at startup). A PII scan of proposal text is still not built |
 | LLM cost of triage runs | Budget overrun during eval | Clustering in code; LLM calls only per cluster, not per trace; the one exception, unclustered failures, is not capped yet (add a per-run cap if a real run shows too many); each cluster has a budget of attempts, tokens and cost |
 | Look-alike failures merge, or one cause splits | Wrong or duplicate diagnoses | Embed a cleaned summary; check purity and cause separation against the injected faults before adding any complexity |
 | Rare failures lost as noise | A real issue never reaches the reviewer | Keep `unclustered` and diagnose each one |

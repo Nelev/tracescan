@@ -6,7 +6,7 @@ It is the AI Engineering capstone. The first target app is **Medas**, a clinicia
 
 ## Status
 
-The pipeline runs end to end, on synthetic traces and on real Medas traffic, as a dry run.
+The pipeline runs end to end, on synthetic traces and on real Medas traffic. It is a dry run by default; with `DRY_RUN` off, approved proposals become GitHub issues in one private repo.
 
 | Part | State |
 | --- | --- |
@@ -14,7 +14,7 @@ The pipeline runs end to end, on synthetic traces and on real Medas traffic, as 
 | Trace MCP server (read-only, sanitized, budgeted) | Working, over the Postgres reader |
 | Graph: collect, judge, cluster, diagnose, draft, review, apply | Working |
 | Graph: `reproduce_failure`, `match_known_issues` | Not built, not in the graph |
-| Writes | Dry run only: local files under `backend/out/`. The GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
+| Writes | Dry run by default: local files under `backend/out/`. With `DRY_RUN` off: one GitHub issue per approved proposal in a private repo, plus the regression cases in the local JSONL. No comments on earlier issues yet, and no eval-dataset writer beyond that file |
 | Run console (Next.js) | Working: start and watch a run, list runs, open a run, browse traces, review proposals |
 | Medas instrumentation | Working, in the Medas repo: one trace per agent run, no patient text on any span |
 | Eval on seeded traces (`backend/eval/`) | Working, with a control day of no faults; the trace judge is scored too. Results below |
@@ -56,6 +56,7 @@ flowchart LR
     ui["Run console<br/>Next.js"]
     llm["OpenRouter<br/>judge, diagnoser,<br/>UI spec models"]
     out[["out/issues/*.md<br/>out/regression_cases.jsonl"]]
+    gh["GitHub issues<br/>private repo"]
 
     sdk -- "OTLP/HTTP protobuf<br/>POST /v1/traces" --> collector
     collector -- "INSERT … ON CONFLICT DO NOTHING" --> spans
@@ -67,6 +68,7 @@ flowchart LR
     agentgraph -- "checkpointer" --> cp
     runs --> apptables
     agentgraph -- "apply_actions (dry run)" --> out
+    agentgraph -- "apply_actions (DRY_RUN off)" --> gh
     ui -- "/api/* → /v1/*" --> api
     ui -- "/api/traces" --> browser
 ```
@@ -289,7 +291,7 @@ flowchart TD
     diagnose --> draft["draft_proposals<br/>issue + regression case per cluster"]
     draft --> review["human_review<br/>interrupt: the run pauses"]
     review -- "nothing approved" --> stop
-    review -- "at least one approve" --> apply["apply_actions<br/>dry run: local files"]
+    review -- "at least one approve" --> apply["apply_actions<br/>dry run: local files<br/>else: GitHub issues"]
     apply --> stop
 
     classDef llm fill:#1e3a8a,stroke:#60a5fa,color:#fff
@@ -316,7 +318,7 @@ Blue nodes call a model; the amber node waits for a person. `reproduce_failure` 
 
 **`human_review`** (`graph.py`) pauses the run with `interrupt({"cluster_ids": [...]})`, ids only, since the value is checkpointed and streamed. The run resumes on the same thread with `Command(resume={cluster_id: "approve" | "reject"})`, one decision per proposal. Nothing approved: the run ends without writing.
 
-**`apply_actions`** (`nodes/apply_actions.py`, `actions.py`) is the only node that writes, and only approved proposals. As a dry run it writes `out/issues/<cluster_id>.md` and appends each regression case as one JSON line to `out/regression_cases.jsonl`, and returns the paths as `actions_log`. With `dry_run` off it raises before any write, because the real writers do not exist.
+**`apply_actions`** (`nodes/apply_actions.py`, `actions.py`) is the only node that writes, and only approved proposals. As a dry run it writes `out/issues/<cluster_id>.md` and appends each regression case as one JSON line to `out/regression_cases.jsonl`, and returns the paths as `actions_log`. With `dry_run` off it opens one GitHub issue per approved proposal (`agent/github.py`, on [githubkit](https://github.com/yanyongyu/githubkit)), one at a time, with the label `tracescan`, then appends the regression cases to the same file; `actions_log` then holds the issue links. Each issue body ends with a hidden `<!-- tracescan run=<run id> cluster=<cluster id> -->` line, and the repo's `tracescan` issues are read before anything is opened, so a review resubmitted after a GitHub error opens only the issues still missing.
 
 ### State and context
 
@@ -332,9 +334,9 @@ Blue nodes call a model; the amber node waits for a person. `reproduce_failure` 
 | `diagnoses`, `diagnosis_failures`, `model_usage` | `diagnose_cluster` (append) | One diagnosis per cluster; clusters that failed; spend per cluster |
 | `proposals` | `draft_proposals` | `Proposal` dicts |
 | `decisions` | `human_review` | Cluster id to `approve` or `reject` |
-| `actions_log` | `apply_actions` | Paths written, relative to the output folder |
+| `actions_log` | `apply_actions` | Paths written, relative to the output folder, and the links of the issues opened |
 
-Per-run resources are not in state. They travel in `TraceContext` (`agent/context.py`), passed at invoke time: the trace session, the embedder, the diagnoser's and the judge's chat models, the diagnose semaphore, `dry_run` and the output folder.
+Per-run resources are not in state. They travel in `TraceContext` (`agent/context.py`), passed at invoke time: the trace session, the embedder, the diagnoser's and the judge's chat models, the diagnose semaphore, `dry_run`, the GitHub writer (or none) and the output folder.
 
 ## How failures become clusters
 
@@ -439,7 +441,7 @@ flowchart LR
     subgraph writes["5 · Writes"]
         e1["human review<br/>interrupt"]
         e2["one decision per<br/>proposal, row lock"]
-        e3["dry run only"]
+        e3["dry run by default,<br/>private repo only"]
         e4["safe file names"]
     end
     access --> calls --> answers --> failures --> writes
@@ -493,7 +495,9 @@ A judge or diagnose branch catches its own errors. It records the trace id in `j
 | Complete decisions | `Runs.review` in `runs/service.py` | A partial review: exactly one `approve` or `reject` per proposal, otherwise `422` with the `missing` and `unknown` cluster ids |
 | One review at a time | `PostgresRunStore.reviewing` | Two reviews of one run: a row lock (`FOR UPDATE SKIP LOCKED`) makes the second get `409`, and the decisions and the new status commit together or not at all |
 | Approved only | `apply_actions` | Rejected proposals being written, or becoming "known" |
-| Dry run only | `require_dry_run` in `agent/actions.py` | Real writes before the writers exist: the app refuses to start with `DRY_RUN` off, and `apply_actions` raises before writing. No request can change the setting |
+| Dry run by default | `DRY_RUN`, read once in `main.py` | Writes to GitHub nobody configured: on unless set off, and off needs both `GITHUB_REPO` and `GITHUB_TOKEN` or the app refuses to start. No request can change the setting |
+| Private repo only | `GitHubIssues.check` in `agent/github.py`, at startup | Clinical text in a public issue: the app refuses to start when `GITHUB_REPO` is public, since the issue body is the diagnoser's prose |
+| No duplicate issues | the hidden marker in each issue body | A review retried after a GitHub error opening the same issue twice |
 | Safe file names | `write_dry_run` | Path tricks: a cluster id that is not `[A-Za-z0-9_-]+` raises before anything is written |
 | Ids-only regression cases | `proposals.py` | Span text in the eval dataset: a regression case holds trace and span ids only |
 
@@ -536,9 +540,9 @@ The page reaches the backend through a Next rewrite (`/api/*` to `/v1/*`), becau
 - Trace access is read-only and goes through the MCP server only.
 - Span attributes reach a model only if their key is allowlisted.
 - All writes happen in `apply_actions`, and only for proposals a person approved.
-- `dry_run` is on by default and set by the server (`DRY_RUN`), never by a request.
+- `dry_run` is on by default and set by the server (`DRY_RUN`), never by a request. Off, issues go to one private repo, through a fine-grained token that can only read and write that repo's issues.
 - Logs carry exception types and argument hashes, never messages or content.
-- The issue text is the diagnoser's own prose. Nothing checks it for clinical content, so the human review is the gate; `backend/out/` is gitignored for the same reason.
+- The issue text is the diagnoser's own prose. Nothing checks it for clinical content, so the human review is the gate; `backend/out/` is gitignored and the GitHub repo must be private for the same reason.
 
 ## Running it
 
@@ -598,9 +602,21 @@ cd backend && uv run --env-file .env python -m scripts.seed_traces
 | `TRACE_JUDGE_MODEL` | no | The per-trace judge; default `anthropic/claude-haiku-5.5` |
 | `UI_SPEC_MODEL` | no | Default `anthropic/claude-haiku-5.5` |
 | `JUDGE_MODEL` | no | The eval's grader (not the trace judge); default `openai/gpt-6.1-sol` |
-| `DRY_RUN` | no | On by default. Off is refused at startup |
+| `DRY_RUN` | no | On by default. Off opens GitHub issues and needs the two below |
+| `GITHUB_REPO` | with `DRY_RUN` off | `owner/name` of a private repo, not its URL |
+| `GITHUB_TOKEN` | with `DRY_RUN` off | A fine-grained token with Issues read and write on that repo only |
 | `FASTEMBED_CACHE_PATH` | no | Where the embedding model is cached |
 | `BACKEND_URL` | no | For the frontend; default `http://localhost:8000` |
+
+### Opening GitHub issues
+
+To have approved proposals opened as issues instead of written to `backend/out/issues/`:
+
+1. Create a private repo, and in it a label named `tracescan`.
+2. Create a fine-grained token at GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens: repository access to that repo only, and **Issues: Read and write** (Metadata read-only comes with it).
+3. In `backend/.env`, set `DRY_RUN=false`, `GITHUB_REPO=<owner>/<repo>` and `GITHUB_TOKEN=<the token>`, then restart the backend. It refuses to start if the repo is public or the token cannot read it.
+
+Approve a finding and submit the review: the actions log under the review bar links each issue opened.
 
 ### The eval
 
@@ -663,7 +679,7 @@ cd frontend && npm run lint && npx tsc --noEmit && npm test && npm run build
 
 | Path | Content |
 | --- | --- |
-| `backend/agent/` | The graph, its nodes, the trace judge, clustering, the diagnoser's guards, the MCP client |
+| `backend/agent/` | The graph, its nodes, the trace judge, clustering, the diagnoser's guards, the MCP client, the GitHub writer |
 | `backend/trace_store/` | Trace contracts, Postgres reader, sanitizer, MCP server, guard |
 | `backend/runs/` | Run lifecycle and the run store |
 | `backend/api/` | The collector, the trace browser, the runs API and SSE stream, the UI spec call |

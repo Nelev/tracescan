@@ -1,7 +1,7 @@
 """
 TraceScan graph. Every node is real: human_review pauses the run with interrupt(), and
-apply_actions writes the approved proposals as a dry run. The reproducer and the known-issues
-match are not built, so they are not in the graph yet.
+apply_actions writes the approved proposals (local files in a dry run, GitHub issues otherwise).
+The reproducer and the known-issues match are not built, so they are not in the graph yet.
 
 Flow (score_trace runs once per trace and diagnose_cluster once per cluster, in parallel,
 through Send; the node after each fan-out runs once, when every branch is done):
