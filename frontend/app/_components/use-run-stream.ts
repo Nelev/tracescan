@@ -12,6 +12,7 @@ import {
   type UiMessage,
 } from "@/lib/events";
 import { foldProgress, type LiveProgress, NO_PROGRESS } from "@/lib/progress";
+import { startProblem } from "@/lib/review";
 import type { SseMessage } from "@/lib/sse";
 import { RUN_EVENTS, type RunRequest } from "@/lib/types";
 
@@ -231,15 +232,12 @@ export function useRunStream() {
         end("cancelled");
       } else if (err instanceof RunError) {
         // Only openRunStream throws RunError, so the run never started.
-        stop(
-          "failed",
-          "error",
-          err.status === null
-            ? "could not reach the backend: check that it is running"
-            : err.status === 401
-              ? "the run did not start: your session has ended, reload the page to sign in again"
-              : `the run did not start (HTTP ${err.status}): check that the backend is running, then its log`,
-        );
+        const problem = startProblem(err);
+        batch.push({
+          type: "line",
+          line: { label: "error", tone: "bad", text: problem },
+        });
+        end("failed", problem);
       } else {
         lost("the connection was interrupted");
       }

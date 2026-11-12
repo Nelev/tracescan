@@ -5,6 +5,7 @@ import {
   parseRunDetail,
   type ReviewResult,
   type RunDetail,
+  retryAfterSeconds,
 } from "./review";
 import { parseRunOverview, type RunOverview } from "./run-overview";
 import { parseRuns } from "./runs";
@@ -21,14 +22,26 @@ import type { RunRecord, RunRequest } from "./types";
 /**
  * A request the backend did not answer as expected. `status` is null when it could not be reached
  * at all. `unreadable`: it answered a 2xx, but not with what our backend sends, so whatever the
- * request asked for may well have been done.
+ * request asked for may well have been done. `retryAfterS`: the wait a 429 named, in seconds.
  */
 export class RunError extends Error {
+  readonly unreadable: boolean;
+  readonly retryAfterS: number | null;
+
   constructor(
     readonly status: number | null,
-    readonly unreadable = false,
+    { unreadable = false, retryAfterS = null as number | null } = {},
   ) {
     super(status === null ? "unreachable" : `http ${status}`);
+    this.unreadable = unreadable;
+    this.retryAfterS = retryAfterS;
+  }
+
+  /** A response the backend refused: its status, and the wait it named if it gave one. */
+  static refused(res: Response): RunError {
+    return new RunError(res.status, {
+      retryAfterS: retryAfterSeconds(res.headers.get("retry-after")),
+    });
   }
 }
 
@@ -64,7 +77,7 @@ export async function openRunStream(
     if (signal.aborted) throw err;
     throw new RunError(null);
   }
-  if (!res.ok || !res.body) throw new RunError(res.status);
+  if (!res.ok || !res.body) throw RunError.refused(res);
   return {
     status: res.status,
     contentType: res.headers.get("content-type") ?? "",
@@ -119,16 +132,16 @@ async function fetchParsed<T>(
     if (aborted()) throw err;
     throw new RunError(null);
   }
-  if (!res.ok) throw new RunError(res.status);
+  if (!res.ok) throw RunError.refused(res);
   let body: unknown;
   try {
     body = await res.json();
   } catch (err) {
     if (aborted()) throw err;
-    throw new RunError(res.status, true); // not JSON: not our backend
+    throw new RunError(res.status, { unreadable: true }); // not JSON: not our backend
   }
   const parsed = parse(body);
-  if (parsed === null) throw new RunError(res.status, true);
+  if (parsed === null) throw new RunError(res.status, { unreadable: true });
   return { value: parsed, headers: res.headers };
 }
 

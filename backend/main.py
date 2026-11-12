@@ -6,6 +6,8 @@ from functools import partial
 from fastapi import Depends, FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from agent.actions import require_dry_run
 from agent.context import ClosedTraces, TraceContext
@@ -13,6 +15,7 @@ from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
 from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model, build_trace_judge_model, build_ui_spec_model
+from api.rate_limit import limiter
 from api.runs import router as runs_router
 from api.trace_browser import router as trace_browser_router
 from api.traces import router as traces_router
@@ -84,6 +87,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 
 app = FastAPI(title="TraceScan", lifespan=lifespan)
+# The run limit (api.rate_limit). Set here, not in the lifespan, so ASGITransport tests get it too.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # pyright: ignore[reportArgumentType]
 # Every route needs a Clerk session token except these two: /health, and the collector, which
 # Medas's exporter calls with no session. tests/test_auth.py walks app.routes, so a route added
 # without a session check fails it unless it is named public there too. A router's dependencies

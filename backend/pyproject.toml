@@ -17,6 +17,7 @@ dependencies = [
     "opentelemetry-proto>=1.45.2",
     "psycopg[binary]>=3.3.8",
     "scikit-learn>=1.9.1",
+    "slowapi>=0.1.10",
     "sqlalchemy[asyncio]>=2.1.8",
     "uvicorn[standard]",
 ]
