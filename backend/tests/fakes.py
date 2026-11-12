@@ -19,15 +19,8 @@ from agent.context import TraceAccess, TraceContext
 from agent.evidence import walk
 from agent.judge import fallback_span
 from agent.schemas import Decision, Diagnosis, Evidence, TraceVerdict
-from runs.store import (
-    CLAIMABLE,
-    ENDED,
-    NotClaimable,
-    ReviewRecord,
-    RunCounts,
-    RunRecord,
-    StoredStatus,
-)
+from runs.schemas import ReviewRecord, RunCounts, RunRecord, StoredStatus
+from runs.store import CLAIMABLE, ENDED, NotClaimable
 from trace_store.models import SpanNode, TraceQuery, TraceSummary
 from trace_store.reader import build_tree
 
@@ -35,9 +28,9 @@ from trace_store.reader import build_tree
 class HashingEmbedder:
     """Offline stand-in for the real embedder: character n-gram hashing, fully deterministic."""
 
-    def __init__(self) -> None:
+    def __init__(self, dimensions: int = 2**12) -> None:
         self._vectorizer = HashingVectorizer(
-            analyzer="char_wb", ngram_range=(3, 5), n_features=2**12, alternate_sign=False
+            analyzer="char_wb", ngram_range=(3, 5), n_features=dimensions, alternate_sign=False
         )
 
     def embed(self, texts: list[str]) -> np.ndarray:

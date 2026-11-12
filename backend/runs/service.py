@@ -13,7 +13,7 @@ that only the store knows a run failed or was aborted.
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -23,100 +23,33 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.stream import AsyncGraphRunStream
 from langgraph.types import Command, StateSnapshot
-from pydantic import BaseModel
 
 from agent.context import ClosedTraces, TraceAccess, TraceContext
 from agent.model_guard import Spent, spent_by
-from agent.progress import ProgressEvent, progress_events
-from agent.schemas import ClusterMap, ClusterMethod, Decision, Proposal, StoredDiagnosis
+from agent.progress import progress_events
+from agent.schemas import Decision, Proposal, StoredDiagnosis
 from agent.state import TriageState
-from runs.store import NotClaimable, RunCounts, RunRecord, RunStore, StoredStatus
+from runs.healthy import HealthySpans
+from runs.schemas import (
+    ClusterDetail,
+    Ended,
+    Failed,
+    Progress,
+    RunCounts,
+    RunDetail,
+    RunEvent,
+    RunRecord,
+    RunState,
+    RunStatus,
+    RunSummary,
+    StartedRun,
+    StoredStatus,
+)
+from runs.store import NotClaimable, RunStore
 
 logger = logging.getLogger(__name__)
 
-# Where a run stands. The checkpoint can tell that it waits for review or reached its end;
-# `failed` and `aborted` come from the run store. The store's statuses are the same five.
-RunState = StoredStatus
-
 OpenTraces = Callable[[], AbstractAsyncContextManager[TraceAccess]]
-
-
-class RunSummary(BaseModel):
-    """Counts and the actions log. The only view of a run's state besides its proposals."""
-
-    run_id: str  # the graph's thread_id
-    traces: int  # in the window, up to MAX_JUDGED_TRACES; each is judged
-    judged: int  # traces the judge gave a verdict on
-    judge_failures: int  # traces whose judging failed; they are not clustered
-    failed_traces: int
-    clusters: int
-    unclustered: int  # failures that fit no cluster; each is diagnosed on its own
-    diagnoses: int
-    diagnosis_failures: int  # clusters whose diagnosis failed; reported, not dropped
-    proposals: int
-    actions_log: list[str]
-
-
-class RunStatus(BaseModel):
-    """Where a run stands, read from its checkpoint.
-
-    The proposals' issue text is the diagnoser's own prose, so it can hold clinical content: it
-    goes to whoever reviews the run, and is never logged.
-    """
-
-    status: RunState
-    summary: RunSummary
-    proposals: list[Proposal]
-
-
-class ClusterDetail(BaseModel):
-    """One cluster of failed traces, and what the run made of it."""
-
-    cluster_id: str
-    signature: str  # names only: the failing span and its error type or check
-    method: ClusterMethod
-    trace_ids: list[str]
-    exemplar_trace_ids: list[str]  # the ones the diagnoser was shown
-    diagnosis: StoredDiagnosis | None  # None until diagnosed, or when it failed
-    diagnosis_failed: bool
-    usage: Spent  # over all its attempts, failed ones included
-    verification: str  # unverified until the reproducer exists
-    decision: Decision | None  # the reviewer's, once the run is reviewed
-
-
-class RunDetail(BaseModel):
-    """What a run found, cluster by cluster: ids, signatures, diagnoses, spend and decisions.
-
-    No span content: a trace is an id here, and the UI reads it from the trace store. The
-    diagnoses' prose is the model's own, so it goes where the proposals go and is never logged.
-    """
-
-    status: RunState
-    summary: RunSummary
-    clusters: list[ClusterDetail]  # a failure that fit no cluster is an `isolated` one
-    # The failures in 3D, for the run page's map. None before clustering, for a run too small
-    # to embed, and for runs clustered before the map existed.
-    cluster_map: ClusterMap | None = None
-
-
-@dataclass(frozen=True)
-class Progress:
-    data: ProgressEvent  # allowlisted by agent.progress: ids and counts only
-
-
-@dataclass(frozen=True)
-class Ended:
-    """The last event of a run that did not fail: it waits for review, or had nothing to review."""
-
-    status: RunStatus
-
-
-@dataclass(frozen=True)
-class Failed:
-    """The last event of a run that failed. No detail: the cause could carry span contents."""
-
-
-RunEvent = Progress | Ended | Failed
 
 
 # What `Runs` raises. None of them carries state or an underlying message.
@@ -141,12 +74,6 @@ class IncompleteDecisions(Exception):
         super().__init__("the decisions do not match the proposals")
         self.missing = missing  # cluster ids with no decision
         self.unknown = unknown  # decided cluster ids the run has no proposal for
-
-
-@dataclass(frozen=True)
-class StartedRun:
-    run_id: str
-    events: AsyncIterator[RunEvent]  # Progress*, then exactly one Ended or Failed
 
 
 def _config(run_id: str) -> RunnableConfig:
@@ -246,6 +173,7 @@ class Runs:
         context: TraceContext,
         open_traces: OpenTraces,
         store: RunStore,
+        healthy: HealthySpans | None = None,
     ) -> None:
         self._graph = graph  # must have a checkpointer: status and review read it
         # What every run segment gets, set once by the server so no request reaches it. Its
@@ -253,6 +181,7 @@ class Runs:
         self._context = context
         self._open_traces = open_traces
         self._store = store
+        self._healthy = healthy  # None: the judge's healthy picks are not saved
 
     async def _mark(
         self, run_id: str, status: StoredStatus, counts: RunCounts | None = None
@@ -262,6 +191,15 @@ class Runs:
             await self._store.set_status(run_id, status, counts)
         except Exception as exc:
             logger.error("run %s: status %s not recorded: %s", run_id, status, type(exc).__name__)
+
+    async def _save_healthy(self, run_id: str, values: Mapping) -> None:
+        """Store the judge's healthy picks. Best effort, like `_mark`: a run never fails on it."""
+        if self._healthy is None:
+            return
+        try:
+            await self._healthy.save(values["target_app"], values.get("verdicts", []))
+        except Exception as exc:
+            logger.error("run %s: healthy spans not saved: %s", run_id, type(exc).__name__)
 
     @asynccontextmanager
     async def start(
@@ -331,6 +269,7 @@ class Runs:
             return
         ended.append(status.status)
         await self._mark(run_id, status.status, _counts(status.summary))
+        await self._save_healthy(run_id, values)
         yield Ended(status)
 
     async def _find_snapshot(self, run_id: str) -> StateSnapshot | None:

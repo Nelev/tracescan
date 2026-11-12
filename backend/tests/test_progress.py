@@ -7,7 +7,8 @@ from typing import Any
 import pytest
 
 from agent.graph import build_graph
-from agent.progress import COUNTED_KEYS, ProgressEvent, progress_events
+from agent.progress import COUNTED_KEYS, progress_events
+from agent.schemas import ProgressEvent
 from agent.state import TriageState
 from tests.fakes import (
     DIAGNOSIS,

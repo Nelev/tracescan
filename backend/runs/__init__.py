@@ -2,22 +2,19 @@
 
 from agent.schemas import Decision
 from db.models import NAME_MAX
-from runs.service import (
+from runs.schemas import (
     Ended,
     Failed,
-    IncompleteDecisions,
-    NotWaitingForReview,
     Progress,
     RunDetail,
-    RunFailed,
-    RunNotFound,
-    Runs,
+    RunRecord,
     RunState,
     RunStatus,
     RunSummary,
     StartedRun,
 )
-from runs.store import PostgresRunStore, RunRecord
+from runs.service import IncompleteDecisions, NotWaitingForReview, RunFailed, RunNotFound, Runs
+from runs.store import PostgresRunStore
 
 __all__ = [
     "Decision",

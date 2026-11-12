@@ -8,9 +8,10 @@ read it only through `progress_events`, never by iterating the raw stream.
 
 from collections import Counter
 from collections.abc import AsyncIterator
-from typing import Literal, TypedDict
 
 from langgraph.stream import AsyncGraphRunStream, ProtocolEvent, StreamChannel, StreamTransformer
+
+from agent.schemas import ProgressEvent
 
 CHANNEL = "progress"
 
@@ -33,19 +34,6 @@ COUNTED_KEYS = (
     "proposals",
     "actions_log",
 )
-
-
-class ProgressEvent(TypedDict, total=False):
-    # node_paused: the node called interrupt() and waits for a resume (human_review).
-    # node_progress: another share of a COUNTED_NODES fan-out is done; counts {done, total}.
-    event: Literal["node_started", "node_finished", "node_failed", "node_paused", "node_progress"]
-    node: str
-    task_id: str
-    # Set on the branches of the diagnose fan-out, so the client can tell parallel tasks apart.
-    cluster_id: str
-    # False when a node finished but recorded a failure (a cluster whose diagnosis failed).
-    ok: bool
-    counts: dict[str, int]
 
 
 class ProgressTransformer(StreamTransformer):
