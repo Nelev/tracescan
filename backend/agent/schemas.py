@@ -162,6 +162,13 @@ class TraceVerdict(BaseModel):
             "trace does not show which. Null for a request that went fine."
         ),
     )
+    healthy_span_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For a request that went fine: up to 3 model, tool or retrieval spans that did their "
+            "work and whose result the request used. Empty for a failed request, or when unsure."
+        ),
+    )
 
 
 # How a failed trace's blamed span fared against the tree the judge was shown: valid at the first

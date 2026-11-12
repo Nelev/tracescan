@@ -118,10 +118,19 @@ def record_search(rng: Random) -> Step:
 UNAVAILABLE: Error = ("schema.AgentUnavailable", "the agent could not answer")
 
 
+# What a healthy request looks up. Every tool a fault breaks is here too, working, so a failed
+# step can be compared with the same step in a request that went fine: PubMed answers in
+# 1.5 to 4 s (a 1 s timeout is too tight for it), and an export takes milliseconds.
+HEALTHY_LOOKUPS: tuple[Callable[[Random], Step], ...] = (
+    record_search,
+    lambda rng: tool(rng, "search_medlineplus", ms=rng.randint(200, 900)),
+    lambda rng: tool(rng, "search_pubmed", ms=rng.randint(1500, 4000)),
+    lambda rng: tool(rng, "export_conversation", ms=rng.randint(5, 40)),
+)
+
+
 def healthy(rng: Random) -> Step:
-    lookup = rng.choice(
-        [record_search(rng), tool(rng, "search_medlineplus", ms=rng.randint(200, 900))]
-    )
+    lookup = rng.choice(HEALTHY_LOOKUPS)(rng)
     return request(rng, chat(rng), lookup, chat(rng))
 
 
@@ -221,7 +230,7 @@ def not_found(rng: Random) -> Step:
 
 # How many traces of each kind one run makes.
 COUNTS: dict[Callable[[Random], Step], int] = {
-    healthy: 8,
+    healthy: 12,
     source_timeout: 6,
     tool_arguments: 5,
     model_unavailable: 5,

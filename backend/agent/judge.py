@@ -8,6 +8,9 @@ The score is the model's; whether that counts as failed is the code's (`JUDGE_FA
 A failed trace must blame a span of the tree it was shown: if it does not, the model is asked once
 more with the valid ids, and if it still names an unknown span, or none, the code blames the
 deepest error span (the root when no span failed). A trace that did not fail blames nothing.
+
+A trace that went fine may name healthy spans, steps that worked, for the planned healthy-span
+store; `healthy_picks` keeps the ones that hold up.
 """
 
 from pathlib import Path
@@ -15,7 +18,7 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from agent.const import JUDGE_FAILED_MAX_SCORE
+from agent.const import JUDGE_FAILED_MAX_SCORE, MAX_HEALTHY_PICKS
 from agent.evidence import span_index, walk
 from agent.model_guard import Spent, structured_asker, trace_budget
 from agent.schemas import BlameCheck, TraceVerdict
@@ -69,6 +72,13 @@ def failed_summary(trace: dict, verdict: dict) -> dict:
         "min_score": verdict["score"],
         "signature": f"{step} {error}" if error else step,
     }
+
+
+def healthy_picks(tree: SpanNode, picked: list[str]) -> list[str]:
+    """The judge's healthy picks that hold up: spans of the tree, not the root, not an error, each
+    once, the first MAX_HEALTHY_PICKS. A bad pick is dropped, never asked about again."""
+    ok = {span.span_id for _, span in walk(tree) if span.status != "error"} - {tree.span_id}
+    return [span_id for span_id in dict.fromkeys(picked) if span_id in ok][:MAX_HEALTHY_PICKS]
 
 
 def retry_message(blamed: str | None, valid: set[str]) -> str:
@@ -126,4 +136,6 @@ async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
         "blame_check": check,
         # Only a failure has one; a failed trace the model did not attribute is unclear.
         "attribution": (verdict.attribution or "unclear") if failed else None,
+        # Only a trace that went fine has examples of steps working.
+        "healthy_span_ids": [] if failed else healthy_picks(tree, verdict.healthy_span_ids),
     }

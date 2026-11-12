@@ -25,3 +25,4 @@ Answer with:
 - `score`: from 0.0 (the request failed its user) to 1.0 (it went fine).
 - `blamed_span_id`: for a failed request, the id of the span where the failure started, which must be a span id of the trace shown. The cause, not where it surfaced: an error usually marks every span up to the root, so prefer the deepest span that explains it. Null for a request that went fine.
 - `attribution`: for a failed request, `app`, `external` or `unclear` as above. Null for a request that went fine.
+- `healthy_span_ids`: for a request that went fine, up to 3 ids of `chat`, `execute_tool` or `retrieval` spans that completed, returned something, and whose result the request used: examples of a step working. Never the root, a span with an error, or a step a retry had to redo. Empty for a failed request; an empty list is always a good answer.
