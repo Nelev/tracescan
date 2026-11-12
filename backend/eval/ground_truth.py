@@ -9,6 +9,11 @@ The first five faults are plain: each raises its own exception. The rest are the
 a look-alike (tight_timeout), two errors in one request (double_failure), a failure with no
 error (silent_no_hits) and one with no visible cause (unexplained). model_unavailable is one
 cause with two faces. NOT_FAULTS holds the errors that are not faults.
+
+Two kinds can be seeded apart and still share one cause (`same_cause_as`): double_failure is
+the provider outage of model_unavailable, met later in a request that also had a tolerated
+timeout. Grouping them is what a reviewer wants (one issue for the provider), so the scores
+that ask whether each fault got a cluster of its own count them as one fault (`cause_of`).
 """
 
 from pydantic import BaseModel, ConfigDict
@@ -25,6 +30,8 @@ class Fault(BaseModel):
     failing_span: str  # the name of the span the failure starts in, which good evidence cites
     # No span has an error status, so a reader that looks for errors never collects the trace.
     silent: bool = False
+    # The kind whose injected cause this one shares; the scores then count the two as one fault.
+    same_cause_as: str | None = None
 
 
 FAULTS: dict[str, Fault] = {
@@ -92,6 +99,7 @@ FAULTS: dict[str, Fault] = {
         ),
         symptom="A search_pubmed call times out and the request fails.",
         failing_span="chat openai/gpt-4.1-mini",
+        same_cause_as="model_unavailable",
     ),
     "silent_no_hits": Fault(
         category="retrieval_miss",
@@ -121,3 +129,10 @@ NOT_FAULTS: dict[str, str] = {
     "retried_ok": "A source refused one call for its rate limit; the retry worked and the request succeeded.",
     "not_found": "The user asked for a record that does not exist; the tool said so and the model told the user.",
 }
+
+
+def cause_of(kind: str) -> str:
+    """The fault a seeded kind counts as: the kind it shares its cause with, else itself.
+    A kind with no fault is returned as it is."""
+    fault = FAULTS.get(kind)
+    return fault.same_cause_as if fault and fault.same_cause_as else kind

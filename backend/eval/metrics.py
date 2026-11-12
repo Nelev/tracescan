@@ -3,7 +3,9 @@
 Run from backend/:  uv run python -m eval.metrics [out/eval/<file>.json]   (default: the newest)
 
 Pure code: no model and no database. Every cluster gets a majority kind, the seeded kind most
-of its traces are of, and the scores follow from that. A ratio is (how many, out of how many).
+of its traces are of, and the scores follow from that. Kinds that share an injected cause
+(`ground_truth.cause_of`) count as one fault there, so grouping them is not a merge; the trace
+judge's own scores stay per seeded kind. A ratio is (how many, out of how many).
 Whether a root cause is the right one takes a judge (eval/judge.py): its scores are added
 when the file has verdicts. The trace judge, which decides which traces failed before anything
 is clustered, is scored on its own against the kinds: how many faulty traces it caught, how many
@@ -18,19 +20,22 @@ from pathlib import Path
 from typing import Any
 
 from agent import actions
-from eval.ground_truth import FAULTS
+from eval.ground_truth import FAULTS, cause_of
 
 OUT_DIR = actions.OUT_DIR / "eval"  # where eval/run.py writes its results files
 
 
 def _mixes(result: dict[str, Any]) -> dict[str, Counter[str]]:
-    """Per cluster: how many of its traces are of each kind."""
+    """Per cluster: how many of its traces are of each fault (kinds sharing a cause as one)."""
     kinds = result["kinds"]
-    return {c["cluster_id"]: Counter(kinds[t] for t in c["trace_ids"]) for c in result["clusters"]}
+    return {
+        c["cluster_id"]: Counter(cause_of(kinds[t]) for t in c["trace_ids"])
+        for c in result["clusters"]
+    }
 
 
 def majority_kinds(result: dict[str, Any]) -> dict[str, str]:
-    """Per cluster: the kind most of its traces are of."""
+    """Per cluster: the fault most of its traces are of (see `cause_of`)."""
     return {cluster_id: mix.most_common(1)[0][0] for cluster_id, mix in _mixes(result).items()}
 
 
@@ -77,7 +82,7 @@ def score(result: dict[str, Any]) -> dict[str, Any]:
     mixes = _mixes(result)
     majority = {cluster_id: mix.most_common(1)[0][0] for cluster_id, mix in mixes.items()}
     expected = {c: FAULTS[kind].category for c, kind in majority.items() if kind in FAULTS}
-    seeded = Counter(kind for kind in kinds.values() if kind in FAULTS)
+    seeded = Counter(cause_of(kind) for kind in kinds.values() if kind in FAULTS)
 
     detected = {majority[d["cluster_id"]] for d in diagnoses} & set(seeded)
     # A diagnosis of a cluster with no fault is a false alarm, counted there and nowhere else.

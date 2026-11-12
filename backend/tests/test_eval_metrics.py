@@ -192,3 +192,21 @@ def test_on_a_control_day_every_cluster_is_a_false_alarm_and_there_is_nothing_to
     assert scores["detection"] == (0, 0) and scores["judge_recall"] == (0, 0)
     assert scores["judge_false_positives"] == (1, 4)
     assert scores["category_accuracy"] == (0, 0)  # a false alarm is not a wrong answer too
+
+
+def test_kinds_that_share_a_cause_count_as_one_fault_in_one_cluster():
+    shared = {
+        "kinds": {"m1": "model_unavailable", "m2": "model_unavailable", "d1": "double_failure"},
+        "failing_spans": {"m1": "sp_m1", "m2": "sp_m2", "d1": "sp_d1"},
+        "clusters": [cluster("c0", "m1", "m2", "d1")],
+        "diagnoses": [diagnosis("c0", "infra_error", ("d1", "sp_d1"))],
+        "model_usage": [{"calls": 1, "tokens": 100, "cost_usd": 0.01}],
+        "seconds": 1.0,
+    }
+
+    scores = score(shared)
+    assert scores["detection"] == (1, 1)
+    assert scores["purity"] == (3, 3)
+    assert scores["separation"] == (1, 1)
+    assert scores["rare_recall"] == (0, 0)  # three traces of the one fault: none is rare
+    assert scores["category_accuracy"] == (1, 1)
