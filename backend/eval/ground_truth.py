@@ -9,6 +9,9 @@ The first five faults are plain: each raises its own exception. The rest are the
 a look-alike (tight_timeout), two errors in one request (double_failure), a failure with no
 error (silent_no_hits) and one with no visible cause (unexplained). model_unavailable is one
 cause with two faces. NOT_FAULTS holds the errors that are not faults.
+
+A kind whose cause is another kind's names it in `same_cause_as`: grouping the two is one issue
+for one cause, so the clustering scores count them as one fault (`cause_of`).
 """
 
 from pydantic import BaseModel, ConfigDict
@@ -25,6 +28,8 @@ class Fault(BaseModel):
     failing_span: str  # the name of the span the failure starts in, which good evidence cites
     # No span has an error status, so a reader that looks for errors never collects the trace.
     silent: bool = False
+    # The kind whose injected cause this one shares; the clustering scores count both as that kind.
+    same_cause_as: str | None = None
 
 
 FAULTS: dict[str, Fault] = {
@@ -92,6 +97,7 @@ FAULTS: dict[str, Fault] = {
         ),
         symptom="A search_pubmed call times out and the request fails.",
         failing_span="chat openai/gpt-4.1-mini",
+        same_cause_as="model_unavailable",
     ),
     "silent_no_hits": Fault(
         category="retrieval_miss",
@@ -121,3 +127,9 @@ NOT_FAULTS: dict[str, str] = {
     "retried_ok": "A source refused one call for its rate limit; the retry worked and the request succeeded.",
     "not_found": "The user asked for a record that does not exist; the tool said so and the model told the user.",
 }
+
+
+def cause_of(kind: str) -> str:
+    """The kind a trace counts as in the clustering scores: its own, or the one it shares a cause with."""
+    fault = FAULTS.get(kind)
+    return (fault.same_cause_as or kind) if fault else kind

@@ -47,6 +47,10 @@ MIN_TRACES_FOR_HDBSCAN = 6
 # min_samples stays above min_cluster_size on purpose.
 MIN_CLUSTER_SIZE = 3  # also the size a step-and-error group needs to rescue noise into a cluster
 MIN_SAMPLES = 4
+# A trace HDBSCAN puts in a group with less membership than this is treated as noise, so it goes
+# to the step-and-error stage or stands alone instead of joining a group it barely fits. On the
+# eval's fault day the misfits sat at 0.0 and the true members at 1.0 (docs/eval-notes.md, exp 6).
+MIN_MEMBERSHIP = 0.1
 MAX_EXEMPLARS = 3  # traces per cluster the diagnoser looks at first
 
 # The cluster map (agent.clustering.cluster_map): the embeddings projected to 3D for the run page.

@@ -192,3 +192,16 @@ def test_on_a_control_day_every_cluster_is_a_false_alarm_and_there_is_nothing_to
     assert scores["detection"] == (0, 0) and scores["judge_recall"] == (0, 0)
     assert scores["judge_false_positives"] == (1, 4)
     assert scores["category_accuracy"] == (0, 0)  # a false alarm is not a wrong answer too
+
+
+def test_kinds_that_share_a_cause_in_one_cluster_count_as_one_separated_fault():
+    kinds = {"m1": "model_unavailable", "m2": "model_unavailable", "d1": "double_failure"}
+    scores = score(
+        {
+            **result([cluster("c0", "m1", "m2", "d1")], []),
+            "kinds": kinds,
+            "failing_spans": {},
+        }
+    )
+    assert scores["separation"] == (1, 1)
+    assert scores["purity"] == (3, 3)

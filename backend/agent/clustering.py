@@ -19,10 +19,13 @@ from importlib import import_module
 
 import numpy as np
 
+from agent.chunks import bucket_word
 from agent.const import (
+    LATENCY_BUCKETS_S,
     MAP_SEED,
     MAX_EXEMPLARS,
     MIN_CLUSTER_SIZE,
+    MIN_MEMBERSHIP,
     MIN_SAMPLES,
     MIN_TRACES_FOR_HDBSCAN,
     TRUST_NEIGHBORS,
@@ -42,23 +45,31 @@ PCA = import_module("sklearn.decomposition").PCA
 UNKNOWN_STEP = "unknown step"
 _QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 _DIGITS = re.compile(r"\d+")
+_SECONDS = re.compile(r"(\d+(?:\.\d+)?)\s?s\b")
+
+
+def seconds_as_words(message: str) -> str:
+    """'timed out after 1.0s' reads 'timed out after normal (0.5-2 s)': the masking of digits
+    would make every duration the same, and a 1 s timeout is not the same fault as a 10 s one."""
+    return _SECONDS.sub(lambda m: bucket_word(float(m.group(1)), LATENCY_BUCKETS_S), message)
 
 
 def failure_text(summary: TraceSummary) -> str:
     """One short string per failure: failing step, error and signature.
 
     Uses only fields already on TraceSummary. Scores and timings are left out and digits in the
-    error and signature are masked, so values that differ between traces do not split one cause.
+    error and signature are masked, so values that differ between traces do not split one cause;
+    seconds in the error are read as a latency word first, so a duration's size still counts.
     """
     step = summary.failing_span_name or UNKNOWN_STEP
-    error = summary.error_message or "no error message"
+    error = seconds_as_words(summary.error_message or "no error message")
     tail = _DIGITS.sub("#", f"{error} | {summary.signature}")
     return f"{step}: {tail}"
 
 
 def normalise_error(message: str | None) -> str:
     """Mask quoted values and numbers so 'missing x' and 'missing y' count as one error type."""
-    text = _DIGITS.sub("#", _QUOTED.sub("'x'", (message or "").lower()))
+    text = _DIGITS.sub("#", _QUOTED.sub("'x'", seconds_as_words(message or "").lower()))
     return " ".join(text.split())
 
 
@@ -71,7 +82,7 @@ class Embedded:
     """What HDBSCAN saw and said, one row per trace in input order."""
 
     vectors: np.ndarray
-    labels: np.ndarray  # -1 for noise
+    labels: np.ndarray  # -1 for noise, including a member under MIN_MEMBERSHIP
     membership: np.ndarray  # HDBSCAN's probabilities_, 0 for noise
 
 
@@ -90,7 +101,9 @@ def _hdbscan(summaries: list[TraceSummary], embedder: Embedder) -> Embedded:
     model = HDBSCAN(
         min_cluster_size=MIN_CLUSTER_SIZE, min_samples=MIN_SAMPLES, metric="cosine", copy=True
     ).fit(vectors)
-    return Embedded(vectors, np.asarray(model.labels_), np.asarray(model.probabilities_))
+    membership = np.asarray(model.probabilities_)
+    labels = np.where(membership < MIN_MEMBERSHIP, -1, np.asarray(model.labels_))
+    return Embedded(vectors, labels, membership)
 
 
 def _signature(members: list[TraceSummary]) -> str:

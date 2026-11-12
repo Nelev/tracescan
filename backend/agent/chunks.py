@@ -11,7 +11,7 @@ from agent.judge import error_type
 from trace_store.models import SpanNode
 
 
-def _word(value: float, buckets: tuple[tuple[float, str], ...]) -> str:
+def bucket_word(value: float, buckets: tuple[tuple[float, str], ...]) -> str:
     """The word of the first bucket whose upper bound is above the value; the last one's."""
     return next((word for bound, word in buckets if value < bound), buckets[-1][1])
 
@@ -43,7 +43,7 @@ def step_text(tree: SpanNode, span_id: str) -> str:
     outcome = f"error {error_type(span) or 'of unknown type'}" if span.status == "error" else "ok"
     hits = span.attributes.get("retrieval.hits")
     if isinstance(hits, int):  # a redacted count is a string: left out
-        outcome += f", hits: {_word(hits, HITS_BUCKETS)}"
+        outcome += f", hits: {bucket_word(hits, HITS_BUCKETS)}"
 
     siblings = sorted(parent.children, key=lambda s: s.start_time) if parent else [span]
     at = siblings.index(span)
@@ -55,6 +55,6 @@ def step_text(tree: SpanNode, span_id: str) -> str:
             f"previous: {siblings[at - 1].name if at > 0 else 'none'}",
             f"next: {siblings[at + 1].name if at + 1 < len(siblings) else 'none'}",
             f"inside: {parent.name if parent else 'none'}",
-            f"latency: {_word(seconds, LATENCY_BUCKETS_S)}",
+            f"latency: {bucket_word(seconds, LATENCY_BUCKETS_S)}",
         ]
     )
