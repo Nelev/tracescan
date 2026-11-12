@@ -45,25 +45,32 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  /* Swiss style: no elevation. Layers are told apart by a hairline and a surface step, so the
-     whole shadow scale (ours and the json-render components') is flat. */
-  --shadow-2xs: 0 0 #0000;
-  --shadow-xs: 0 0 #0000;
-  --shadow-sm: 0 0 #0000;
-  --shadow-md: 0 0 #0000;
-  --shadow-lg: 0 0 #0000;
-  --shadow-xl: 0 0 #0000;
-  --shadow-2xl: 0 0 #0000;
+  --color-primary-hover: var(--primary-hover);
+  --color-sidebar: var(--sidebar);
+  --color-ai-surface: var(--ai-surface);
+  /* AI-Native: barely-there elevation. Panels sit on a hairline and the faintest shadow; only what
+     floats over content (menus, tooltips, the review bar) lifts. The json-render components'
+     shadow-* classes pick up the same scale. */
+  --shadow-2xs: var(--elevation-0);
+  --shadow-xs: var(--elevation-0);
+  --shadow-sm: var(--elevation-1);
+  --shadow-md: var(--elevation-2);
+  --shadow-lg: var(--elevation-3);
+  --shadow-xl: var(--elevation-3);
+  --shadow-2xl: var(--elevation-3);
   /* Motion: one duration and easing for every state change (hover, press, open). */
   --default-transition-duration: 150ms;
   --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /*
- * Design system: Minimalism and Swiss style
+ * Design system: AI-Native UI
  *
- * Grid, hairlines, flush type and one ink. Square corners (--radius 0), no shadows, no gradients
- * or textures; hierarchy comes from size, weight and space, not from color or depth.
+ * Minimal chrome around the agent's work: neutral surfaces, one indigo accent, hairlines and the
+ * faintest elevation. What the agent wrote (the console's messages, a suggested fix) reads as a
+ * context card: the `ai-surface` tint with a left accent line. Motion is functional only: a 3-dot
+ * typing indicator while a run streams and a short reveal as each message arrives, both still
+ * under prefers-reduced-motion. Rounded corners (--radius 0.75rem), pills for chips and badges.
  *
  * Type: four sizes. Weights: 400 body, 500 emphasis and small headings, 600 for h1 and h2.
  * Use these, not text-xs/lg/3xl.
@@ -75,12 +82,15 @@
  *
  * Color roles, one job each:
  *   foreground        ink                   muted-foreground  secondary text, overlines
- *   muted < background = card < popover   surfaces (light: inset gray, white, white, white)
+ *   background        the page              sidebar           the nav rail, one step darker
+ *   card / popover    panels / what floats over content (light: both white)
+ *   muted             an inset well inside a panel
+ *   ai-surface        what the agent wrote: console messages, the suggested fix
  *   border            hairlines between regions   rule  the strong line under a heading or axis
- *   input             control outlines (3:1 against the page)
+ *   input             control outlines (3:1 against any surface)
  *   hover / track     a row or button under the pointer / the empty part of a bar
- *   primary           the ink itself (black on light, white on dark): actions, focus, selection,
- *                     key metric; the interface has no decorative hue
+ *   primary           the one accent, AI indigo: actions, focus, selection, the AI's marks, chart
+ *                     bars; primary-hover is a filled action under the pointer
  *   info / warning / success / destructive / stopped   status only, never decoration (chip.tsx);
  *   on small marks (chips, icons, counts, a thin stripe), never as a large border or fill:
  *     info         under way, nothing to do
@@ -89,9 +99,11 @@
  *     stopped      cut short by choice (cancelled, aborted)
  *     a status that is nothing (idle) is muted-foreground
  *
- * Contrast (WCAG, measured on the page and on muted): light: foreground 19.4, muted-foreground
- * 7.1, every status color at least 4.9, input 3.9. Dark: foreground 17.5, muted-foreground 7.7,
- * every status color at least 7.0, input 3.5.
+ * Contrast (WCAG, the lowest over background, card, popover, sidebar, muted and ai-surface):
+ * light: foreground 16.0, muted-foreground 5.4, primary 5.7, every status color at least 4.9,
+ * input 3.3, white on primary 6.1 (on primary-hover 8.0). Dark: foreground 15.7,
+ * muted-foreground 6.9, primary 7.5, every status color at least 6.3, input 3.1, ink on primary
+ * 8.4 (on primary-hover 10.5).
  */
 @utility type-h1 {
   font-size: 1.75rem;
@@ -129,57 +141,107 @@
   font-weight: 400;
 }
 
+/* A panel: the card on a hairline (the element's own `border`) and the faintest elevation. */
+@utility surface {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--elevation-1);
+}
+
+/* What floats over content: menus, tooltips, sticky bars. */
+@utility surface-raised {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--elevation-2);
+}
+
+/* What the agent wrote, as a context card: the AI tint and a left accent line. */
+@utility ai-context {
+  background-color: var(--ai-surface);
+  border-left: 2px solid var(--primary);
+}
+
+/* The typing indicator: three dots that rise in turn while the agent works (typing-dots.tsx). */
+@utility typing-dot {
+  width: var(--typing-dot-size);
+  height: var(--typing-dot-size);
+  border-radius: 9999px;
+  background-color: currentColor;
+  animation: typing 1.2s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
 :root {
   color-scheme: light;
-  --radius: 0rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.16 0 0);
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.002 277);
+  --foreground: oklch(0.21 0.006 277);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.16 0 0);
+  --card-foreground: oklch(0.21 0.006 277);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0 0);
-  --primary: oklch(0.16 0 0);
+  --popover-foreground: oklch(0.21 0.006 277);
+  --sidebar: oklch(0.965 0.003 277);
+  --primary: oklch(0.51 0.23 277);
+  --primary-hover: oklch(0.45 0.22 277);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.95 0 0);
-  --secondary-foreground: oklch(0.16 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.46 0 0);
-  --accent: oklch(0.95 0 0);
-  --accent-foreground: oklch(0.16 0 0);
-  --border: oklch(0.89 0 0);
-  --rule: oklch(0.16 0 0);
-  --input: oklch(0.6 0 0);
-  --ring: oklch(0.16 0 0);
-  --hover: oklch(0.16 0 0 / 5%);
-  --track: oklch(0.16 0 0 / 8%);
+  --secondary: oklch(0.955 0.004 277);
+  --secondary-foreground: oklch(0.21 0.006 277);
+  --muted: oklch(0.965 0.003 277);
+  --muted-foreground: oklch(0.5 0.012 277);
+  --accent: oklch(0.955 0.012 277);
+  --accent-foreground: oklch(0.21 0.006 277);
+  --ai-surface: oklch(0.965 0.018 277);
+  --border: oklch(0.91 0.004 277);
+  --rule: oklch(0.21 0.006 277);
+  --input: oklch(0.62 0.008 277);
+  --ring: oklch(0.51 0.23 277);
+  --hover: oklch(0.21 0.006 277 / 5%);
+  --track: oklch(0.21 0.006 277 / 8%);
   --destructive: oklch(0.53 0.19 27);
   --success: oklch(0.5 0.12 155);
   --info: oklch(0.5 0.09 235);
   --warning: oklch(0.52 0.11 70);
   --stopped: oklch(0.54 0.15 45);
+  --elevation-0: 0 0 #0000;
+  --elevation-1: 0 1px 2px oklch(0.21 0.006 277 / 4%);
+  --elevation-2:
+    0 1px 2px oklch(0.21 0.006 277 / 6%),
+    0 8px 24px -8px oklch(0.21 0.006 277 / 14%);
+  --elevation-3:
+    0 2px 4px oklch(0.21 0.006 277 / 8%),
+    0 16px 40px -12px oklch(0.21 0.006 277 / 20%);
+  /* The agent's messages and its typing indicator. */
+  --message-gap: 1rem;
+  --typing-dot-size: 0.375rem;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --background: oklch(0.14 0 0);
-    --foreground: oklch(0.97 0 0);
-    --card: oklch(0.17 0 0);
-    --card-foreground: oklch(0.97 0 0);
-    --popover: oklch(0.2 0 0);
-    --popover-foreground: oklch(0.97 0 0);
-    --primary: oklch(0.97 0 0);
-    --primary-foreground: oklch(0.14 0 0);
-    --secondary: oklch(0.24 0 0);
-    --secondary-foreground: oklch(0.97 0 0);
-    --muted: oklch(0.12 0 0);
-    --muted-foreground: oklch(0.72 0 0);
-    --accent: oklch(0.24 0 0);
-    --accent-foreground: oklch(0.97 0 0);
-    --border: oklch(0.29 0 0);
-    --rule: oklch(0.97 0 0);
-    --input: oklch(0.52 0 0);
-    --ring: oklch(0.97 0 0);
+    --background: oklch(0.155 0.004 277);
+    --foreground: oklch(0.97 0.003 277);
+    --card: oklch(0.19 0.005 277);
+    --card-foreground: oklch(0.97 0.003 277);
+    --popover: oklch(0.22 0.006 277);
+    --popover-foreground: oklch(0.97 0.003 277);
+    --sidebar: oklch(0.135 0.004 277);
+    --primary: oklch(0.75 0.14 277);
+    --primary-hover: oklch(0.81 0.11 277);
+    --primary-foreground: oklch(0.16 0.02 277);
+    --secondary: oklch(0.25 0.006 277);
+    --secondary-foreground: oklch(0.97 0.003 277);
+    --muted: oklch(0.135 0.004 277);
+    --muted-foreground: oklch(0.72 0.01 277);
+    --accent: oklch(0.25 0.02 277);
+    --accent-foreground: oklch(0.97 0.003 277);
+    --ai-surface: oklch(0.225 0.03 277);
+    --border: oklch(0.28 0.006 277);
+    --rule: oklch(0.97 0.003 277);
+    --input: oklch(0.52 0.008 277);
+    --ring: oklch(0.75 0.14 277);
     --hover: oklch(1 0 0 / 6%);
     --track: oklch(1 0 0 / 10%);
     /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
@@ -188,6 +250,11 @@
     --info: oklch(0.78 0.08 225);
     --warning: oklch(0.82 0.1 78);
     --stopped: oklch(0.76 0.1 52);
+    --elevation-1: 0 1px 2px oklch(0 0 0 / 30%);
+    --elevation-2:
+      0 1px 2px oklch(0 0 0 / 30%), 0 12px 32px -12px oklch(0 0 0 / 60%);
+    --elevation-3:
+      0 2px 6px oklch(0 0 0 / 35%), 0 20px 48px -16px oklch(0 0 0 / 70%);
   }
 }
 
@@ -203,6 +270,9 @@
   }
   body {
     @apply bg-background text-foreground type-body;
+  }
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 25%, transparent);
   }
   /* The body text style goes on <body>, not <html>: on <html> its 0.875rem would become the
      root size, so every rem (type sizes, spacing, control heights) would shrink by 1/8. */
@@ -233,5 +303,18 @@
   }
   h4 {
     @apply type-h4;
+  }
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-35%);
+    opacity: 1;
   }
 }

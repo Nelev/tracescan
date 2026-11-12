@@ -38,7 +38,7 @@ function NeedsReview({ runs }: { runs: RunRecord[] }) {
   return (
     <section
       aria-labelledby="needs-review"
-      className="type-body flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-card px-3 py-2"
+      className="type-body flex flex-wrap items-center gap-x-4 gap-y-2 surface rounded-lg border px-3 py-2"
     >
       <h2
         id="needs-review"
@@ -84,7 +84,7 @@ function Tile({
   hint: string;
 }) {
   return (
-    <div className="flex flex-col gap-1 rounded-xl border bg-card p-4">
+    <div className="surface flex flex-col gap-1 rounded-xl border p-4">
       <span className="type-h4">{label}</span>
       <span className="type-h1 font-mono tabular-nums">{value}</span>
       <span className="type-body text-muted-foreground">{hint}</span>
@@ -108,7 +108,7 @@ function Panel({
     <section
       aria-labelledby={id}
       className={cn(
-        "flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4",
+        "surface flex min-w-0 flex-col gap-4 rounded-xl border p-4",
         className,
       )}
     >
@@ -138,7 +138,7 @@ function Categories({ shares }: { shares: CategoryShare[] }) {
               {plural(s.traces, "trace")} · {plural(s.clusters, "cluster")}
             </span>
           </span>
-          <span className="h-2 bg-track">
+          <span className="h-2 overflow-hidden rounded-full bg-track">
             <span
               className={cn(
                 "block h-full",
@@ -166,11 +166,11 @@ function Trend({ runs }: { runs: RunRecord[] }) {
           <Link
             key={r.run_id}
             href={runPath(r.run_id)}
-            className="group relative flex h-full min-w-2 flex-1 items-end justify-center focus-visible:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="group relative flex h-full min-w-2 flex-1 items-end justify-center rounded-sm focus-visible:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`Run ${shortId(r.run_id)}, ${formatWhen(r.created_at)}: ${plural(r.failed_traces, "failed trace")}, ${plural(r.clusters, "cluster")}`}
           >
             <span
-              className="block w-full max-w-6 bg-primary/70 transition-colors group-hover:bg-primary group-focus-visible:bg-primary"
+              className="block w-full max-w-6 rounded-t-sm bg-primary/70 transition-colors group-hover:bg-primary group-focus-visible:bg-primary"
               style={{
                 height: `${Math.max(2, (r.failed_traces / max) * 100)}%`,
               }}
@@ -178,7 +178,7 @@ function Trend({ runs }: { runs: RunRecord[] }) {
             <span
               aria-hidden="true"
               className={cn(
-                "type-body pointer-events-none absolute bottom-full z-10 mb-2 flex w-max translate-y-1 flex-col border border-rule bg-popover px-2 py-1 tabular-nums opacity-0 transition-[opacity,translate] duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100",
+                "type-body pointer-events-none absolute bottom-full z-10 mb-2 flex w-max translate-y-1 flex-col rounded-md border surface-raised px-2 py-1 tabular-nums opacity-0 transition-[opacity,translate] duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100",
                 // Kept inside the chart at both ends, so it never widens the page.
                 i < runs.length / 3 && "left-0",
                 i >= (runs.length * 2) / 3 && "right-0",
@@ -246,7 +246,10 @@ function Outcomes({ counts }: { counts: Record<RunStatus, number> }) {
             )}
           >
             <span
-              className={cn("size-2", TONE_FILL[RUN_STATUS[s].tone])}
+              className={cn(
+                "size-2 rounded-full",
+                TONE_FILL[RUN_STATUS[s].tone],
+              )}
               aria-hidden="true"
             />
             <span className="text-foreground">{RUN_STATUS[s].label}</span>

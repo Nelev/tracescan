@@ -194,7 +194,7 @@ export default function ClusterMap3D({
             <>
               <span
                 ref={hoverLabel}
-                className="type-body absolute top-0 left-0 w-max max-w-72 border bg-popover px-2 py-0.5 text-foreground"
+                className="type-body absolute top-0 left-0 w-max max-w-72 rounded-md border surface-raised px-2 py-0.5 text-foreground"
               >
                 {describe(hoveredPoint)}
               </span>
@@ -500,18 +500,22 @@ function readInk(dark: boolean): Ink {
 
 /**
  * A CSS color token as `rgb(...)`. The tokens are oklch, which three.js cannot parse, so the
- * browser paints one pixel with it and the pixel is read back.
+ * browser paints one pixel with it and the pixel is read back. Some tokens are translucent (the
+ * glass card, the hairline border), so the pixel is first painted with the opaque page
+ * background and the token composited over it: the color it shows on the page, not its raw hue.
  */
 function token(name: string): string {
-  const value = getComputedStyle(document.documentElement)
-    .getPropertyValue(name)
-    .trim();
+  const style = getComputedStyle(document.documentElement);
+  const value = style.getPropertyValue(name).trim();
+  const page = style.getPropertyValue("--background").trim();
   const canvas = document.createElement("canvas");
   canvas.width = 1;
   canvas.height = 1;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return "#808080";
   context.fillStyle = "#808080";
+  context.fillStyle = page;
+  context.fillRect(0, 0, 1, 1);
   context.fillStyle = value;
   context.fillRect(0, 0, 1, 1);
   const [r, g, b] = context.getImageData(0, 0, 1, 1).data;

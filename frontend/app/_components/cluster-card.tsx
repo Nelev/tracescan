@@ -167,7 +167,7 @@ function Evidence({ cluster }: { cluster: ClusterDetail }) {
                 >
                   <span
                     className={cn(
-                      "flex size-6 items-center justify-center border font-mono",
+                      "flex size-6 items-center justify-center rounded-md border font-mono",
                       picked &&
                         "border-primary bg-primary text-primary-foreground",
                     )}
@@ -344,7 +344,7 @@ export function ClusterCard({
       aria-labelledby={`cluster-${cluster.cluster_id}`}
       aria-current={focused ? "true" : undefined}
       className={cn(
-        "type-body flex scroll-mt-20 flex-col overflow-hidden rounded-xl border bg-card",
+        "surface type-body flex scroll-mt-20 flex-col overflow-hidden rounded-xl border",
         // A decided card carries a thin stripe of its decision, so a reviewed list scans at a
         // glance; one still to decide has no mark of its own: its picker is the cue.
         decision && "border-l-[3px]",
@@ -458,7 +458,7 @@ export function ClusterCard({
           {diagnosis && (
             <section
               aria-label="Suggested fix"
-              className="flex gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3"
+              className="ai-context flex gap-3 rounded-r-lg p-3"
             >
               <Wrench
                 className="mt-0.5 size-4 shrink-0 text-primary"

@@ -132,7 +132,7 @@ export function RunsList() {
 
       <section className="flex flex-col gap-3">
         <h2 className="sr-only">All runs</h2>
-        <div className="relative overflow-x-auto rounded-xl border bg-card">
+        <div className="surface relative overflow-x-auto rounded-xl border">
           {recorded.status === "error" && (
             <p role="alert" className="type-body px-4 pt-4 text-destructive">
               Could not load the runs. Check that the backend is running, then

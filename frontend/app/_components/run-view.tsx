@@ -213,7 +213,7 @@ export function RunView({
 
       {overview && (
         <>
-          <section className="rounded-xl border bg-card p-4">
+          <section className="surface rounded-xl border p-4">
             <h2 className="sr-only">Pipeline</h2>
             <PipelineStepper stages={pipeline(overview, live)} />
           </section>
@@ -354,7 +354,7 @@ function ReviewBar({
   onReload: () => void;
 }) {
   return (
-    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 border border-rule bg-popover px-4 py-3">
+    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border surface-raised px-4 py-3">
       <div className="flex min-w-0 flex-col gap-1">
         <span className="type-h3 flex items-center gap-2">
           <UserCheck

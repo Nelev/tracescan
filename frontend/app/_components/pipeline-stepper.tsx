@@ -27,7 +27,7 @@ function Bar({ stage }: { stage: Stage }) {
     );
   }
   return (
-    <span className="block h-1.5 overflow-hidden bg-track">
+    <span className="block h-1.5 overflow-hidden rounded-full bg-track">
       <span
         className={cn("block h-full transition-[width]", bar)}
         style={{ width: `${Math.round(stage.progress * 100)}%` }}
