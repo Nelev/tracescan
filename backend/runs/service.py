@@ -282,9 +282,16 @@ class Runs:
             raise RunNotFound
         return snapshot
 
-    async def list(self, limit: int = 50) -> list[RunRecord]:
-        """The newest runs first, as the run store recorded them: no state, no proposals."""
-        return await self._store.list_runs(limit)
+    async def list(self, limit: int = 50, offset: int = 0) -> list[RunRecord]:
+        """The newest runs first, as the run store recorded them: no state, no proposals.
+
+        `offset` skips that many of the newest, so a list can be read page by page.
+        """
+        return await self._store.list_runs(limit, offset)
+
+    async def count(self) -> int:
+        """How many runs are recorded, for the pages of the list."""
+        return await self._store.count_runs()
 
     async def _load(self, run_id: str) -> tuple[Mapping, RunState]:
         """The run's state values and where it stands, from its two records."""

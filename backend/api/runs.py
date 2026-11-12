@@ -15,14 +15,15 @@ is counts, the actions log and the drafted proposals, plus on the stream the UI 
 model writes for each message (api.ui_spec).
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from api.schemas import ReviewRequest, ReviewResponse, RunRequest
+from api.schemas import TOTAL_COUNT, ReviewRequest, ReviewResponse, RunRequest
 from api.ui_spec import UiSpecs
 from runs import (
     NAME_MAX,
@@ -133,10 +134,20 @@ async def stream_run(
 
 @router.get("/runs")
 async def list_runs(
-    runs: Annotated[Runs, Depends(_runs)], limit: Annotated[int, Query(ge=1, le=200)] = 50
+    runs: Annotated[Runs, Depends(_runs)],
+    response: Response,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[RunRecord]:
-    """The newest runs first: ids, names, statuses and counts, never state or proposals."""
-    return await runs.list(limit)
+    """The newest runs first: ids, names, statuses and counts, never state or proposals.
+
+    One page of them: `limit` runs after the newest `offset`. The total over all pages is the
+    `X-Total-Count` header, so the body stays a plain list.
+    """
+    # Two independent reads, each on its own pooled connection: run together, not one after the other.
+    total, page = await asyncio.gather(runs.count(), runs.list(limit, offset))
+    response.headers[TOTAL_COUNT] = str(total)
+    return page
 
 
 @router.get("/runs/{run_id}")
