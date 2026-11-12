@@ -518,7 +518,7 @@ A run is one graph thread. Its state is checkpointed in Postgres (`AsyncPostgres
 
 The stream sends `run_started`, `progress` events (node, counts; never state), one `proposal` event per draft, and last `review_required`, `run_completed` or `run_failed`. Behind most messages comes a `ui_spec`: a small model (`UI_SPEC_MODEL`) describes the message as a [json-render](https://github.com/vercel-labs/json-render) spec, which the run page's agent console checks and draws.
 
-A review holds a row lock for the length of the resume, so a second review of the same run gets a `409`, and the decisions and the new status are committed together. There is no login: the `X-User-Name` header is recorded, not verified (`local` without one).
+A review holds a row lock for the length of the resume, so a second review of the same run gets a `409`, and the decisions and the new status are committed together. Every route except `/health` and the trace collector needs a Clerk session token (`Authorization: Bearer`): `401` without a valid one, `503` when it cannot be verified. A run or a review is recorded under the name the token carries (its `name` claim, else `email`, else Clerk's user id). The web app does not send the token yet, so until it does it cannot read the API.
 
 ## The web app
 
@@ -556,7 +556,7 @@ Install the backend and create its environment file:
 cd backend && uv sync && cp .env.example .env
 ```
 
-Edit `backend/.env`: set `OPENROUTER_API_KEY`, and set `DATABASE_URL` and `TRACE_DATABASE_URL` to `postgresql://postgres:tracescan@127.0.0.1:5433/postgres` for the compose database.
+Edit `backend/.env`: set `OPENROUTER_API_KEY` and `CLERK_SECRET_KEY` (from the TraceScan application in the Clerk dashboard), and set `DATABASE_URL` and `TRACE_DATABASE_URL` to `postgresql://postgres:tracescan@127.0.0.1:5433/postgres` for the compose database.
 
 Create the tables (the app never migrates by itself and refuses to start before this):
 
@@ -591,6 +591,9 @@ cd backend && uv run --env-file .env python -m scripts.seed_traces
 | `DATABASE_URL` | yes | Postgres for the checkpoints, the run tables and the collector's writes |
 | `TRACE_DATABASE_URL` | yes | Where the trace server and trace browser read spans: the same database, meant for a read-only role |
 | `OPENROUTER_API_KEY` | yes | The key for every model call |
+| `CLERK_SECRET_KEY` | yes | Clerk's secret key; every API route but `/health` and the collector needs a session token |
+| `CLERK_JWT_KEY` | no | Clerk's JWT public key (PEM), to verify tokens without a network call |
+| `CLERK_AUTHORIZED_PARTIES` | no | JSON list of origins a token may be issued for; default the UI on 3010 and 3000 |
 | `DIAGNOSER_MODEL` | no | Default `anthropic/claude-sonnet-5-5` |
 | `TRACE_JUDGE_MODEL` | no | The per-trace judge; default `anthropic/claude-haiku-5.5` |
 | `UI_SPEC_MODEL` | no | Default `anthropic/claude-haiku-5.5` |

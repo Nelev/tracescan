@@ -7,7 +7,7 @@
 Reads go through the Postgres trace reader on TRACE_DATABASE_URL, whose transactions are
 read-only. The collector stores span content as sent, so the tree is sanitized the way the MCP
 server sanitizes it (trace_store/sanitize.py): attributes outside the allowlist are redacted and
-status messages are truncated.
+status messages are truncated. Every route needs a Clerk session token (required for this router in main.py).
 """
 
 import asyncio

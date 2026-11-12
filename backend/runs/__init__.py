@@ -1,7 +1,6 @@
 """The runs module: see runs.service. Import from here."""
 
 from agent.schemas import Decision
-from db.models import NAME_MAX
 from runs.schemas import (
     Ended,
     Failed,
@@ -21,7 +20,6 @@ __all__ = [
     "Ended",
     "Failed",
     "IncompleteDecisions",
-    "NAME_MAX",
     "NotWaitingForReview",
     "PostgresRunStore",
     "Progress",

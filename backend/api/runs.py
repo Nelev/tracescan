@@ -7,8 +7,10 @@
   span ids they cite, spend and decisions.
 - `POST /v1/runs/{run_id}/review` resumes it with one decision per proposal.
 
-Who starts or reviews a run is recorded by name, from the `X-User-Name` header (`local` without
-one). There is no login: the name is not checked, so it says who claimed to act, nothing more.
+Every route needs a Clerk session token (auth.session, required for this router in main.py):
+`401` without a valid one, `503` when it cannot be verified, both before a run or a trace session
+is opened. Who starts or reviews a run
+is recorded under the name the token carries, never one the request sends.
 
 No response carries raw state: failed traces can hold clinical span data. What leaves the server
 is counts, the actions log and the drafted proposals, plus on the stream the UI spec the small
@@ -20,13 +22,13 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from api.schemas import TOTAL_COUNT, ReviewRequest, ReviewResponse, RunRequest
 from api.ui_spec import UiSpecs
+from auth import CurrentUser
 from runs import (
-    NAME_MAX,
     Ended,
     IncompleteDecisions,
     NotWaitingForReview,
@@ -58,18 +60,10 @@ def _runs(request: Request) -> Runs:
     return request.app.state.runs
 
 
-DEFAULT_USER = "local"  # whoever sends no X-User-Name header
-
-
-def _user(x_user_name: Annotated[str | None, Header(max_length=NAME_MAX)] = None) -> str:
-    """The name to record a run or a review under. Unverified: there is no login."""
-    return (x_user_name or "").strip() or DEFAULT_USER
-
-
 async def _open_run(
     body: RunRequest,
     runs: Annotated[Runs, Depends(_runs)],
-    user: Annotated[str, Depends(_user)],
+    user: CurrentUser,
 ) -> AsyncIterator[StartedRun]:
     """Own the started run for the whole response.
 
@@ -79,7 +73,7 @@ async def _open_run(
     collection.
     """
     try:
-        async with runs.start(body.target_app, user, body.since, body.until) as run:
+        async with runs.start(body.target_app, user.name, body.since, body.until) as run:
             yield run
     except RunFailed:
         # Raised only while opening, so before the stream starts: a plain 502.
@@ -172,11 +166,11 @@ async def review_run(
     run_id: UUID,
     body: ReviewRequest,
     runs: Annotated[Runs, Depends(_runs)],
-    user: Annotated[str, Depends(_user)],
+    user: CurrentUser,
 ) -> ReviewResponse:
     """Resume a run that waits for review. `409` when it does not, `422` for a partial review."""
     try:
-        status = await runs.review(str(run_id), body.decisions, user)
+        status = await runs.review(str(run_id), body.decisions, user.name)
     except RunNotFound:
         raise _run_not_found() from None
     except NotWaitingForReview:
