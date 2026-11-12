@@ -166,7 +166,10 @@ class TraceVerdict(BaseModel):
     )
     blamed_span_id: str | None = Field(
         default=None,
-        description="For a failed request, the span where the failure started; null otherwise.",
+        description=(
+            "For a failed request, the span where the failure started (of several, the one "
+            "that ended the request); null otherwise."
+        ),
     )
     attribution: Attribution | None = Field(
         default=None,

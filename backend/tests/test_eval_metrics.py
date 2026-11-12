@@ -139,8 +139,8 @@ def test_a_judged_file_adds_the_cause_scores_and_how_often_the_judge_agrees_with
     assert score(judged)["judge_agreement"] == (1, 2)
 
 
-def verdict(trace_id: str, failed: bool) -> dict:
-    return {"trace_id": trace_id, "failed": failed}
+def verdict(trace_id: str, failed: bool, step: str | None = None) -> dict:
+    return {"trace_id": trace_id, "failed": failed, "failing_span_name": step}
 
 
 def test_the_trace_judge_is_scored_per_kind_and_its_spend_joins_the_cost():
@@ -148,11 +148,11 @@ def test_the_trace_judge_is_scored_per_kind_and_its_spend_joins_the_cost():
     assert "judge_recall" not in score(judged)  # a file from before the trace judge
 
     judged["trace_verdicts"] = [
-        verdict("t1", True),
-        verdict("t2", True),
+        verdict("t1", True, "execute_tool search_pubmed"),
+        verdict("t2", True, "chat openai/gpt-4.1-mini"),  # caught, but the wrong step blamed
         verdict("t3", False),  # a timeout the judge let through
-        verdict("a1", True),
-        verdict("a2", True),
+        verdict("a1", True, "execute_tool export_conversation"),
+        verdict("a2", True, "execute_tool export_conversation"),
         verdict("h1", True),  # a healthy request judged failed
     ]  # s1 is in judge_failures: never judged, so not failed
     judged["judge_failures"] = ["s1"]
@@ -161,6 +161,7 @@ def test_the_trace_judge_is_scored_per_kind_and_its_spend_joins_the_cost():
     scores = score(judged)
     assert scores["judge_recall"] == (4, 6)
     assert scores["judge_false_positives"] == (1, 1)
+    assert scores["judge_blame"] == (3, 4)  # of the 4 faulty traces caught
     assert scores["judge_failures"] == 1
     assert scores["judge_by_kind"] == {
         "healthy": (1, 1),
