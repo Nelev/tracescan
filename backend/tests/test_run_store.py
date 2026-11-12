@@ -8,7 +8,8 @@ import pytest
 from sqlalchemy import text
 
 from db.engine import create_engine, sqlalchemy_url
-from runs.store import NotClaimable, PostgresRunStore, RunCounts
+from runs.schemas import RunCounts
+from runs.store import NotClaimable, PostgresRunStore
 from tests.fakes import InMemoryRunStore
 
 SINCE = datetime(2026, 11, 5, 9, 0, tzinfo=UTC)

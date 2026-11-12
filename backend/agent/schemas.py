@@ -206,3 +206,17 @@ class Proposal(BaseModel):
     verification: str = "unverified"
     diagnosed: bool
     regression_case: RegressionCase | None = None
+
+
+# A graph run's progress as agent.progress reports it: ids and counts only, safe for a client.
+class ProgressEvent(TypedDict, total=False):
+    # node_paused: the node called interrupt() and waits for a resume (human_review).
+    # node_progress: another share of a COUNTED_NODES fan-out is done; counts {done, total}.
+    event: Literal["node_started", "node_finished", "node_failed", "node_paused", "node_progress"]
+    node: str
+    task_id: str
+    # Set on the branches of the diagnose fan-out, so the client can tell parallel tasks apart.
+    cluster_id: str
+    # False when a node finished but recorded a failure (a cluster whose diagnosis failed).
+    ok: bool
+    counts: dict[str, int]

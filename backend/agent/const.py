@@ -1,6 +1,7 @@
 """Tuning constants for failure clustering and the diagnoser. Revisit once Medas produces real traffic."""
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # fastembed ONNX model, runs locally
+EMBEDDING_DIMENSIONS = 384  # its vector size: the healthy-span store's column is this wide
 
 # The span texts agent.chunks builds for retrieval. Bump the version on any change to the text
 # or a bucket: a stored embedding is only comparable to one built from the same version.

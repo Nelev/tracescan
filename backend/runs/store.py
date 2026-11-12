@@ -8,12 +8,11 @@ Rows hold ids, counts and decisions, never issue text or span content.
 
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from pydantic import BaseModel
 from sqlalchemy import Update, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -21,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from agent.schemas import Decision
 from db.models import Review, Run
 from db.models import RunStatus as StoredStatus
+from runs.schemas import ReviewRecord, RunCounts, RunRecord
 
 ENDED: frozenset[str] = frozenset({"completed", "failed", "aborted"})
 # What a review may take. `in_progress` too: the checkpoint has already shown that the run waits
@@ -32,38 +32,8 @@ class NotClaimable(Exception):
     """The run is not there to review: unknown, ended, or held by another review right now."""
 
 
-@dataclass(frozen=True)
-class RunCounts:
-    failed_traces: int
-    clusters: int
-    proposals: int
-
-
 # Ends a review: sets where the run stands after it, in the review's own transaction.
 Finish = Callable[[StoredStatus, RunCounts], Awaitable[None]]
-
-
-class RunRecord(BaseModel):
-    """One row of `runs`."""
-
-    run_id: str
-    target_app: str
-    since: datetime | None
-    until: datetime | None
-    status: StoredStatus
-    started_by: str | None  # a name as the client sent it; None only on old rows
-    created_at: datetime
-    ended_at: datetime | None
-    failed_traces: int
-    clusters: int
-    proposals: int
-
-
-class ReviewRecord(BaseModel):
-    cluster_id: str
-    decision: Decision
-    reviewer: str
-    decided_at: datetime
 
 
 class RunStore(Protocol):

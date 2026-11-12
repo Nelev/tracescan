@@ -18,6 +18,7 @@ from api.trace_browser import router as trace_browser_router
 from api.traces import router as traces_router
 from db.engine import create_engine
 from runs import PostgresRunStore, Runs
+from runs.healthy import HealthyStore
 from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
 
 
@@ -47,9 +48,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # One embedder per process (it loads its model on first use); the diagnoser's and the
         # trace judge's chat models need OPENROUTER_API_KEY, like DATABASE_URL. Each run opens its
         # own trace session.
+        embedder = FastEmbedEmbedder()
         context = TraceContext(
             ClosedTraces(),
-            FastEmbedEmbedder(),
+            embedder,
             build_diagnoser_model(),
             build_trace_judge_model(),
             dry_run=dry_run,
@@ -60,7 +62,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # The trace browser (api.trace_browser) reads the same store, read-only, in this process.
         trace_engine = read_only_engine(trace_database_url)
         app.state.trace_reader = PostgresTraceReader(trace_engine)
-        app.state.runs = Runs(app.state.graph, context, open_traces, store)
+        # The judge's healthy picks, embedded with the same local model, in the same database.
+        healthy = HealthyStore(engine, embedder)
+        app.state.runs = Runs(app.state.graph, context, open_traces, store, healthy)
         # The small model that writes the UI spec of each streamed message (api.ui_spec).
         app.state.ui_spec_model = build_ui_spec_model()
         try:

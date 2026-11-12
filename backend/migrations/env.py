@@ -2,7 +2,8 @@
 
 Synchronous on purpose (psycopg 3 does both), so it also runs from inside a test's event loop.
 The same database holds LangGraph's checkpoint tables, which the checkpointer creates and owns:
-`include_name` keeps autogenerate from proposing to drop them.
+`include_name` keeps autogenerate from proposing to drop them, and the healthy-span store's
+(langchain_pg_*, created by langchain-postgres; see runs/healthy.py).
 """
 
 import os

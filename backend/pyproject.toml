@@ -10,6 +10,7 @@ dependencies = [
     "fastmcp>=3.4,<4",
     "langchain-mcp-adapters>=0.3.2",
     "langchain-openrouter>=0.2.9",
+    "langchain-postgres==0.0.19",
     "langgraph>=1.2.20",
     "langgraph-checkpoint-postgres>=3.2.0",
     "opentelemetry-proto>=1.45.2",

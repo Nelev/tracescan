@@ -25,6 +25,14 @@ def _find(span: SpanNode, span_id: str, parent: SpanNode | None = None):
     return None
 
 
+def span_name(tree: SpanNode, span_id: str) -> str:
+    """Raises KeyError for a span id that is not in the tree."""
+    found = _find(tree, span_id)
+    if found is None:
+        raise KeyError(span_id)
+    return found[0].name
+
+
 def step_text(tree: SpanNode, span_id: str) -> str:
     """Raises KeyError for a span id that is not in the tree."""
     found = _find(tree, span_id)
