@@ -10,6 +10,10 @@ doubling wait, while the cluster's budget has room; any other error, or one with
 records the cluster in `diagnosis_failures`. The evidence re-ask draws on the same budget; when it is spent the
 diagnosis is kept as `unsupported`, never dropped. The retries live in the node, not in the
 graph: a run is durable only once it waits for review, so nothing is gained by checkpointing them.
+
+With a healthy-span store in the context, the prompt also gets the nearest healthy calls of the
+failing step (`healthy_twins`), as comparison only: they are not spans of the exemplars, so the
+evidence check would refuse a citation of them.
 """
 
 import asyncio
@@ -21,7 +25,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
-from agent.const import UNSUPPORTED_CONFIDENCE_CAP
+from agent.chunks import span_name, step_text
+from agent.const import HEALTHY_TWINS, UNSUPPORTED_CONFIDENCE_CAP
 from agent.context import TraceContext
 from agent.evidence import (
     fallback_evidence,
@@ -55,7 +60,8 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
             trees = await asyncio.gather(
                 *(context.traces.get_trace_tree(t) for t in cluster["exemplar_trace_ids"])
             )
-            diagnosis = await _diagnose(cluster, trees, context.model, spent)
+            twins = await healthy_twins(state, trees, context)
+            diagnosis = await _diagnose(cluster, trees, context.model, spent, twins)
     except Exception as exc:
         # Type name only: the message could carry span contents.
         logger.error("diagnosis of %s failed: %s", cluster_id, type(exc).__name__)
@@ -63,12 +69,44 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
     return {"diagnoses": [diagnosis], **_usage(cluster_id, spent)}
 
 
+async def healthy_twins(task: ClusterTask, trees: list[SpanNode], context: TraceContext) -> str:
+    """The prompt section with healthy calls of the cluster's failing step, or "" when there are
+    none. The step is the one the trace judge blamed in the first exemplar that has one; the
+    query is that span's step_text. Best effort: a failing lookup leaves the section out."""
+    if context.healthy is None:
+        return ""
+    for tree in trees:
+        span_id = task["failing_spans"].get(tree.trace_id)
+        if span_id is None:
+            continue
+        try:
+            step, failed = span_name(tree, span_id), step_text(tree, span_id)
+            twins = await context.healthy.similar(failed, step, task["target_app"], HEALTHY_TWINS)
+        except Exception as exc:
+            logger.warning(
+                "healthy twins of %s not found: %s",
+                task["cluster"]["cluster_id"],
+                type(exc).__name__,
+            )
+            return ""
+        if not twins:
+            return ""
+        return (
+            f"\nThe failing step of exemplar {tree.trace_id}, span {span_id}:\n{failed}\n"
+            f"Healthy calls of the same step from requests that went fine, nearest first. Compare "
+            "them with the failure to find what differs. They are not evidence: do not cite them.\n"
+            + "\n---\n".join(twin.text for twin in twins)
+            + "\n"
+        )
+    return ""
+
+
 def _usage(cluster_id: str, spent: Spent) -> dict:
     return {"model_usage": [{"cluster_id": cluster_id, **asdict(spent)}]}
 
 
 async def _diagnose(
-    cluster: Cluster, trees: list[SpanNode], model: BaseChatModel, spent: Spent
+    cluster: Cluster, trees: list[SpanNode], model: BaseChatModel, spent: Spent, twins: str = ""
 ) -> dict:
     """One attempt: diagnose the cluster from its exemplar trees, citing their spans as evidence."""
     prompt = (
@@ -76,6 +114,7 @@ async def _diagnose(
         f"failure: {cluster['signature']}\n"
         "Cite only trace ids and span ids that appear in the exemplar traces below.\n"
         + "\n".join(tree.model_dump_json(exclude_defaults=True) for tree in trees)
+        + twins
     )
     budget = cluster_budget()
     ask = retrying(

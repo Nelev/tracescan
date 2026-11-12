@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from agent.const import CHUNK_TEMPLATE_VERSION, EMBEDDING_DIMENSIONS
 from agent.embeddings import Embedder
-from runs.schemas import HealthyMatch
+from agent.schemas import HealthyMatch
 
 COLLECTION = "healthy_spans"
 

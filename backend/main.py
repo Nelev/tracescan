@@ -49,11 +49,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # trace judge's chat models need OPENROUTER_API_KEY, like DATABASE_URL. Each run opens its
         # own trace session.
         embedder = FastEmbedEmbedder()
+        # The judge's healthy picks, embedded with the same local model, in the same database:
+        # Runs saves them after each run, the diagnoser reads the nearest ones.
+        healthy = HealthyStore(engine, embedder)
         context = TraceContext(
             ClosedTraces(),
             embedder,
             build_diagnoser_model(),
             build_trace_judge_model(),
+            healthy=healthy,
             dry_run=dry_run,
         )
         # Where each run's trace server reads spans and scores: meant for a read-only role.
@@ -62,8 +66,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # The trace browser (api.trace_browser) reads the same store, read-only, in this process.
         trace_engine = read_only_engine(trace_database_url)
         app.state.trace_reader = PostgresTraceReader(trace_engine)
-        # The judge's healthy picks, embedded with the same local model, in the same database.
-        healthy = HealthyStore(engine, embedder)
         app.state.runs = Runs(app.state.graph, context, open_traces, store, healthy)
         # The small model that writes the UI spec of each streamed message (api.ui_spec).
         app.state.ui_spec_model = build_ui_spec_model()

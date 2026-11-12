@@ -16,6 +16,8 @@ LATENCY_BUCKETS_S = (
 HITS_BUCKETS = ((1, "none"), (11, "some (1-10)"), (float("inf"), "many (>10)"))
 # Healthy spans the trace judge may pick in one trace that went fine (agent.judge.healthy_picks).
 MAX_HEALTHY_PICKS = 3
+# Healthy calls of a cluster's failing step the diagnoser is shown (runs.healthy similar()).
+HEALTHY_TWINS = 3
 
 # An OpenRouter slug ("vendor/model"); the DIAGNOSER_MODEL environment variable overrides it.
 DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"

@@ -76,8 +76,17 @@ def route_after_scores(state: TriageState) -> str:
 
 def route_after_cluster(state: TriageState) -> list[Send] | str:
     """One parallel diagnose branch per cluster; no clusters (e.g. all noise): end the run."""
+    blamed = {t["trace_id"]: t["failing_span_id"] for t in state.get("failed_traces", [])}
     return [
-        Send("diagnose_cluster", ClusterTask(cluster=c)) for c in state.get("clusters", [])
+        Send(
+            "diagnose_cluster",
+            ClusterTask(
+                cluster=c,
+                target_app=state["target_app"],
+                failing_spans={t: blamed[t] for t in c["exemplar_trace_ids"] if t in blamed},
+            ),
+        )
+        for c in state.get("clusters", [])
     ] or END
 
 

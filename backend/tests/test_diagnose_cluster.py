@@ -2,16 +2,23 @@
 
 import asyncio
 import json
+from dataclasses import replace
 
 import pytest
 from langgraph.runtime import Runtime
 
 from agent import model_guard
-from agent.const import MAX_MODEL_ATTEMPTS, MAX_PARALLEL_DIAGNOSES, UNSUPPORTED_CONFIDENCE_CAP
+from agent.chunks import step_text
+from agent.const import (
+    HEALTHY_TWINS,
+    MAX_MODEL_ATTEMPTS,
+    MAX_PARALLEL_DIAGNOSES,
+    UNSUPPORTED_CONFIDENCE_CAP,
+)
 from agent.evidence import FALLBACK_NOTE
 from agent.graph import build_graph
 from agent.nodes.diagnose_cluster import TAXONOMY, diagnose_cluster
-from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence
+from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence, HealthyMatch
 from tests.fakes import (
     DIAGNOSIS,
     FakeApiError,
@@ -40,10 +47,56 @@ FAILURES = [
 ]
 
 
-async def diagnose(model) -> dict:
+TASK = ClusterTask(cluster=CLUSTER, target_app="medas", failing_spans={"t1": "s1"})
+
+
+async def diagnose(model, healthy=None) -> dict:
     """One run of the node over CLUSTER, whose one exemplar is TREE."""
-    context = fake_context(FakeTraces(trees={"t1": TREE}), model)
-    return await diagnose_cluster(ClusterTask(cluster=CLUSTER), Runtime(context=context))
+    context = replace(fake_context(FakeTraces(trees={"t1": TREE}), model), healthy=healthy)
+    return await diagnose_cluster(TASK, Runtime(context=context))
+
+
+class FakeHealthy:
+    """A healthy-span store with fixed matches, recording what it was asked; or one that fails."""
+
+    def __init__(self, matches: list[HealthyMatch], fail: bool = False) -> None:
+        self.matches, self.fail, self.asked = matches, fail, []
+
+    async def similar(self, text: str, step: str, app: str, k: int = 3) -> list[HealthyMatch]:
+        if self.fail:
+            raise RuntimeError("store down")
+        self.asked.append((text, step, app, k))
+        return self.matches
+
+
+TWIN = HealthyMatch(trace_id="h1", span_id="hs", text="step: twin\noutcome: ok", distance=0.05)
+
+
+@pytest.mark.anyio
+async def test_the_model_sees_healthy_twins_of_the_failing_step_next_to_the_failure():
+    healthy, model = FakeHealthy([TWIN]), fake_diagnoser(DIAGNOSIS)
+    result = await diagnose(model, healthy)
+    ((text, step, app, k),) = healthy.asked
+    assert (text, step, app, k) == (step_text(TREE, "s1"), TREE.name, "medas", HEALTHY_TWINS)
+    prompt = str(model.seen[0][1].content)
+    assert text in prompt and TWIN.text in prompt and "do not cite them" in prompt
+    assert result["diagnoses"][0]["evidence_check"] == "valid"
+
+
+@pytest.mark.anyio
+async def test_no_twins_and_no_store_leave_the_prompt_as_it_was():
+    without, empty = fake_diagnoser(DIAGNOSIS), fake_diagnoser(DIAGNOSIS)
+    await diagnose(without)
+    await diagnose(empty, FakeHealthy([]))
+    assert without.seen[0][1].content == empty.seen[0][1].content
+    assert "Healthy calls" not in str(without.seen[0][1].content)
+
+
+@pytest.mark.anyio
+async def test_a_failing_store_does_not_fail_the_diagnosis(caplog):
+    result = await diagnose(fake_diagnoser(DIAGNOSIS), FakeHealthy([], fail=True))
+    assert result["diagnoses"][0]["cluster_id"] == "c0"
+    assert "healthy twins of c0 not found: RuntimeError" in caplog.text
 
 
 async def run_graph(trees: dict, model) -> dict:
@@ -272,7 +325,7 @@ async def test_a_failure_before_any_model_call_is_a_failure_not_a_retry():
     # Left unfinished it would never use up the budget, and the graph would loop for ever.
     model = scripted_model(GOOD)
     context = fake_context(FailingTraces(), model)
-    result = await diagnose_cluster(ClusterTask(cluster=CLUSTER), Runtime(context=context))
+    result = await diagnose_cluster(TASK, Runtime(context=context))
 
     assert result["diagnosis_failures"] == ["c0"]
     assert model.seen == []

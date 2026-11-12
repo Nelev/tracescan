@@ -93,11 +93,19 @@ def test_routes():
     assert route_after_scores(state(failed_traces=[])) == "__end__"
     assert route_after_scores(state(failed_traces=[{"trace_id": "t"}])) == "cluster_failures"
     assert route_after_cluster(state()) == "__end__"
-    clusters = [{"cluster_id": "c0"}, {"cluster_id": "c1"}]
-    sends = route_after_cluster(state(clusters=clusters))
+    clusters = [
+        {"cluster_id": "c0", "exemplar_trace_ids": ["t1", "t2"]},
+        {"cluster_id": "c1", "exemplar_trace_ids": ["t3"]},
+    ]
+    failed = [
+        {"trace_id": "t1", "failing_span_id": "s1"},
+        {"trace_id": "t3", "failing_span_id": "s3"},
+    ]
+    sends = route_after_cluster(state(clusters=clusters, failed_traces=failed))
     assert isinstance(sends, list)
     assert [(s.node, s.arg) for s in sends] == [
-        ("diagnose_cluster", {"cluster": c}) for c in clusters
+        ("diagnose_cluster", {"cluster": c, "target_app": "medas", "failing_spans": spans})
+        for c, spans in zip(clusters, [{"t1": "s1"}, {"t3": "s3"}], strict=True)
     ]
     assert route_after_review(state(decisions={"c0": "reject"})) == "__end__"
     assert route_after_review(state(decisions={"c0": "approve"})) == "apply_actions"
