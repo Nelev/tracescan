@@ -4,8 +4,8 @@ from collections import Counter
 
 from api.traces import decode
 from eval.ground_truth import FAULTS, NOT_FAULTS
-from eval.run import DEFAULT_END
-from scripts.seed_traces import COUNTS, export, healthy, kinds
+from eval.run import CONTROL_END, DEFAULT_END
+from scripts.seed_traces import CONTROL_COUNTS, COUNTS, export, healthy, kinds
 from tests.test_seed_traces import END, by_trace
 
 SEEDED = {make.__name__: count for make, count in COUNTS.items()}
@@ -55,3 +55,10 @@ def test_the_eval_day_has_healthy_traces_that_ran_each_failing_step():
 
     for kind, fault in FAULTS.items():
         assert healthy_steps[fault.failing_span] >= HEALTHY_TWINS, kind
+
+
+def test_the_control_day_has_no_fault_and_as_many_traces_as_an_eval_day():
+    answer = kinds(CONTROL_END, CONTROL_COUNTS)
+    assert set(answer.values()) <= NOT_FAULTS.keys()
+    assert len(answer) == sum(COUNTS.values()) == sum(CONTROL_COUNTS.values())
+    assert set(answer).isdisjoint(kinds(DEFAULT_END))

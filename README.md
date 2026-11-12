@@ -17,7 +17,7 @@ The pipeline runs end to end, on synthetic traces and on real Medas traffic, as 
 | Writes | Dry run only: local files under `backend/out/`. The GitHub and eval-dataset writers do not exist, and the app refuses to start with `DRY_RUN` off |
 | Run console (Next.js) | Working: start and watch a run, list runs, open a run, browse traces, review proposals |
 | Medas instrumentation | Working, in the Medas repo: one trace per agent run, no patient text on any span |
-| Eval on seeded traces (`backend/eval/`) | Working. The trace judge's own accuracy is not measured yet |
+| Eval on seeded traces (`backend/eval/`) | Working, with a control day of no faults; the trace judge is scored too. Results below |
 | Fault-injection eval in Medas | Not built |
 
 `PLAN.md` holds the scope and the task order. `CLAUDE.md` has detailed notes on every module.
@@ -619,6 +619,28 @@ cd backend && uv run python -m eval.metrics
 ```
 
 A seeded day has twelve kinds of traces (`COUNTS` in `scripts/seed_traces.py`, answers in `eval/ground_truth.py`): healthy requests, plain faults, and hard cases (a look-alike timeout, a fault with two faces, a request with two errors of which the first is not the cause, a failure at the root only, a retrieval that silently finds nothing, and harmless error spans). [docs/eval-notes.md](docs/eval-notes.md) logs every experiment and its results.
+
+A control day (`python -m eval.run --control`) seeds only healthy requests and harmless errors, so anything it finds is a false alarm. `eval.metrics` also scores the trace judge on its own (which traces it called failed, per kind) and counts its spend in the cost.
+
+#### Results
+
+The latest runs (experiment 5 in the notes): a fault day the judge prompt was not tuned on, and the control day. One run each, so a single trace can change a ratio.
+
+| Score | Fault day (2026-02-27) | Control day |
+| --- | --- | --- |
+| Trace judge: faulty traces caught | 34/34 | n/a |
+| Trace judge: harmless traces flagged | 0/18 | 1/52 |
+| Detection (faults with a diagnosed cluster) | 6/9 | n/a |
+| Cluster purity | 27/34 | 1/1 |
+| Cause separation | 2/9 | n/a |
+| Rare-failure recall | 0/1 | n/a |
+| False alarms (clusters with no fault) | 0 | 1 |
+| Category accuracy | 5/6 | n/a |
+| Root-cause accuracy (graded on the injected cause) | 5/6 | n/a |
+| Evidence valid and relevant | 6/6, 6/6 | 1/1, 1/1 |
+| Cost and time | $0.13 (judge $0.03), 25 s | $0.04 (judge $0.03), 22 s |
+
+The weak spot is clustering: look-alike timeouts merge, and the rare store outage joins the silent retrieval misses.
 
 ## Tests and checks
 

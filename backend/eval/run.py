@@ -1,11 +1,14 @@
 """The eval runner: one seeded day of traces through the triage graph, saved as a results file.
 
-Run from backend/:  uv run --env-file .env python -m eval.run [--end 2026-02-13T12:00:00Z]
+Run from backend/:  uv run --env-file .env python -m eval.run [--end 2026-02-13T12:00:00Z] [--control]
 
 It seeds the day (scripts/seed_traces.py), runs the graph on that day's window, and writes what
 the graph found, with the answer key next to it, to out/eval/. The graph has no checkpointer
 here, so the invoke returns at the review pause with the whole state: nothing is reviewed,
 apply_actions never runs, and the results file is the only thing written.
+
+With --control the day holds no fault (scripts/seed_traces.py CONTROL_COUNTS), on its own fixed
+day: every trace judged failed and every cluster in it is a false alarm.
 
 Needs DATABASE_URL (the seed writes spans), TRACE_DATABASE_URL (the trace server reads them;
 the same database) and OPENROUTER_API_KEY. One run is one diagnoser call per cluster.
@@ -29,12 +32,14 @@ from agent.model import build_diagnoser_model, build_trace_judge_model
 from agent.state import TriageState
 from api.traces import decode
 from eval.metrics import OUT_DIR
-from scripts.seed_traces import APP, DAY, export, kinds, seed
+from scripts.seed_traces import APP, CONTROL_COUNTS, COUNTS, DAY, Counts, export, kinds, seed
 
 # A fixed day, so every run grades the same traces, and one no other seeded day overlaps.
 # Change it when the seeded cases change: a day already stored keeps its old traces, and a
 # trace the answer key does not know stops the scoring.
 DEFAULT_END = datetime(2026, 2, 13, 12, tzinfo=UTC)
+# The control day's, a week later, so the two windows never overlap.
+CONTROL_END = datetime(2026, 2, 20, 12, tzinfo=UTC)
 
 
 async def triage(
@@ -43,10 +48,12 @@ async def triage(
     embedder: Embedder,
     model: BaseChatModel,
     judge_model: BaseChatModel | None = None,
+    counts: Counts = COUNTS,
 ) -> dict[str, Any]:
     """Run the graph on the day that ends at `end`; what it found, next to the answer key.
 
-    `judge_model` judges the traces; None uses the diagnoser's `model`.
+    `judge_model` judges the traces; None uses the diagnoser's `model`. `counts` is the mix the
+    day was seeded with, which the answer key is worked out from again.
     """
     state = TriageState(target_app=APP, since=(end - DAY).isoformat(), until=end.isoformat())
     started = time.perf_counter()
@@ -55,8 +62,11 @@ async def triage(
     )
     return {
         "end": end.isoformat(),
+        "control": counts is CONTROL_COUNTS,
         "seconds": round(time.perf_counter() - started, 1),
-        "kinds": kinds(end),  # the answer key: trace id to seeded kind (eval/ground_truth.py)
+        "kinds": kinds(
+            end, counts
+        ),  # the answer key: trace id to seeded kind (eval/ground_truth.py)
         # The failed traces the graph collected, and the span each failed in (ids only).
         "failing_spans": {
             trace["trace_id"]: trace["failing_span_id"] for trace in found.get("failed_traces", [])
@@ -74,14 +84,16 @@ async def triage(
     }
 
 
-async def run(end: datetime, database_url: str, trace_database_url: str) -> dict[str, Any]:
-    await seed(database_url, decode(export(end)))
+async def run(
+    end: datetime, database_url: str, trace_database_url: str, counts: Counts = COUNTS
+) -> dict[str, Any]:
+    await seed(database_url, decode(export(end, counts)))
     async with TraceClient(trace_database_url) as traces:
         model, judge = build_diagnoser_model(), build_trace_judge_model()
         return {
             "model": getattr(model, "model_name", "unknown"),
             "judge_model": getattr(judge, "model_name", "unknown"),
-        } | await triage(end, traces, FastEmbedEmbedder(), model, judge)
+        } | await triage(end, traces, FastEmbedEmbedder(), model, judge, counts)
 
 
 def main() -> None:
@@ -89,10 +101,20 @@ def main() -> None:
     parser.add_argument(
         "--end",
         type=datetime.fromisoformat,
-        default=DEFAULT_END,
-        help=f"when the seeded day ends, with an offset (default: {DEFAULT_END.isoformat()})",
+        default=None,
+        help=(
+            f"when the seeded day ends, with an offset (default: {DEFAULT_END.isoformat()}, "
+            f"or {CONTROL_END.isoformat()} with --control)"
+        ),
     )
-    end = parser.parse_args().end
+    parser.add_argument(
+        "--control",
+        action="store_true",
+        help="seed a day with no fault (healthy requests and harmless errors only)",
+    )
+    args = parser.parse_args()
+    counts = CONTROL_COUNTS if args.control else COUNTS
+    end = args.end or (CONTROL_END if args.control else DEFAULT_END)
     if end.tzinfo is None:
         parser.error("--end needs an offset, for example 2026-02-13T12:00:00Z")
     database_url = os.environ.get("DATABASE_URL")
@@ -100,7 +122,7 @@ def main() -> None:
     if not database_url or not trace_database_url:
         parser.error("set DATABASE_URL and TRACE_DATABASE_URL (the same database)")
 
-    result = asyncio.run(run(end, database_url, trace_database_url))
+    result = asyncio.run(run(end, database_url, trace_database_url, counts))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
     path.write_text(json.dumps(result, indent=2))

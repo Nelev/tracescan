@@ -244,6 +244,17 @@ COUNTS: dict[Callable[[Random], Step], int] = {
     not_found: 3,
 }
 
+# A control day: only the kinds with no fault (eval/ground_truth.py NOT_FAULTS), as many traces
+# as a day of COUNTS, so anything a triage finds in it is a false alarm. The harmless errors are
+# there because they are what a judge or a clustering most easily mistakes for a fault.
+CONTROL_COUNTS: dict[Callable[[Random], Step], int] = {
+    healthy: 36,
+    retried_ok: 8,
+    not_found: 8,
+}
+
+Counts = Mapping[Callable[[Random], Step], int]
+
 
 def _emit(tracer: trace.Tracer, step: Step, parent: trace.Span | None, start_ns: int) -> int:
     """Make the span of `step` and of everything under it; returns when it ended."""
@@ -273,7 +284,7 @@ def _emit(tracer: trace.Tracer, step: Step, parent: trace.Span | None, start_ns:
     return end_ns
 
 
-def _day(end: datetime) -> tuple[Sequence[ReadableSpan], dict[str, str]]:
+def _day(end: datetime, counts: Counts) -> tuple[Sequence[ReadableSpan], dict[str, str]]:
     """The spans of the day that ends at `end`, and the kind of each of its traces."""
     rng = Random(int(end.timestamp()))
     finished = InMemorySpanExporter()
@@ -281,7 +292,7 @@ def _day(end: datetime) -> tuple[Sequence[ReadableSpan], dict[str, str]]:
     provider.add_span_processor(SimpleSpanProcessor(finished))
     tracer = provider.get_tracer("scripts.seed_traces")
 
-    makers = [make for make, count in COUNTS.items() for _ in range(count)]
+    makers = [make for make, count in counts.items() for _ in range(count)]
     rng.shuffle(makers)
     # One request per slot, started at the slot's start: each is over well before `end`.
     slot = DAY / len(makers)
@@ -297,18 +308,18 @@ def _day(end: datetime) -> tuple[Sequence[ReadableSpan], dict[str, str]]:
     return finished.get_finished_spans(), kinds
 
 
-def export(end: datetime) -> bytes:
+def export(end: datetime, counts: Counts = COUNTS) -> bytes:
     """The day of traffic that ends at `end`, as one OTLP trace export."""
-    return encode_spans(_day(end)[0]).SerializeToString()
+    return encode_spans(_day(end, counts)[0]).SerializeToString()
 
 
-def kinds(end: datetime) -> dict[str, str]:
-    """What each trace of that day is: trace id to the name of its maker in COUNTS.
+def kinds(end: datetime, counts: Counts = COUNTS) -> dict[str, str]:
+    """What each trace of that day is: trace id to the name of its maker in `counts`.
 
     The answer key of the eval (eval/ground_truth.py). It is worked out again from `end`
     and never stored, so nothing the diagnoser can read says what a trace is.
     """
-    return _day(end)[1]
+    return _day(end, counts)[1]
 
 
 async def seed(database_url: str, rows: list[dict[str, Any]]) -> int:
