@@ -26,7 +26,7 @@ RunStatus = Literal["in_progress", "review_required", "completed", "failed", "ab
 RUN_STATUSES = get_args(RunStatus)
 DECISIONS = get_args(Decision)
 SPAN_STATUSES = get_args(SpanStatus)
-NAME_MAX = 80  # the width of a stored name, and so the longest name the API accepts
+NAME_MAX = 80  # the width of a stored name; a longer one is cut (auth.current_user)
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> str:

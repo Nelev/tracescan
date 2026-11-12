@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import partial
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
 
@@ -16,6 +16,7 @@ from agent.model import build_diagnoser_model, build_trace_judge_model, build_ui
 from api.runs import router as runs_router
 from api.trace_browser import router as trace_browser_router
 from api.traces import router as traces_router
+from auth import AuthSettings, session_claims
 from db.engine import create_engine
 from runs import PostgresRunStore, Runs
 from runs.healthy import HealthyStore
@@ -35,6 +36,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     dry_run = dry_run_setting()
     # Checked before anything opens: better to refuse at startup than after a run's review.
     require_dry_run(dry_run)
+    # CLERK_SECRET_KEY is required: without it the app stops here, not on each signed-in request.
+    app.state.auth = AuthSettings.from_env()
     # DATABASE_URL: a role separate from the read-only trace role. One database, two owners: the
     # checkpointer creates its own tables, Alembic creates ours (runs, reviews, spans, scores).
     database_url = os.environ["DATABASE_URL"]
@@ -77,9 +80,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 
 app = FastAPI(title="TraceScan", lifespan=lifespan)
-app.include_router(runs_router)
+# Every route needs a Clerk session token except these two: /health, and the collector, which
+# Medas's exporter calls with no session. tests/test_auth.py walks app.routes, so a route added
+# without a session check fails it unless it is named public there too. A router's dependencies
+# run before its routes' own, so a request without a session never starts a run or a trace server.
+app.include_router(runs_router, dependencies=[Depends(session_claims)])
+app.include_router(trace_browser_router, dependencies=[Depends(session_claims)])
 app.include_router(traces_router)
-app.include_router(trace_browser_router)
 
 
 @app.get("/health")

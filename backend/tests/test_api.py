@@ -17,7 +17,7 @@ from agent.graph import build_graph
 from agent.schemas import Proposal
 from api import ui_spec
 from main import app, dry_run_setting
-from runs import NAME_MAX, Runs
+from runs import Runs
 from tests.fakes import (
     DIAGNOSIS,
     SPEC,
@@ -578,9 +578,6 @@ def test_dry_run_is_off_when_the_environment_says_so(monkeypatch, value):
 
 # --- the record of runs: GET /v1/runs, who started and who reviewed
 
-ANA = {"X-User-Name": "ana"}
-BO = {"X-User-Name": "bo"}
-
 
 async def listed(client) -> list[dict]:
     response = await client.get("/v1/runs")
@@ -589,16 +586,18 @@ async def listed(client) -> list[dict]:
 
 
 @pytest.mark.anyio
-async def test_runs_are_listed_newest_first_with_who_started_them_and_no_state(client):
+async def test_runs_are_listed_newest_first_with_who_started_them_and_no_state(client, sign_in):
     use_diagnosed_run(attributes={"patient": PHI})
     window = {"target_app": "medas", "since": "2026-11-05T09:00:00Z"}
-    first = (await client.post("/v1/runs/stream", json=window, headers=ANA)).text
+    sign_in("ana")
+    first = (await client.post("/v1/runs/stream", json=window)).text
+    sign_in("local")
     second = (await client.post("/v1/runs/stream", json={"target_app": "medas"})).text
     first_id, second_id = (parse_sse(text)[0][1]["run_id"] for text in (first, second))
 
     runs = await listed(client)
     assert [r["run_id"] for r in runs] == [second_id, first_id]
-    assert [r["started_by"] for r in runs] == ["local", "ana"]  # no header: the default name
+    assert [r["started_by"] for r in runs] == ["local", "ana"]  # the names their tokens carry
     assert runs[1]["status"] == "review_required" and runs[1]["ended_at"] is None
     assert runs[1]["since"] == "2026-11-05T09:00:00Z" and runs[1]["until"] is None
     assert (runs[1]["failed_traces"], runs[1]["clusters"], runs[1]["proposals"]) == (2, 1, 1)
@@ -636,13 +635,12 @@ async def test_the_run_list_pages_with_the_total_in_a_header(client):
 
 
 @pytest.mark.anyio
-async def test_a_review_is_recorded_with_its_decisions_and_the_reviewer(client):
+async def test_a_review_is_recorded_with_its_decisions_and_the_reviewer(client, sign_in):
     use_diagnosed_run()
     run_id = await start(client)
     review = {"decisions": {"c0": "approve"}}
-    assert (
-        await client.post(f"/v1/runs/{run_id}/review", json=review, headers=BO)
-    ).status_code == 200
+    sign_in("bo")
+    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 200
 
     (run,) = await listed(client)
     assert run["status"] == "completed" and run["ended_at"] is not None
@@ -731,17 +729,6 @@ async def test_a_run_whose_client_went_away_is_recorded_as_aborted(client):
     (run,) = await listed(client)
     assert run["status"] == "aborted"
     assert (await client.get(f"/v1/runs/{run['run_id']}")).json()["status"] == "aborted"
-
-
-@pytest.mark.anyio
-async def test_a_user_name_longer_than_the_column_is_422(client):
-    response = await client.post(
-        "/v1/runs/stream",
-        json={"target_app": "medas"},
-        headers={"X-User-Name": "x" * (NAME_MAX + 1)},
-    )
-    assert response.status_code == 422
-    assert await listed(client) == []
 
 
 @pytest.mark.anyio

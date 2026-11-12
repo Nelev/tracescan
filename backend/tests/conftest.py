@@ -8,6 +8,7 @@ from alembic.config import Config
 from sqlalchemy import text
 
 from agent import model_guard
+from auth import session_claims
 from db.engine import create_engine
 from main import app
 from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
@@ -19,6 +20,21 @@ BACKEND = Path(__file__).parent.parent
 def no_retry_wait(monkeypatch):
     """No test waits out a retry delay."""
     monkeypatch.setattr(model_guard, "RETRY_DELAY_S", 0)
+
+
+@pytest.fixture(autouse=True)
+def sign_in():
+    """Every request is signed in as `local` unless the test calls `sign_in(name)`, through the
+    verified claims a session token of that person would carry; tests/test_auth.py signs out and
+    verifies real tokens."""
+
+    def as_user(name: str) -> None:
+        claims = {"sub": f"user_{name}", "sid": f"sess_{name}", "name": name}
+        app.dependency_overrides[session_claims] = lambda: claims
+
+    as_user("local")
+    yield as_user
+    app.dependency_overrides.pop(session_claims, None)
 
 
 @pytest.fixture
