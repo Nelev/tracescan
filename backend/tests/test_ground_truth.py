@@ -4,6 +4,7 @@ from collections import Counter
 
 from api.traces import decode
 from eval.ground_truth import FAULTS, NOT_FAULTS
+from eval.run import DEFAULT_END
 from scripts.seed_traces import COUNTS, export, healthy, kinds
 from tests.test_seed_traces import END, by_trace
 
@@ -36,3 +37,21 @@ def test_a_trace_of_a_kind_fails_where_its_answer_says():
             parents = {span["parent_span_id"] for span in errors}
             starts = [span["name"] for span in errors if span["span_id"] not in parents]
             assert FAULTS[kind].failing_span in (starts or [span["name"] for span in spans]), kind
+
+
+# Healthy traces the eval's day must have of each step a fault breaks, so a failure can be
+# compared with the same step in a request that went fine.
+HEALTHY_TWINS = 3
+
+
+def test_the_eval_day_has_healthy_traces_that_ran_each_failing_step():
+    traces = by_trace(decode(export(DEFAULT_END)))
+    healthy_steps = Counter(
+        name
+        for trace_id, kind in kinds(DEFAULT_END).items()
+        if kind == healthy.__name__
+        for name in {span["name"] for span in traces[trace_id]}
+    )
+
+    for kind, fault in FAULTS.items():
+        assert healthy_steps[fault.failing_span] >= HEALTHY_TWINS, kind

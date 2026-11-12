@@ -576,7 +576,7 @@ Start the frontend, then open `http://localhost:3000`:
 cd frontend && npm install && npm run dev
 ```
 
-With no real app sending traces, seed a day of synthetic Medas traffic (48 traces, healthy and failed):
+With no real app sending traces, seed a day of synthetic Medas traffic (52 traces, healthy and failed):
 
 ```bash
 cd backend && uv run --env-file .env python -m scripts.seed_traces
