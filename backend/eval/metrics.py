@@ -7,7 +7,8 @@ of its traces are of, and the scores follow from that. A ratio is (how many, out
 Whether a root cause is the right one takes a judge (eval/judge.py): its scores are added
 when the file has verdicts. The trace judge, which decides which traces failed before anything
 is clustered, is scored on its own against the kinds: how many faulty traces it caught, how many
-harmless ones it flagged, per kind too; its spend is in the cost.
+harmless ones it flagged, per kind too, and whether it blamed the step the fault starts in; its
+spend is in the cost.
 """
 
 import json
@@ -38,6 +39,12 @@ def judge_scores(result: dict[str, Any]) -> dict[str, Any]:
     harmless one not. A trace the judge could not judge (`judge_failures`) counts as not failed."""
     kinds = result["kinds"]
     failed = {v["trace_id"] for v in result["trace_verdicts"] if v["failed"]}
+    # The step the judge blamed in each faulty trace it caught, against the answer key's.
+    blamed = [
+        v.get("failing_span_name") == FAULTS[kinds[v["trace_id"]]].failing_span
+        for v in result["trace_verdicts"]
+        if v["failed"] and kinds[v["trace_id"]] in FAULTS
+    ]
     by_kind: dict[str, list[int]] = {}
     for trace_id, kind in kinds.items():
         hits = by_kind.setdefault(kind, [0, 0])
@@ -48,6 +55,8 @@ def judge_scores(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "judge_recall": (sum(t in failed for t in faulty), len(faulty)),
         "judge_false_positives": (sum(t in failed for t in harmless), len(harmless)),
+        # Of the faulty traces it caught, how many blame the step the fault starts in.
+        "judge_blame": (sum(blamed), len(blamed)),
         "judge_failures": len(result.get("judge_failures", [])),
         # Per seeded kind: (judged failed, traces of it).
         "judge_by_kind": {kind: tuple(by_kind[kind]) for kind in sorted(by_kind)},

@@ -2,6 +2,60 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("Other entry points"); the code is in `backend/eval/`.
 
+## Experiment 7: the judge's unsure, not-found and blame rules (2026-11-12)
+
+### Question
+
+Experiments 4 and 5 found two weak spots in the trace judge. An unsure judge scores 0.5, which counts as failed. And in a request with two errors it blames the first, not the one that ended the request. Do three prompt rules fix both without losing recall?
+
+### What changed
+
+`agent/judge_prompt.md`, three rules; the same two days as experiment 5 (runs G and H):
+
+- **Unsure:** score 0.6, not "in the middle". The prompt now says that 0.5 or less means failed.
+- **Not-found:** a lookup that says the thing does not exist, followed by a model call that completed, is by design. The trace never holds the answer, so its absence is no reason to doubt it. (The old rule required "the model tells the user so", which a trace cannot show.)
+- **Blame:** when more than one step failed, blame the one that ended the request (the failure after which nothing went on to serve the user, usually the last). An earlier failure still counts towards the score. This matches the answer key, which already names the provider's `chat` span for `double_failure`. `TraceVerdict.blamed_span_id`'s description says the same.
+
+`eval.metrics` also gained `judge_blame`: of the faulty traces the judge caught, how many blame the answer key's `failing_span` step. It was worked out by hand before.
+
+- **Run I.** The fault day of run G. Results file: `out/eval/20261112T154735Z.json`.
+- **Run J.** The control day of run H. Results file: `out/eval/20261112T154749Z.json`.
+
+### Results
+
+| Score | Run G (exp 5) | Run I | Run H (exp 5, control) | Run J (control) |
+| --- | --- | --- | --- | --- |
+| Judge recall | 34/34 | **34/34** | n/a | n/a |
+| Judge false positives | 0/18 | 0/18 | 1/52 | **0/52** |
+| Judge blame (right step) | 32/34 | **34/34** | n/a | n/a |
+| Scores between 0.3 and 0.85 | 1 | 0 | 1 (0.5) | 0 |
+| Detection | 6/9 | 6/9 | n/a | n/a |
+| Purity | 27/34 | 27/34 | 1/1 | 0/0 |
+| Separation | 2/9 | 2/9 | n/a | n/a |
+| False alarms (clusters) | 0 | 0 | 1 | **0** |
+| Category / cause accuracy | 5/6, 5/6 | **6/6, 6/6** | n/a | n/a |
+| Total cost (judge part) | $0.13 ($0.03) | $0.13 ($0.03) | $0.04 ($0.03) | $0.02 ($0.02) |
+
+Run I's clusters: the PubMed timeouts (normal and look-alike); the provider's 5xx failures together with both `double_failure` traces; `context_overflow` with the one model timeout; `tool_arguments` alone; `silent_no_hits` with `store_down`; `unexplained` alone (step and error).
+
+### Findings
+
+1. **All three rules did what they were for.** On the control day every trace scored 0.9 or more and nothing was proposed. On the fault day every trace scored 0.2 or less or 0.9 or more, so nothing sits near the threshold, and the judge now blames the step the answer key names in all 34 faulty traces.
+2. **The double failures now cluster with the provider outage, which is their cause.** Both blame the provider's 503, so their failure text is the same as `model_unavailable`'s 5xx face, and the timeout cluster now holds only timeouts. Detection and separation do not move: `double_failure` is the minority kind of the provider cluster, and separation wants each seeded kind alone.
+3. **The eval now penalises a right answer.** `double_failure` and `model_unavailable` have the same injected cause, the model provider answering with a server error, and the same category. Grouping them is what a reviewer would want: one issue for the provider. The answer key counts them as two faults because they were seeded as two kinds. Scoring should treat kinds that share a cause as one fault, for example a `same_cause_as` field on `Fault`.
+4. **Cause accuracy is 6/6.** The silent-miss diagnosis that lost a point in run G got full marks this time. One run each, so that may be run-to-run variation rather than the prompt change.
+
+### Limits
+
+- One run per day, and on the same two days the rules were written from. The not-found rule was written after seeing run H's false alarm.
+- The judge's attribution (`app`, `external`, `unclear`) is still not scored: the answer key has no expected value for it.
+
+### What to do next
+
+1. Let the answer key say which kinds share a cause, so that `detection` and `separation` stop counting the provider merge as a loss.
+2. The clustering, as in experiment 6: a membership threshold, and a duration size word in the failure text.
+3. A third, unseen day and a second control run, to see how far these results hold.
+
 ## Experiment 6: why the clustering merges faults (2026-11-12)
 
 ### Question
