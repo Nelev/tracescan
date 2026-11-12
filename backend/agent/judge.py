@@ -4,7 +4,8 @@ It decides, for each trace in a run's window (nodes/score_trace.py), whether the
 the decision the removed heuristic scoring job used to make when spans were stored. `judge_trace` takes a tree the trace
 server already sanitized, so the model sees no attribute outside the allowlist.
 
-The score is the model's; whether that counts as failed is the code's (`JUDGE_FAILED_MAX_SCORE`).
+The score is the model's; whether that counts as failed is the code's (`trace_store.models.is_failed`,
+the same threshold the trace browser reads the stored score with).
 A failed trace must blame a span of the tree it was shown: if it does not, the model is asked once
 more with the valid ids, and if it still names an unknown span, or none, the code blames the
 deepest error span (the root when no span failed). A trace that did not fail blames nothing.
@@ -18,11 +19,11 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from agent.const import JUDGE_FAILED_MAX_SCORE, MAX_HEALTHY_PICKS
+from agent.const import MAX_HEALTHY_PICKS
 from agent.evidence import span_index, walk
 from agent.model_guard import Spent, structured_asker, trace_budget
 from agent.schemas import BlameCheck, TraceVerdict
-from trace_store.models import SpanNode
+from trace_store.models import SpanNode, is_failed
 
 JUDGE_PROMPT = (Path(__file__).parent / "judge_prompt.md").read_text()
 
@@ -106,11 +107,7 @@ async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
     verdict = await ask(messages)
     valid = span_index([tree])[tree.trace_id]
     retried = False
-    if (
-        verdict.score <= JUDGE_FAILED_MAX_SCORE
-        and verdict.blamed_span_id not in valid
-        and run.ok(trace_budget())
-    ):
+    if is_failed(verdict.score) and verdict.blamed_span_id not in valid and run.ok(trace_budget()):
         messages = [
             *messages,
             AIMessage(verdict.model_dump_json()),
@@ -119,7 +116,7 @@ async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
         verdict = await ask(messages)
         retried = True
     # Decided once, on the last answer, which may have changed its mind about the failure.
-    failed = verdict.score <= JUDGE_FAILED_MAX_SCORE
+    failed = is_failed(verdict.score)
     blamed: str | None = None
     check: BlameCheck | None = None
     if failed:

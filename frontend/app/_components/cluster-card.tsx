@@ -21,6 +21,7 @@ import {
   confidenceLevel,
   type EvidenceCheck,
   formatUsage,
+  healthyTwinsText,
   METHOD_LABEL,
   signatureParts,
   verificationText,
@@ -393,6 +394,7 @@ export function ClusterCard({
   const detailsId = `cluster-${cluster.cluster_id}-details`;
   const cites = diagnosis?.evidence.length ?? 0;
   const check = diagnosis ? CHECK[diagnosis.evidence_check] : null;
+  const twins = healthyTwinsText(diagnosis?.healthy_twins);
   const toggle = expanded
     ? "Hide the evidence"
     : diagnosis
@@ -574,6 +576,7 @@ export function ClusterCard({
             <span>grouped by {METHOD_LABEL[cluster.method]}</span>
             <span>diagnosis {formatUsage(cluster.usage)}</span>
             <span>{verificationText(cluster.verification)}</span>
+            {twins && <span>{twins}</span>}
           </p>
         </div>
       )}

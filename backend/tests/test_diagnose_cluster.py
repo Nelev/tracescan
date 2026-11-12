@@ -88,13 +88,15 @@ async def test_the_model_sees_healthy_twins_of_the_failing_step_next_to_the_fail
     prompt = str(model.seen[0][1].content)
     assert text in prompt and TWIN.text in prompt and "do not cite them" in prompt
     assert result["diagnoses"][0]["evidence_check"] == "valid"
+    assert result["diagnoses"][0]["healthy_twins"] == 1  # the run can tell the twins were shown
 
 
 @pytest.mark.anyio
 async def test_no_twins_and_no_store_leave_the_prompt_as_it_was():
     without, empty = fake_diagnoser(DIAGNOSIS), fake_diagnoser(DIAGNOSIS)
-    await diagnose(without)
-    await diagnose(empty, FakeHealthy([]))
+    no_store = await diagnose(without)
+    no_match = await diagnose(empty, FakeHealthy([]))
+    assert [r["diagnoses"][0]["healthy_twins"] for r in (no_store, no_match)] == [0, 0]
     assert without.seen[0][1].content == empty.seen[0][1].content
     assert "Healthy calls" not in str(without.seen[0][1].content)
 
@@ -103,6 +105,7 @@ async def test_no_twins_and_no_store_leave_the_prompt_as_it_was():
 async def test_a_failing_store_does_not_fail_the_diagnosis(caplog):
     result = await diagnose(fake_diagnoser(DIAGNOSIS), DownHealthy())
     assert result["diagnoses"][0]["cluster_id"] == "c0"
+    assert result["diagnoses"][0]["healthy_twins"] == 0
     assert "healthy twins of c0 not found: RuntimeError" in caplog.text
 
 

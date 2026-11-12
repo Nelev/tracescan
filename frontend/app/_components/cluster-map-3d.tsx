@@ -22,6 +22,7 @@ import {
   type Vec3,
 } from "@/lib/cluster-map";
 import { cn } from "@/lib/utils";
+import { tokenRgb } from "./token-color";
 
 /** Where the floor sits: just under the lowest a point can be (the map is in [-1, 1]). */
 const FLOOR = -1.1;
@@ -480,26 +481,7 @@ function useInk(): Ink {
   return inkCache;
 }
 
-/**
- * A CSS color token as `rgb(...)`. The tokens are oklch, which three.js cannot parse, so the
- * browser paints one pixel with it and the pixel is read back. Some tokens are translucent (the
- * glass card, the hairline border), so the pixel is first painted with the opaque page
- * background and the token composited over it: the color it shows on the page, not its raw hue.
- */
+/** A CSS color token as `rgb(...)`, as it shows on the page (see `tokenRgb`). */
 function token(name: string): string {
-  const style = getComputedStyle(document.documentElement);
-  const value = style.getPropertyValue(name).trim();
-  const page = style.getPropertyValue("--background").trim();
-  const canvas = document.createElement("canvas");
-  canvas.width = 1;
-  canvas.height = 1;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return "#808080";
-  context.fillStyle = "#808080";
-  context.fillStyle = page;
-  context.fillRect(0, 0, 1, 1);
-  context.fillStyle = value;
-  context.fillRect(0, 0, 1, 1);
-  const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
-  return `rgb(${r}, ${g}, ${b})`;
+  return `rgb(${tokenRgb(name).join(", ")})`;
 }

@@ -5,7 +5,7 @@ ids, names, counts and decisions only: no issue text and no span content. A pers
 client sent (there is no login), stored as it is in the row that names them. The checkpoint
 stays the record of a run's state and proposals; `runs` is the index and the lifecycle around it.
 `spans` is the exception: it is the trace store, and holds what the collector received;
-`scores` is what the heuristic checks say about each of its traces (ids and numbers only).
+`scores` is what the trace judge said about each of its traces (ids and numbers only).
 
 Change a table here, then write a migration: `uv run alembic revision --autogenerate -m "..."`.
 """
@@ -105,7 +105,8 @@ class Span(Base):
 class Score(Base):
     """What a check says about one stored trace; read by the trace browser.
 
-    The heuristic scoring job that wrote these rows is removed; nothing writes them for now.
+    Written after each run from the trace judge's verdicts (runs/scores.py, evaluator
+    `trace_judge`, one row per judged trace, a later run's verdict replacing an earlier one).
 
     0.0 is bad and 1.0 is fine. A trace counts as failed when its lowest score is low. `span_id`
     is the span the check blames, when it blames one. Ids and numbers only, no span content.

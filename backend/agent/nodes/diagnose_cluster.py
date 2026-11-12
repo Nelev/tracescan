@@ -13,7 +13,8 @@ graph: a run is durable only once it waits for review, so nothing is gained by c
 
 With a healthy-span store in the context, the prompt also gets the nearest healthy calls of the
 failing step (`healthy_twins`), as comparison only: they are not spans of the exemplars, so the
-evidence check would refuse a citation of them.
+evidence check would refuse a citation of them. The stored diagnosis keeps how many it showed
+(`healthy_twins`, 0 when none), so a run tells whether the comparison was there.
 """
 
 import asyncio
@@ -60,8 +61,9 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
             trees = await asyncio.gather(
                 *(context.traces.get_trace_tree(t) for t in cluster["exemplar_trace_ids"])
             )
-            twins = await healthy_twins(state, trees, context)
+            twins, shown = await healthy_twins(state, trees, context)
             diagnosis = await _diagnose(cluster, trees, context.model, spent, twins)
+            diagnosis["healthy_twins"] = shown
     except Exception as exc:
         # Type name only: the message could carry span contents.
         logger.error("diagnosis of %s failed: %s", cluster_id, type(exc).__name__)
@@ -69,13 +71,16 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
     return {"diagnoses": [diagnosis], **_usage(cluster_id, spent)}
 
 
-async def healthy_twins(task: ClusterTask, trees: list[SpanNode], context: TraceContext) -> str:
-    """The prompt section with healthy calls of the cluster's failing step, or "" when there are
-    none. The step is the one the trace judge blamed in the first exemplar that has one; the
-    query is that span's step_text. Best effort: a failing lookup leaves the section out."""
+async def healthy_twins(
+    task: ClusterTask, trees: list[SpanNode], context: TraceContext
+) -> tuple[str, int]:
+    """The prompt section with healthy calls of the cluster's failing step and how many it holds,
+    or ("", 0) when there are none. The step is the one the trace judge blamed in the first
+    exemplar that has one; the query is that span's step_text. Best effort: a failing lookup
+    leaves the section out."""
     blamed = task["failing_span"]
     if context.healthy is None or blamed is None:
-        return ""
+        return "", 0
     trace_id, span_id = blamed["trace_id"], blamed["span_id"]
     try:
         tree = next(tree for tree in trees if tree.trace_id == trace_id)
@@ -87,16 +92,17 @@ async def healthy_twins(task: ClusterTask, trees: list[SpanNode], context: Trace
         logger.warning(
             "healthy twins of %s not found: %s", task["cluster"]["cluster_id"], type(exc).__name__
         )
-        return ""
+        return "", 0
     if not twins:
-        return ""
-    return (
+        return "", 0
+    section = (
         f"\nThe failing step of exemplar {trace_id}, span {span_id}:\n{failed}\n"
         "Healthy calls of the same step from requests that went fine, nearest first. Compare "
         "them with the failure to find what differs. They are not evidence: do not cite them.\n"
         + "\n---\n".join(twin.text for twin in twins)
         + "\n"
     )
+    return section, len(twins)
 
 
 def _usage(cluster_id: str, spent: Spent) -> dict:

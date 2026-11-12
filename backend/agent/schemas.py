@@ -102,9 +102,12 @@ class Diagnosis(BaseModel):
 
 
 class StoredDiagnosis(Diagnosis):
-    """A diagnosis as diagnose_cluster stores it: the model's answer plus the code's evidence check."""
+    """A diagnosis as diagnose_cluster stores it: the model's answer plus what the code adds."""
 
     evidence_check: EvidenceCheck
+    # How many healthy calls of the failing step the prompt showed; None for runs from before
+    # the count was kept.
+    healthy_twins: int | None = Field(default=None, ge=0)
 
 
 # How the failure embeddings were flattened to 3D for the cluster map: t-SNE, or PCA for few points.

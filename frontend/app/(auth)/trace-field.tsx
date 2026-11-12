@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { tokenRgb } from "../_components/token-color";
 
 /**
  * The sign-in backdrop: TraceScan's pipeline, played slowly behind the form. Traces drift in from
@@ -80,6 +81,7 @@ interface Scene {
   /** What the scene fades out around (the form), in canvas pixels. */
   clear: Box[];
   dpr: number;
+  layout: Layout;
 }
 
 interface Box {
@@ -116,41 +118,22 @@ const GRID_BACKGROUND =
 const CAPTION_Y = 32;
 const SCENE_TOP = 64;
 
+const CLUSTERS: [fx: number, fy: number, label: string, weight: number][] = [
+  [0.18, 0.22, "tool_schema_error", 0.34],
+  [0.82, 0.4, "retrieval_miss", 0.28],
+  [0.12, 0.62, "infra_error", 0.22],
+  [0.74, 0.8, "context_overflow", 0.16],
+];
+
 function makeClusters(): Cluster[] {
-  return [
-    {
-      fx: 0.18,
-      fy: 0.22,
-      label: "tool_schema_error",
-      weight: 0.34,
-      landed: 0,
-      pulseAt: null,
-    },
-    {
-      fx: 0.82,
-      fy: 0.4,
-      label: "retrieval_miss",
-      weight: 0.28,
-      landed: 0,
-      pulseAt: null,
-    },
-    {
-      fx: 0.12,
-      fy: 0.62,
-      label: "infra_error",
-      weight: 0.22,
-      landed: 0,
-      pulseAt: null,
-    },
-    {
-      fx: 0.74,
-      fy: 0.8,
-      label: "context_overflow",
-      weight: 0.16,
-      landed: 0,
-      pulseAt: null,
-    },
-  ];
+  return CLUSTERS.map(([fx, fy, label, weight]) => ({
+    fx,
+    fy,
+    label,
+    weight,
+    landed: 0,
+    pulseAt: null,
+  }));
 }
 
 interface Layout {
@@ -159,28 +142,21 @@ interface Layout {
   right: number;
 }
 
-let layoutFor = -1;
-let layoutMemo: Layout = { judgeX: 0, left: 0, right: 0 };
-
 /**
- * Where each stage sits: the judge's beam left of the form, the clusters right of it. Called for
- * every point and tail dot of every frame, so it is worked out once per width.
+ * Where each stage sits: the judge's beam left of the form, the clusters right of it. Read for
+ * every point and tail dot of every frame, so it is worked out on resize and kept on the scene.
  */
 function layout(w: number): Layout {
-  if (w !== layoutFor) {
-    const left = Math.min(w / 2 + 270, w * 0.72);
-    layoutMemo = {
-      judgeX: Math.min(Math.max(w / 2 - 260, w * 0.2), w * 0.36),
-      left,
-      right: Math.min(w * 0.95, left + 560),
-    };
-    layoutFor = w;
-  }
-  return layoutMemo;
+  const left = Math.min(w / 2 + 270, w * 0.72);
+  return {
+    judgeX: Math.min(Math.max(w / 2 - 260, w * 0.2), w * 0.36),
+    left,
+    right: Math.min(w * 0.95, left + 560),
+  };
 }
 
 function clusterCenter(s: Scene, fx: number, fy: number): [number, number] {
-  const { left, right } = layout(s.w);
+  const { left, right } = s.layout;
   return [left + fx * (right - left), s.h * (0.1 + fy * 0.8)];
 }
 
@@ -260,7 +236,7 @@ function land(s: Scene, p: Point) {
 
 function step(s: Scene, dt: number) {
   s.t += dt;
-  const { judgeX } = layout(s.w);
+  const { judgeX } = s.layout;
   s.spawnIn -= dt;
   if (s.spawnIn <= 0) {
     s.traces.push(makeTrace(s));
@@ -365,7 +341,7 @@ function drawTraces(ctx: CanvasRenderingContext2D, s: Scene, pal: Palette) {
 }
 
 function drawBeam(ctx: CanvasRenderingContext2D, s: Scene, pal: Palette) {
-  const { judgeX } = layout(s.w);
+  const { judgeX } = s.layout;
   ctx.fillStyle = rgba(pal.primary, 0.1);
   ctx.fillRect(judgeX, 0, 1, s.h);
   const len = 180;
@@ -465,7 +441,7 @@ function drawPoints(ctx: CanvasRenderingContext2D, s: Scene, pal: Palette) {
 
 function drawCaptions(ctx: CanvasRenderingContext2D, s: Scene, pal: Palette) {
   if (s.w < 900) return;
-  const { judgeX, left, right } = layout(s.w);
+  const { judgeX, left, right } = s.layout;
   const captions: [string, number][] = [
     ["INCOMING TRACES", judgeX / 2],
     ["TRACE JUDGE", judgeX],
@@ -560,29 +536,15 @@ function clearForm(ctx: CanvasRenderingContext2D, mask: Mask | null) {
   ctx.restore();
 }
 
-/** The tokens as RGB: the canvas cannot blend an oklch string with an alpha of its own. */
 function readPalette(): Palette {
-  const style = getComputedStyle(document.documentElement);
-  const probe = document.createElement("canvas");
-  probe.width = 1;
-  probe.height = 1;
-  const ctx = probe.getContext("2d", { willReadFrequently: true });
-  const read = (token: string, fallback: string): Rgb => {
-    if (!ctx) return [128, 128, 128];
-    ctx.clearRect(0, 0, 1, 1);
-    ctx.fillStyle = fallback;
-    ctx.fillStyle = style.getPropertyValue(token).trim() || fallback;
-    ctx.fillRect(0, 0, 1, 1);
-    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-    return [r, g, b];
-  };
   return {
-    muted: read("--muted-foreground", "#a3a8b8"),
-    primary: read("--primary", "#9fa2ff"),
-    failure: read("--destructive", "#f07a76"),
+    muted: tokenRgb("--muted-foreground"),
+    primary: tokenRgb("--primary"),
+    failure: tokenRgb("--destructive"),
     mono:
-      style.getPropertyValue("--font-geist-mono").trim() ||
-      "ui-monospace, monospace",
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--font-geist-mono")
+        .trim() || "ui-monospace, monospace",
   };
 }
 
@@ -605,6 +567,7 @@ export function TraceField({ className }: { className?: string }) {
       clusters: makeClusters(),
       clear: [],
       dpr: 1,
+      layout: layout(0),
     };
     let mask: Mask | null = null;
 
@@ -612,6 +575,7 @@ export function TraceField({ className }: { className?: string }) {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       scene.w = canvas.clientWidth;
       scene.h = canvas.clientHeight;
+      scene.layout = layout(scene.w);
       canvas.width = Math.round(scene.w * dpr);
       canvas.height = Math.round(scene.h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -626,11 +590,27 @@ export function TraceField({ className }: { className?: string }) {
         const b = el.getBoundingClientRect();
         return { x: b.x, y: b.y, w: b.width, h: b.height };
       });
-      const key = (boxes: Box[]) =>
-        boxes.map((b) => `${b.x},${b.y},${b.w},${b.h}`).join(";");
-      if (key(next) === key(scene.clear)) return;
+      const prev = scene.clear;
+      const dx = (next[0]?.x ?? 0) - (prev[0]?.x ?? 0);
+      const dy = (next[0]?.y ?? 0) - (prev[0]?.y ?? 0);
+      // The same boxes shifted together (a scroll): move the mask, do not blur it again.
+      const shifted =
+        next.length === prev.length &&
+        next.every(
+          (b, i) =>
+            b.x - prev[i].x === dx &&
+            b.y - prev[i].y === dy &&
+            b.w === prev[i].w &&
+            b.h === prev[i].h,
+        );
+      if (shifted && dx === 0 && dy === 0) return;
       scene.clear = next;
-      mask = makeMask(next, scene.dpr);
+      if (shifted && mask) {
+        mask.x += dx;
+        mask.y += dy;
+      } else {
+        mask = makeMask(next, scene.dpr);
+      }
       if (still) draw(ctx, scene, palette, mask);
     };
     resize();
