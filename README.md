@@ -618,7 +618,7 @@ cd backend && uv run --env-file .env python -m eval.judge
 cd backend && uv run python -m eval.metrics
 ```
 
-A seeded day has twelve kinds of traces (`COUNTS` in `scripts/seed_traces.py`, answers in `eval/ground_truth.py`): healthy requests, plain faults, and hard cases (a look-alike timeout, a fault with two faces, a request with two errors of which the first is not the cause, a failure at the root only, a retrieval that silently finds nothing, and harmless error spans). [docs/eval-notes.md](docs/eval-notes.md) logs every experiment and its results.
+A seeded day has twelve kinds of traces (`COUNTS` in `scripts/seed_traces.py`, answers in `eval/ground_truth.py`): healthy requests, plain faults, and hard cases (a look-alike timeout, a fault with two faces, a request with two errors of which the first is not the cause, a failure at the root only, a retrieval that silently finds nothing, and harmless error spans). [docs/eval-notes.md](docs/eval-notes.md) logs every experiment and its results. [docs/eval/review.md](docs/eval/review.md) sums them up for review, and [docs/eval/eval-results.xlsx](docs/eval/eval-results.xlsx) holds every run's scores, the clusters, the answer key and the rubrics.
 
 A control day (`python -m eval.run --control`) seeds only healthy requests and harmless errors, so anything it finds is a false alarm. `eval.metrics` also scores the trace judge on its own (which traces it called failed, per kind) and counts its spend in the cost.
 
