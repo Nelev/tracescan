@@ -142,3 +142,16 @@ class ReviewRecord(BaseModel):
     decision: Decision
     reviewer: str
     decided_at: datetime
+
+
+# --- The healthy-span store's answers
+
+
+@dataclass(frozen=True)
+class HealthyMatch:
+    """A stored healthy call of a step, near the text that was searched for."""
+
+    trace_id: str
+    span_id: str
+    text: str  # its step_text: names, error types and bucketed numbers only
+    distance: float  # cosine distance: 0 is the same text, smaller is nearer

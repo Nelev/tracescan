@@ -60,3 +60,35 @@ async def test_saving_a_window_again_replaces_its_rows(engine):
 async def test_no_picks_write_nothing(engine):
     store = HealthyStore(engine, HashingEmbedder(EMBEDDING_DIMENSIONS))
     assert await store.save("medas", VERDICTS[1:]) == 0
+
+
+def verdict(trace_id: str, step: str, latency: str) -> dict:
+    text = f"step: {step}\noutcome: ok\nlatency: {latency}"
+    return {"trace_id": trace_id, "healthy_spans": [{"span_id": "s", "step": step, "text": text}]}
+
+
+@pytest.mark.anyio
+async def test_similar_finds_the_nearest_calls_of_the_same_step_only(engine):
+    store = HealthyStore(engine, HashingEmbedder(EMBEDDING_DIMENSIONS))
+    pubmed, medline = "execute_tool search_pubmed", "execute_tool search_medlineplus"
+    await store.save(
+        "medas",
+        [
+            verdict("fast", pubmed, "fast (<0.5 s)"),
+            verdict("slow", pubmed, "slow (2-5 s)"),
+            verdict("other_step", medline, "slow (2-5 s)"),
+        ],
+    )
+    await store.save("other_app", [verdict("other_app", pubmed, "slow (2-5 s)")])
+
+    query = f"step: {pubmed}\noutcome: error TimeoutError\nlatency: slow (2-5 s)"
+    found = await store.similar(query, pubmed, "medas", k=5)
+    assert [match.trace_id for match in found] == ["slow", "fast"]
+    assert found[0].distance < found[1].distance and found[0].text.endswith("slow (2-5 s)")
+
+
+@pytest.mark.anyio
+async def test_similar_finds_nothing_for_a_step_with_no_healthy_calls(engine):
+    store = HealthyStore(engine, HashingEmbedder(EMBEDDING_DIMENSIONS))
+    await store.save("medas", VERDICTS)
+    assert await store.similar("step: x", "execute_tool never_seen", "medas") == []

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from agent.const import CHUNK_TEMPLATE_VERSION, EMBEDDING_DIMENSIONS
 from agent.embeddings import Embedder
+from runs.schemas import HealthyMatch
 
 COLLECTION = "healthy_spans"
 
@@ -86,3 +87,30 @@ class HealthyStore:
         if docs:
             await self._vectors.aadd_documents(docs)
         return len(docs)
+
+    async def similar(self, text: str, step: str, app: str, k: int = 3) -> list[HealthyMatch]:
+        """The `k` stored healthy calls of `step` in `app` nearest to `text`, nearest first.
+
+        Only rows of the current chunk template: a text of another version is not comparable.
+        No threshold yet: bge-small's scores bunch together, so one is tuned on the eval later.
+        """
+        found = await self._vectors.asimilarity_search_with_score(
+            text,
+            k=k,
+            filter={
+                "$and": [
+                    {"app": {"$eq": app}},
+                    {"step": {"$eq": step}},
+                    {"v": {"$eq": CHUNK_TEMPLATE_VERSION}},
+                ]
+            },
+        )
+        return [
+            HealthyMatch(
+                trace_id=doc.metadata["trace_id"],
+                span_id=doc.metadata["span_id"],
+                text=doc.page_content,
+                distance=distance,
+            )
+            for doc, distance in found
+        ]
