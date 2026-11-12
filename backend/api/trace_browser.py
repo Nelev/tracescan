@@ -10,11 +10,13 @@ server sanitizes it (trace_store/sanitize.py): attributes outside the allowlist 
 status messages are truncated.
 """
 
+import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import AwareDatetime
 
+from api.schemas import TOTAL_COUNT
 from trace_store.const import MAX_ATTR_CHARS_TREE, MAX_LIMIT
 from trace_store.models import TraceDetail, TraceId, TraceRow
 from trace_store.postgres_reader import PostgresTraceReader
@@ -30,15 +32,26 @@ def _reader(request: Request) -> PostgresTraceReader:
 @router.get("/traces")
 async def list_traces(
     request: Request,
+    response: Response,
     app: str = "medas",
     since: AwareDatetime | None = None,
     until: AwareDatetime | None = None,
     failed_only: bool = False,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[TraceRow]:
-    return await _reader(request).list_traces(
-        app, since=since, until=until, failed_only=failed_only, limit=limit
+    """One page of the list: `limit` traces after the newest `offset`. The total over all pages,
+    with the same filters, is the `X-Total-Count` header, so the body stays a plain list."""
+    reader = _reader(request)
+    # Two independent reads, each on its own connection: run together, not one after the other.
+    total, page = await asyncio.gather(
+        reader.count_traces(app, since=since, until=until, failed_only=failed_only),
+        reader.list_traces(
+            app, since=since, until=until, failed_only=failed_only, limit=limit, offset=offset
+        ),
     )
+    response.headers[TOTAL_COUNT] = str(total)
+    return page
 
 
 @router.get("/traces/{trace_id}")

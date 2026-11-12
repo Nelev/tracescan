@@ -12,7 +12,7 @@ Give it TRACE_DATABASE_URL; the session is opened read-only, whatever the role m
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import RowMapping, and_, func, literal_column, select
+from sqlalchemy import ColumnElement, RowMapping, ScalarSelect, and_, func, literal_column, select
 from sqlalchemy.dialects.postgresql import JSONB, distinct_on
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.orm import aliased
@@ -77,6 +77,26 @@ def read_only_engine(database_url: str) -> AsyncEngine:
     )
 
 
+def _listed_roots(
+    app: str, since: datetime | None, until: datetime | None, failed_only: bool
+) -> tuple[type[Span], ScalarSelect[float], list[ColumnElement[bool]]]:
+    """The root spans a trace list holds: their alias, each one's lowest score, and the filters.
+
+    Shared by the list and its count, so the two can never disagree about which traces are in.
+    """
+    root = aliased(Span, name="root")
+    # Per root, probing the scores' key: no aggregate over the whole table.
+    lowest = select(func.min(Score.value)).where(Score.trace_id == root.trace_id).scalar_subquery()
+    listed: list[ColumnElement[bool]] = [root.parent_span_id.is_(None), root.app == app]
+    if failed_only:
+        listed.append(lowest <= FAILED_MAX_SCORE)
+    if since is not None:
+        listed.append(root.start_time >= since)
+    if until is not None:
+        listed.append(root.start_time < until)
+    return root, lowest, listed
+
+
 class PostgresTraceReader:
     """Serves the traces of `apps` only, on every method."""
 
@@ -124,18 +144,16 @@ class PostgresTraceReader:
         until: datetime | None = None,
         failed_only: bool = False,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[TraceRow]:
         """The newest whole-rooted traces of `app`, failed or not, unscored ones included.
 
-        A trace whose root span has not arrived is not listed. Reads no attributes or events.
+        A trace whose root span has not arrived is not listed. `offset` skips that many of the
+        newest, so the list can be read page by page. Reads no attributes or events.
         """
         if app not in self._apps:
             return []
-        root = aliased(Span, name="root")
-        # Per root, probing the scores' key: no aggregate over the whole table.
-        lowest = (
-            select(func.min(Score.value)).where(Score.trace_id == root.trace_id).scalar_subquery()
-        )
+        root, lowest, listed = _listed_roots(app, since, until, failed_only)
         span_count = (
             select(func.count())
             .select_from(Span)
@@ -149,14 +167,8 @@ class PostgresTraceReader:
             root.status,
             lowest.label("low"),
             span_count.label("spans"),
-        ).where(root.parent_span_id.is_(None), root.app == app)
-        if failed_only:
-            roots = roots.where(lowest <= FAILED_MAX_SCORE)
-        if since is not None:
-            roots = roots.where(root.start_time >= since)
-        if until is not None:
-            roots = roots.where(root.start_time < until)
-        roots = roots.order_by(root.start_time.desc(), root.trace_id).limit(limit)
+        ).where(*listed)
+        roots = roots.order_by(root.start_time.desc(), root.trace_id).limit(limit).offset(offset)
 
         async with self._engine.connect() as conn:
             traces = (await conn.execute(roots)).mappings().all()
@@ -183,6 +195,22 @@ class PostgresTraceReader:
                 )
             )
         return rows
+
+    async def count_traces(
+        self,
+        app: str,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        failed_only: bool = False,
+    ) -> int:
+        """How many traces `list_traces` would list with the same filters, over all its pages."""
+        if app not in self._apps:
+            return 0
+        root, _, listed = _listed_roots(app, since, until, failed_only)
+        async with self._engine.connect() as conn:
+            counted = select(func.count()).select_from(root).where(*listed)
+            return (await conn.execute(counted)).scalar_one()
 
     async def get_trace_detail(self, trace_id: str) -> TraceDetail | None:
         """One trace's tree (raw: the caller sanitizes it) and its scores, on one connection.

@@ -1,3 +1,4 @@
+import { type Page, pageOffset, totalFrom } from "./pages";
 import {
   type Decisions,
   parseReviewResult,
@@ -80,6 +81,32 @@ async function fetchJson<T>(
   init: RequestInit,
   parse: (body: unknown) => T | null,
 ): Promise<T> {
+  return (await fetchParsed(path, init, parse)).value;
+}
+
+/**
+ * One page of a list: the rows the body holds, and the whole list's total from the server's
+ * `X-Total-Count` header (a server without it sent everything it has, so the rows are the total).
+ */
+async function fetchPage<T>(
+  path: string,
+  init: RequestInit,
+  parse: (body: unknown) => T[] | null,
+): Promise<Page<T>> {
+  const { value, headers } = await fetchParsed(path, init, parse);
+  return {
+    items: value,
+    total: totalFrom(headers.get(TOTAL_COUNT), value.length),
+  };
+}
+
+const TOTAL_COUNT = "X-Total-Count";
+
+async function fetchParsed<T>(
+  path: string,
+  init: RequestInit,
+  parse: (body: unknown) => T | null,
+): Promise<{ value: T; headers: Headers }> {
   const aborted = () => init.signal?.aborted ?? false;
   let res: Response;
   try {
@@ -98,12 +125,25 @@ async function fetchJson<T>(
   }
   const parsed = parse(body);
   if (parsed === null) throw new RunError(res.status, true);
-  return parsed;
+  return { value: parsed, headers: res.headers };
 }
 
 /** The newest recorded runs, newest first. Throws `RunError` when the list cannot be read. */
 export function listRuns(signal: AbortSignal): Promise<RunRecord[]> {
   return fetchJson(RUNS_PATH, { signal }, parseRuns);
+}
+
+/** One page of the recorded runs, newest first, with how many there are in all. */
+export function listRunsPage(
+  page: number,
+  size: number,
+  signal: AbortSignal,
+): Promise<Page<RunRecord>> {
+  const query = new URLSearchParams({
+    limit: String(size),
+    offset: String(pageOffset(page, size)),
+  });
+  return fetchPage(`${RUNS_PATH}?${query}`, { signal }, parseRuns);
 }
 
 /** A run's status and proposals. Throws `RunError`: 404 for a run the server does not know. */
@@ -143,16 +183,21 @@ export function reviewRun(
 const TRACES_PATH = "/api/traces";
 
 /**
- * The newest stored traces, newest first, failed or not (only failed ones with `failedOnly`).
- * Throws `RunError` when the list cannot be read.
+ * One page of the stored traces, newest first, failed or not (only failed ones with
+ * `failedOnly`), with how many there are in all. Throws `RunError` when the list cannot be read.
  */
 export function listTraces(
   failedOnly: boolean,
+  page: number,
+  size: number,
   signal: AbortSignal,
-): Promise<TraceRow[]> {
-  const query = new URLSearchParams({ limit: "200" });
+): Promise<Page<TraceRow>> {
+  const query = new URLSearchParams({
+    limit: String(size),
+    offset: String(pageOffset(page, size)),
+  });
   if (failedOnly) query.set("failed_only", "true");
-  return fetchJson(`${TRACES_PATH}?${query}`, { signal }, parseTraces);
+  return fetchPage(`${TRACES_PATH}?${query}`, { signal }, parseTraces);
 }
 
 /**

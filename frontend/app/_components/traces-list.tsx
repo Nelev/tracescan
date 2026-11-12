@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { INDEXED_RUNS, type Membership } from "@/lib/clusters";
 import { formatDuration } from "@/lib/format";
+import { pageCount, pageForRow, pageOffset } from "@/lib/pages";
 import { formatWhen, runPath, shortId } from "@/lib/runs";
 import {
   formatScore,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
+import { Pager, usePageSize } from "./pager";
 import { CELL, HEAD, LINK, NUMERIC } from "./styles";
 import { listFooter } from "./use-list";
 import { useClusterIndex, useTraceList } from "./use-traces";
@@ -115,12 +117,30 @@ function Row({
 }
 
 /**
- * The trace store, read-only: the newest traces (up to 200) with the verdict their scores give.
- * Loaded when the page opens, when the filter changes, and on Refresh; no polling.
+ * The trace store, read-only: every stored trace, newest first, a page at a time, with the
+ * verdict their scores give. Loaded when the page opens, when the filter or the page changes, and
+ * on Refresh; no polling.
  */
 export function TracesList() {
   const [failedOnly, setFailedOnly] = useState(false);
-  const stored = useTraceList(true, failedOnly);
+  const size = usePageSize();
+  const [page, setPage] = useState(1);
+  // A new page size (the window crossed a height tier) keeps the first row on screen.
+  const [lastSize, setLastSize] = useState(size);
+  if (size !== lastSize) {
+    setLastSize(size);
+    setPage(pageForRow(pageOffset(page, lastSize), size));
+  }
+  const stored = useTraceList(true, failedOnly, page, size);
+  const count = pageCount(stored.total ?? 0, size);
+  // A refresh can shrink the list under the page shown: hold the page to the pages there are.
+  if (stored.total !== null && page > count) setPage(count);
+  const top = useRef<HTMLDivElement>(null);
+
+  function goTo(next: number) {
+    setPage(next);
+    top.current?.scrollIntoView({ block: "start" });
+  }
   const index = useClusterIndex();
   // Undefined while the index loads; null when it could not be read (the column stays empty).
   const clustersOf = (traceId: string) =>
@@ -145,7 +165,11 @@ export function TracesList() {
           <Button
             variant={failedOnly ? "secondary" : "outline"}
             aria-pressed={failedOnly}
-            onClick={() => setFailedOnly((on) => !on)}
+            onClick={() => {
+              // Another filter is another list: start it from its first page.
+              setFailedOnly((on) => !on);
+              setPage(1);
+            }}
           >
             Failed only
           </Button>
@@ -158,7 +182,10 @@ export function TracesList() {
           </Button>
         </div>
       </div>
-      <div className="surface relative overflow-x-auto rounded-xl border">
+      <div
+        ref={top}
+        className="surface relative scroll-mt-20 overflow-x-auto rounded-xl border"
+      >
         {status === "error" && (
           <p role="alert" className="type-body px-4 pt-4 text-destructive">
             Could not load the traces. Check that the backend is running, then
@@ -203,6 +230,16 @@ export function TracesList() {
           </table>
         )}
       </div>
+      {stored.total !== null && stored.total > 0 && (
+        <Pager
+          page={page}
+          count={count}
+          total={stored.total}
+          size={size}
+          noun={failedOnly ? "failed trace" : "trace"}
+          onPage={goTo}
+        />
+      )}
       <p className="type-h4">
         {listFooter(stored, failedOnly ? "failed trace" : "trace")}
       </p>

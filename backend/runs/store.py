@@ -69,8 +69,12 @@ class RunStore(Protocol):
 
     async def get_run(self, run_id: str) -> RunRecord | None: ...
 
-    async def list_runs(self, limit: int) -> list[RunRecord]:
-        """The newest runs first."""
+    async def list_runs(self, limit: int, offset: int = 0) -> list[RunRecord]:
+        """The newest runs first, skipping the first `offset` of them (one page of the list)."""
+        ...
+
+    async def count_runs(self) -> int:
+        """How many runs are recorded: the length of the whole list, for its pages."""
         ...
 
 
@@ -184,10 +188,16 @@ class PostgresRunStore:
             row = (await conn.execute(_SELECT_RUNS.where(Run.id == UUID(run_id)))).first()
         return _record(row) if row else None
 
-    async def list_runs(self, limit: int) -> list[RunRecord]:
+    async def list_runs(self, limit: int, offset: int = 0) -> list[RunRecord]:
+        # The id breaks ties, so two runs created in the same instant keep one order across pages.
+        newest_first = _SELECT_RUNS.order_by(Run.created_at.desc(), Run.id)
         async with self._engine.connect() as conn:
-            rows = await conn.execute(_SELECT_RUNS.order_by(Run.created_at.desc()).limit(limit))
+            rows = await conn.execute(newest_first.limit(limit).offset(offset))
             return [_record(row) for row in rows]
+
+    async def count_runs(self) -> int:
+        async with self._engine.connect() as conn:
+            return (await conn.execute(select(func.count()).select_from(Run))).scalar_one()
 
     async def reviews(self, run_id: str) -> list[ReviewRecord]:
         """The run's recorded decisions, by cluster id. Nothing in the app reads them yet."""

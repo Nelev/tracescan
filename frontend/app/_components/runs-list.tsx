@@ -3,7 +3,9 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { pageCount, pageForRow, pageOffset } from "@/lib/pages";
 import {
   formatWhen,
   formatWindow,
@@ -15,9 +17,10 @@ import {
 import type { RunRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
+import { Pager, usePageSize } from "./pager";
 import { CELL, HEAD, LINK, NUMERIC } from "./styles";
 import { listFooter } from "./use-list";
-import { useRuns } from "./use-runs";
+import { useRunsPage } from "./use-runs";
 
 /** The run's funnel: failed traces, then clusters, then proposals. */
 function Funnel({ run }: { run: RunRecord }) {
@@ -108,8 +111,25 @@ function Row({ run }: { run: RunRecord }) {
  * connection (the server records `aborted` only when it notices), and on Refresh; no polling.
  */
 export function RunsList() {
-  const recorded = useRuns();
+  const size = usePageSize();
+  const [page, setPage] = useState(1);
+  // A new page size (the window crossed a height tier) keeps the first row on screen.
+  const [lastSize, setLastSize] = useState(size);
+  if (size !== lastSize) {
+    setLastSize(size);
+    setPage(pageForRow(pageOffset(page, lastSize), size));
+  }
+  const recorded = useRunsPage(page, size);
   const runs = recorded.items;
+  const count = pageCount(recorded.total ?? 0, size);
+  // A refresh can shrink the list under the page shown: hold the page to the pages there are.
+  if (recorded.total !== null && page > count) setPage(count);
+  const top = useRef<HTMLElement>(null);
+
+  function goTo(next: number) {
+    setPage(next);
+    top.current?.scrollIntoView({ block: "start" });
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -130,7 +150,7 @@ export function RunsList() {
         </Button>
       </div>
 
-      <section className="flex flex-col gap-3">
+      <section ref={top} className="flex scroll-mt-20 flex-col gap-3">
         <h2 className="sr-only">All runs</h2>
         <div className="surface relative overflow-x-auto rounded-xl border">
           {recorded.status === "error" && (
@@ -176,6 +196,16 @@ export function RunsList() {
             </table>
           )}
         </div>
+        {recorded.total !== null && recorded.total > 0 && (
+          <Pager
+            page={page}
+            count={count}
+            total={recorded.total}
+            size={size}
+            noun="run"
+            onPage={goTo}
+          />
+        )}
         <p className="type-h4">{listFooter(recorded, "run")}</p>
       </section>
     </div>

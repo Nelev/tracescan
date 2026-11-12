@@ -7,6 +7,10 @@ from pydantic import AwareDatetime, BaseModel
 
 from runs import Decision, RunState, RunSummary
 
+# The response header that carries a paged list's total over all its pages (GET /v1/runs,
+# GET /v1/traces), so the body stays a plain list for the callers that read only the first page.
+TOTAL_COUNT = "X-Total-Count"
+
 
 class RunRequest(BaseModel):
     target_app: str

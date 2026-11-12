@@ -4,14 +4,19 @@ import { getRunOverview, getTrace, listRuns, listTraces } from "@/lib/api";
 import { clusterIndex, INDEXED_RUNS, type Membership } from "@/lib/clusters";
 import { isAnalyzed } from "@/lib/dashboard";
 import type { TraceDetail } from "@/lib/traces";
-import { useList, useResource } from "./use-list";
+import { usePage, useResource } from "./use-list";
 
-/** The stored traces, loaded while `enabled`, again when `failedOnly` changes, and on `refresh`. */
-export function useTraceList(enabled: boolean, failedOnly: boolean) {
-  return useList(
-    (signal) => listTraces(failedOnly, signal),
+/** One page of the stored traces, with how many there are in all, for the traces table. */
+export function useTraceList(
+  enabled: boolean,
+  failedOnly: boolean,
+  page: number,
+  size: number,
+) {
+  return usePage(
+    (signal) => listTraces(failedOnly, page, size, signal),
     enabled,
-    failedOnly,
+    `${failedOnly}:${page}:${size}`,
   );
 }
 
