@@ -8,7 +8,6 @@ import {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { Box3, DoubleSide, Vector3 } from "three";
 import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
@@ -465,37 +464,20 @@ function Mark({
   );
 }
 
-const SCHEME = "(prefers-color-scheme: dark)";
+let inkCache: Ink | null = null;
 
-function subscribeScheme(onChange: () => void): () => void {
-  const query = window.matchMedia(SCHEME);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
-
-/** The design tokens the scene draws with, resolved for the current theme. */
+/**
+ * The design tokens the scene draws with. The app is dark only, so they never change once the
+ * page has loaded: read them once (the scene only renders in the browser).
+ */
 function useInk(): Ink {
-  const dark = useSyncExternalStore(
-    subscribeScheme,
-    () => window.matchMedia(SCHEME).matches,
-    () => false,
-  );
-  return readInk(dark);
-}
-
-const inkCache = new Map<boolean, Ink>();
-
-function readInk(dark: boolean): Ink {
-  const cached = inkCache.get(dark);
-  if (cached) return cached;
-  const ink = {
+  inkCache ??= {
     foreground: token("--foreground"),
     muted: token("--muted-foreground"),
     border: token("--border"),
     card: token("--card"),
   };
-  inkCache.set(dark, ink);
-  return ink;
+  return inkCache;
 }
 
 /**

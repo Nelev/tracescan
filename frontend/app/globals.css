@@ -5,9 +5,9 @@
    draw the part of a server UI spec that ui-parts.tsx does not, are found here. */
 @source "../node_modules/@json-render/shadcn/dist/*.mjs";
 
-/* Light and dark follow the system setting: the tokens below switch under the same media query,
-   so shadcn's `dark:` variants and our tokens always agree. */
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* Dark only (Dark Mode OLED): the app never draws a light theme, so shadcn's `dark:` variants
+   always apply and agree with the tokens below. */
+@custom-variant dark (&:where(:root, :root *));
 
 @theme inline {
   --color-background: var(--background);
@@ -48,9 +48,10 @@
   --color-primary-hover: var(--primary-hover);
   --color-sidebar: var(--sidebar);
   --color-ai-surface: var(--ai-surface);
-  /* AI-Native: barely-there elevation. Panels sit on a hairline and the faintest shadow; only what
-     floats over content (menus, tooltips, the review bar) lifts. The json-render components'
-     shadow-* classes pick up the same scale. */
+  /* OLED: shadows do not show on black, so depth is a surface step, a faint light rim on what
+     floats, and a soft glow on the accent (`shadow-glow`). The json-render components' shadow-*
+     classes pick up the same scale. */
+  --shadow-glow: var(--glow-primary);
   --shadow-2xs: var(--elevation-0);
   --shadow-xs: var(--elevation-0);
   --shadow-sm: var(--elevation-1);
@@ -64,13 +65,15 @@
 }
 
 /*
- * Design system: AI-Native UI
+ * Design system: Dark Mode (OLED)
  *
- * Minimal chrome around the agent's work: neutral surfaces, one indigo accent, hairlines and the
- * faintest elevation. What the agent wrote (the console's messages, a suggested fix) reads as a
- * context card: the `ai-surface` tint with a left accent line. Motion is functional only: a 3-dot
- * typing indicator while a run streams and a short reveal as each message arrives, both still
- * under prefers-reduced-motion. Rounded corners (--radius 0.75rem), pills for chips and badges.
+ * Dark only. A true black page (OLED pixels off) with slate-tinted panels one step above it, text
+ * in a dimmed off-white (low white emission), one indigo accent, and a near-white focus ring.
+ * Depth is a surface step and a hairline, never a drop shadow; the accent may carry a soft glow
+ * (`shadow-glow`) on hover and on live marks. What the agent wrote (the console's messages, a
+ * suggested fix) reads as a context card: the `ai-surface` tint with a left accent line. Motion
+ * is functional only (typing dots, a short reveal), still under prefers-reduced-motion.
+ * Rounded corners (--radius 0.75rem), pills for chips and badges.
  *
  * Type: four sizes. Weights: 400 body, 500 emphasis and small headings, 600 for h1 and h2.
  * Use these, not text-xs/lg/3xl.
@@ -81,16 +84,17 @@
  *   body 14/22 400  paragraphs and log text
  *
  * Color roles, one job each:
- *   foreground        ink                   muted-foreground  secondary text, overlines
- *   background        the page              sidebar           the nav rail, one step darker
- *   card / popover    panels / what floats over content (light: both white)
+ *   foreground        dimmed off-white ink  muted-foreground  secondary text, overlines
+ *   background        true black            sidebar           the nav rail, black like the page
+ *   card / popover    panels / what floats over content, one and two steps above black
  *   muted             an inset well inside a panel
  *   ai-surface        what the agent wrote: console messages, the suggested fix
  *   border            hairlines between regions   rule  the strong line under a heading or axis
  *   input             control outlines (3:1 against any surface)
+ *   ring              the focus ring: near white, the brightest thing on the page
  *   hover / track     a row or button under the pointer / the empty part of a bar
- *   primary           the one accent, AI indigo: actions, focus, selection, the AI's marks, chart
- *                     bars; primary-hover is a filled action under the pointer
+ *   primary           the one accent, indigo: actions, selection, the AI's marks, chart bars;
+ *                     primary-hover is a filled action under the pointer, glow-primary its glow
  *   info / warning / success / destructive / stopped   status only, never decoration (chip.tsx);
  *   on small marks (chips, icons, counts, a thin stripe), never as a large border or fill:
  *     info         under way, nothing to do
@@ -99,11 +103,9 @@
  *     stopped      cut short by choice (cancelled, aborted)
  *     a status that is nothing (idle) is muted-foreground
  *
- * Contrast (WCAG, the lowest over background, card, popover, sidebar, muted and ai-surface):
- * light: foreground 16.0, muted-foreground 5.4, primary 5.7, every status color at least 4.9,
- * input 3.3, white on primary 6.1 (on primary-hover 8.0). Dark: foreground 15.7,
- * muted-foreground 6.9, primary 7.5, every status color at least 6.3, input 3.1, ink on primary
- * 8.4 (on primary-hover 10.5).
+ * Contrast (WCAG, the lowest over background, card, popover, muted, ai-surface, secondary and
+ * accent): foreground 13.1, muted-foreground 6.0, primary 7.0, every status color at least 5.9,
+ * input 3.6, ring 14.7, ink on primary 8.8 (on primary-hover 11.0).
  */
 @utility type-h1 {
   font-size: 1.75rem;
@@ -175,87 +177,47 @@
 }
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   --radius: 0.75rem;
-  --background: oklch(0.985 0.002 277);
-  --foreground: oklch(0.21 0.006 277);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.006 277);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.006 277);
-  --sidebar: oklch(0.965 0.003 277);
-  --primary: oklch(0.51 0.23 277);
-  --primary-hover: oklch(0.45 0.22 277);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.955 0.004 277);
-  --secondary-foreground: oklch(0.21 0.006 277);
-  --muted: oklch(0.965 0.003 277);
-  --muted-foreground: oklch(0.5 0.012 277);
-  --accent: oklch(0.955 0.012 277);
-  --accent-foreground: oklch(0.21 0.006 277);
-  --ai-surface: oklch(0.965 0.018 277);
-  --border: oklch(0.91 0.004 277);
-  --rule: oklch(0.21 0.006 277);
-  --input: oklch(0.62 0.008 277);
-  --ring: oklch(0.51 0.23 277);
-  --hover: oklch(0.21 0.006 277 / 5%);
-  --track: oklch(0.21 0.006 277 / 8%);
-  --destructive: oklch(0.53 0.19 27);
-  --success: oklch(0.5 0.12 155);
-  --info: oklch(0.5 0.09 235);
-  --warning: oklch(0.52 0.11 70);
-  --stopped: oklch(0.54 0.15 45);
+  --background: oklch(0 0 0);
+  --foreground: oklch(0.93 0.008 265);
+  --card: oklch(0.16 0.008 265);
+  --card-foreground: oklch(0.93 0.008 265);
+  --popover: oklch(0.2 0.01 265);
+  --popover-foreground: oklch(0.93 0.008 265);
+  --sidebar: oklch(0 0 0);
+  --primary: oklch(0.75 0.14 277);
+  --primary-hover: oklch(0.81 0.11 277);
+  --primary-foreground: oklch(0.12 0.02 277);
+  --secondary: oklch(0.23 0.01 265);
+  --secondary-foreground: oklch(0.93 0.008 265);
+  --muted: oklch(0.11 0.006 265);
+  --muted-foreground: oklch(0.7 0.015 265);
+  --accent: oklch(0.25 0.03 277);
+  --accent-foreground: oklch(0.93 0.008 265);
+  --ai-surface: oklch(0.19 0.03 277);
+  --border: oklch(0.3 0.01 265);
+  --rule: oklch(0.7 0.015 265);
+  --input: oklch(0.57 0.01 265);
+  --ring: oklch(0.97 0 0);
+  --hover: oklch(1 0 0 / 6%);
+  --track: oklch(1 0 0 / 10%);
+  /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
+  --destructive: oklch(0.71 0.14 22);
+  --success: oklch(0.77 0.11 155);
+  --info: oklch(0.78 0.08 225);
+  --warning: oklch(0.82 0.1 78);
+  --stopped: oklch(0.76 0.1 52);
   --elevation-0: 0 0 #0000;
-  --elevation-1: 0 1px 2px oklch(0.21 0.006 277 / 4%);
+  --elevation-1: 0 0 #0000;
   --elevation-2:
-    0 1px 2px oklch(0.21 0.006 277 / 6%),
-    0 8px 24px -8px oklch(0.21 0.006 277 / 14%);
+    0 0 0 1px oklch(1 0 0 / 6%), 0 16px 40px -12px oklch(0 0 0 / 90%);
   --elevation-3:
-    0 2px 4px oklch(0.21 0.006 277 / 8%),
-    0 16px 40px -12px oklch(0.21 0.006 277 / 20%);
+    0 0 0 1px oklch(1 0 0 / 8%), 0 24px 56px -16px oklch(0 0 0 / 95%);
+  --glow-primary: 0 0 16px -2px oklch(0.75 0.14 277 / 45%);
   /* The agent's messages and its typing indicator. */
   --message-gap: 1rem;
   --typing-dot-size: 0.375rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --background: oklch(0.155 0.004 277);
-    --foreground: oklch(0.97 0.003 277);
-    --card: oklch(0.19 0.005 277);
-    --card-foreground: oklch(0.97 0.003 277);
-    --popover: oklch(0.22 0.006 277);
-    --popover-foreground: oklch(0.97 0.003 277);
-    --sidebar: oklch(0.135 0.004 277);
-    --primary: oklch(0.75 0.14 277);
-    --primary-hover: oklch(0.81 0.11 277);
-    --primary-foreground: oklch(0.16 0.02 277);
-    --secondary: oklch(0.25 0.006 277);
-    --secondary-foreground: oklch(0.97 0.003 277);
-    --muted: oklch(0.135 0.004 277);
-    --muted-foreground: oklch(0.72 0.01 277);
-    --accent: oklch(0.25 0.02 277);
-    --accent-foreground: oklch(0.97 0.003 277);
-    --ai-surface: oklch(0.225 0.03 277);
-    --border: oklch(0.28 0.006 277);
-    --rule: oklch(0.97 0.003 277);
-    --input: oklch(0.52 0.008 277);
-    --ring: oklch(0.75 0.14 277);
-    --hover: oklch(1 0 0 / 6%);
-    --track: oklch(1 0 0 / 10%);
-    /* Status colors at one lightness and a moderate chroma, so none shouts over the others. */
-    --destructive: oklch(0.71 0.14 22);
-    --success: oklch(0.77 0.11 155);
-    --info: oklch(0.78 0.08 225);
-    --warning: oklch(0.82 0.1 78);
-    --stopped: oklch(0.76 0.1 52);
-    --elevation-1: 0 1px 2px oklch(0 0 0 / 30%);
-    --elevation-2:
-      0 1px 2px oklch(0 0 0 / 30%), 0 12px 32px -12px oklch(0 0 0 / 60%);
-    --elevation-3:
-      0 2px 6px oklch(0 0 0 / 35%), 0 20px 48px -16px oklch(0 0 0 / 70%);
-  }
 }
 
 @layer base {

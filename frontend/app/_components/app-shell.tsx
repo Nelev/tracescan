@@ -38,7 +38,7 @@ function NavLink({
       className={cn(
         "type-body relative flex h-10 items-center gap-3 rounded-lg px-2.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active &&
-          "bg-hover text-foreground before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-full before:bg-primary",
+          "bg-hover text-foreground before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-full before:bg-primary before:shadow-glow",
       )}
     >
       <span className="relative flex">
