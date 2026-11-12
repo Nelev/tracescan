@@ -3,11 +3,9 @@
 import {
   Activity,
   ArrowLeft,
-  Check,
   ListChecks,
   RotateCw,
   UserCheck,
-  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -16,21 +14,18 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { getRunOverview } from "@/lib/api";
 import { tally, tallyText } from "@/lib/review";
 import {
-  type ClusterDetail,
-  clusterTitle,
   emptyOverview,
   formatUsage,
   pipeline,
   type RunOverview,
-  signatureParts,
   totalUsage,
 } from "@/lib/run-overview";
 import { plural, RUN_STATUS, type StatusTone, shortId } from "@/lib/runs";
-import type { Decision } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
-import { ClusterCard, type LiveDiagnosis } from "./cluster-card";
+import type { LiveDiagnosis } from "./cluster-card";
 import { ClusterMapPanel } from "./cluster-map-panel";
+import { FindingsBrowser } from "./findings-browser";
 import { PipelineStepper } from "./pipeline-stepper";
 import { type RunStream, useRun } from "./run-stream";
 import { TypingDots } from "./typing-dots";
@@ -358,44 +353,20 @@ export function RunView({
                     {noClusters(overview, streaming)}
                   </p>
                 ) : (
-                  <div className="grid items-start gap-6 xl:grid-cols-[15rem_minmax(0,1fr)]">
-                    <FindingsIndex
-                      clusters={clusters}
-                      decisionOf={(c) =>
-                        decidable
-                          ? review.decisions[c.cluster_id]
-                          : (c.decision ?? undefined)
-                      }
-                      deciding={decidable}
-                      live={liveDiagnosis}
-                    />
-                    <div className="flex min-w-0 flex-col gap-4">
-                      {clusters.map((cluster) => (
-                        <ClusterCard
-                          key={cluster.cluster_id}
-                          cluster={cluster}
-                          focus={
-                            finding?.clusterId === cluster.cluster_id
-                              ? finding.ask
-                              : null
-                          }
-                          live={liveDiagnosis(cluster.cluster_id)}
-                          proposal={proposals.get(cluster.cluster_id) ?? null}
-                          decision={
-                            decidable
-                              ? review.decisions[cluster.cluster_id]
-                              : (cluster.decision ?? undefined)
-                          }
-                          onDecide={
-                            decidable
-                              ? (d) => review.decide(cluster.cluster_id, d)
-                              : null
-                          }
-                          deciding={sending}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  <FindingsBrowser
+                    clusters={clusters}
+                    ask={finding}
+                    proposals={proposals}
+                    decisionOf={(c) =>
+                      decidable
+                        ? review.decisions[c.cluster_id]
+                        : (c.decision ?? undefined)
+                    }
+                    deciding={decidable}
+                    onDecide={decidable ? review.decide : null}
+                    sending={sending}
+                    live={liveDiagnosis}
+                  />
                 )}
                 {progress && review.state.step === "open" && (
                   <ReviewBar
@@ -413,82 +384,6 @@ export function RunView({
         </>
       )}
     </div>
-  );
-}
-
-/**
- * The findings at a glance, beside the cards on a wide screen: each one's title, size and where
- * its decision stands, linking to its card. Hidden below `xl`, where the cards are the list.
- */
-function FindingsIndex({
-  clusters,
-  decisionOf,
-  deciding,
-  live,
-}: {
-  clusters: ClusterDetail[];
-  decisionOf: (cluster: ClusterDetail) => Decision | undefined;
-  /** The run waits for review: an undecided finding is marked as such. */
-  deciding: boolean;
-  live: (clusterId: string) => "queued" | "diagnosing" | null;
-}) {
-  return (
-    <nav
-      aria-label="Findings in this run"
-      className="sticky top-20 hidden flex-col gap-1 xl:flex"
-    >
-      <h3 className="type-h4 px-2 pb-1">In this run</h3>
-      <ol className="flex flex-col gap-0.5">
-        {clusters.map((c) => {
-          const decision = decisionOf(c);
-          const state = live(c.cluster_id);
-          return (
-            <li key={c.cluster_id}>
-              <a
-                href={`#finding-${c.cluster_id}`}
-                className="type-body flex min-h-10 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate">{clusterTitle(c)}</span>
-                  {/* The error, not the step: two findings of one kind often fail at the same step. */}
-                  <span
-                    className="truncate font-mono text-muted-foreground"
-                    title={c.signature}
-                  >
-                    {signatureParts(c.signature).error ||
-                      signatureParts(c.signature).step}
-                  </span>
-                  <span className="text-muted-foreground tabular-nums">
-                    {plural(c.trace_ids.length, "trace")}
-                    {state === "diagnosing" && " · diagnosing"}
-                    {state === "queued" && " · queued"}
-                  </span>
-                </span>
-                {decision === "approve" ? (
-                  <Check
-                    className="size-4 shrink-0 text-success"
-                    aria-label="approved"
-                  />
-                ) : decision === "reject" ? (
-                  <X
-                    className="size-4 shrink-0 text-muted-foreground"
-                    aria-label="rejected"
-                  />
-                ) : (
-                  deciding && (
-                    <span
-                      className="size-2 shrink-0 rounded-full bg-warning"
-                      role="img"
-                      aria-label="to decide"
-                    />
-                  )
-                )}
-              </a>
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
   );
 }
 
