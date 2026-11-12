@@ -8,6 +8,7 @@ from alembic.config import Config
 from sqlalchemy import text
 
 from agent import model_guard
+from api.rate_limit import limiter
 from auth import session_claims
 from db.engine import create_engine
 from main import app
@@ -20,6 +21,12 @@ BACKEND = Path(__file__).parent.parent
 def no_retry_wait(monkeypatch):
     """No test waits out a retry delay."""
     monkeypatch.setattr(model_guard, "RETRY_DELAY_S", 0)
+
+
+@pytest.fixture(autouse=True)
+def fresh_run_limit():
+    """Every test starts with no runs counted: the limiter is one instance for the process."""
+    limiter.reset()
 
 
 @pytest.fixture(autouse=True)

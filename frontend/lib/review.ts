@@ -1,6 +1,7 @@
 // The review of a run: its detail and the review's answer read once into what the review screen
 // shows, and the words it uses.
 
+import { formatAge } from "./format.ts";
 import { isRecord } from "./guards.ts";
 import { isRunStatus, isText } from "./runs.ts";
 import type { Decision, RunStatus } from "./types.ts";
@@ -135,15 +136,44 @@ export function issueSections(body: string): IssueSection[] {
 /**
  * How a request to the backend went wrong (`RunError` in lib/api.ts): not reached (`status`
  * null), refused with a status, or answered with something that could not be read
- * (`unreadable`), which for a review means it was sent and most likely taken.
+ * (`unreadable`), which for a review means it was sent and most likely taken. `retryAfterS`: the
+ * wait a 429 named, in seconds.
  */
-export type Failure = { status: number | null; unreadable: boolean };
+export type Failure = {
+  status: number | null;
+  unreadable: boolean;
+  retryAfterS?: number | null;
+};
+
+/** Retry-After as whole seconds, or null when it is missing or not a number of seconds. */
+export function retryAfterSeconds(header: string | null): number | null {
+  const value = header?.trim() ?? "";
+  return /^\d+$/.test(value) ? Number(value) : null;
+}
 
 const UNREACHABLE = "Could not reach the backend. Check that it is running.";
 
 /** A 401 from the backend: the session token was missing or no longer good. */
 export const SIGNED_OUT =
   "Your session has ended or could not be checked. Reload the page to sign in again.";
+
+/** Why a run did not start. A 429 says how long to wait, in whole minutes rounded up. */
+export function startProblem({ status, retryAfterS }: Failure): string {
+  switch (status) {
+    case null:
+      return UNREACHABLE;
+    case 401:
+      return SIGNED_OUT;
+    case 429: {
+      const base = "You have started as many runs as allowed for now.";
+      if (retryAfterS == null) return `${base} Try again later.`;
+      const minutes = Math.max(1, Math.ceil(retryAfterS / 60));
+      return `${base} Try again in ${formatAge(minutes * 60_000)}.`;
+    }
+    default:
+      return `The run did not start (HTTP ${status}). Check that the backend is running, then its log.`;
+  }
+}
 
 /** Why a run could not be opened for review. */
 export function loadProblem({ status, unreadable }: Failure): string {

@@ -5,6 +5,8 @@ import {
   loadProblem,
   parseReviewResult,
   parseRunDetail,
+  retryAfterSeconds,
+  startProblem,
   submitProblem,
   tally,
   tallyText,
@@ -159,4 +161,23 @@ test("an answer that could not be read is not reported as a refusal", () => {
   assert.match(submitProblem(UNREADABLE), /was sent/);
   assert.doesNotMatch(submitProblem(UNREADABLE), /not taken|HTTP/);
   assert.match(loadProblem(UNREADABLE), /could not be read/);
+});
+
+test("Retry-After is read as whole seconds, anything else as unknown", () => {
+  assert.equal(retryAfterSeconds("720"), 720);
+  assert.equal(retryAfterSeconds(" 5 "), 5);
+  assert.equal(retryAfterSeconds(null), null);
+  assert.equal(retryAfterSeconds("Wed, 21 Oct 2026 07:28:00 GMT"), null);
+  assert.equal(retryAfterSeconds("-3"), null);
+});
+
+test("a run past its limit names the wait in whole minutes, rounded up", () => {
+  const limited = (retryAfterS: number | null) =>
+    startProblem({ status: 429, unreadable: false, retryAfterS });
+  assert.match(limited(720), /Try again in 12 min\.$/);
+  assert.match(limited(61), /Try again in 2 min\.$/);
+  assert.match(limited(0), /Try again in 1 min\.$/);
+  assert.match(limited(3600), /Try again in 1 h\.$/);
+  assert.match(limited(null), /Try again later\.$/);
+  assert.match(startProblem({ status: 500, unreadable: false }), /HTTP 500/);
 });

@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
+import limits
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
@@ -16,6 +17,7 @@ from agent.actions import OUT_DIR, REGRESSION_FILE
 from agent.graph import build_graph
 from agent.schemas import Proposal
 from api import ui_spec
+from api.rate_limit import RUN_LIMIT
 from main import app, dry_run_setting
 from runs import Runs
 from tests.fakes import (
@@ -293,6 +295,45 @@ async def test_stream_that_cannot_open_the_trace_session_returns_502(client):
     assert response.json() == {"detail": "triage run failed"}
 
 
+RUNS_PER_WINDOW = limits.parse(RUN_LIMIT).amount
+
+
+def counting_session(opened: list[bool], traces: FakeTraces | None = None):
+    """A trace session factory over `traces` that notes each session it opens in `opened`."""
+
+    @asynccontextmanager
+    async def session():
+        opened.append(True)
+        yield traces or FakeTraces()
+
+    return session
+
+
+@pytest.mark.anyio
+async def test_starting_a_run_past_the_limit_is_429_and_opens_no_trace_session(client):
+    opened: list[bool] = []
+    use_runs(open_traces=counting_session(opened))
+    for _ in range(RUNS_PER_WINDOW):
+        assert (await post_stream(client)).status_code == 200
+
+    refused = await post_stream(client)
+
+    assert refused.status_code == 429
+    assert int(refused.headers["Retry-After"]) > 0
+    assert len(opened) == RUNS_PER_WINDOW  # the refused request opened nothing
+    assert len(await app.state.run_store.list_runs(100, 0)) == RUNS_PER_WINDOW  # nor a run row
+
+
+@pytest.mark.anyio
+async def test_the_run_limit_is_per_person(client, sign_in):
+    for _ in range(RUNS_PER_WINDOW):
+        await post_stream(client)
+    assert (await post_stream(client)).status_code == 429
+
+    sign_in("ana")
+    assert (await post_stream(client)).status_code == 200
+
+
 async def run_with_a_stalled_client() -> None:
     """POST a run to the app as a client that reads nothing and then goes away."""
     payload = json.dumps({"target_app": "medas"}).encode()
@@ -561,14 +602,8 @@ async def test_a_decision_other_than_approve_or_reject_is_422(client):
 
 @pytest.mark.anyio
 async def test_the_review_opens_no_trace_session(client):
-    opened = []
-
-    @asynccontextmanager
-    async def session():
-        opened.append(True)
-        yield two_failures()
-
-    use_runs(model=fake_diagnoser(DIAGNOSIS), open_traces=session)
+    opened: list[bool] = []
+    use_runs(model=fake_diagnoser(DIAGNOSIS), open_traces=counting_session(opened, two_failures()))
     run_id = await start(client)
     assert opened == [True]
     review = {"decisions": {"c0": "approve"}}

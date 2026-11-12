@@ -9,8 +9,8 @@
 
 Every route needs a Clerk session token (auth.session, required for this router in main.py):
 `401` without a valid one, `503` when it cannot be verified, both before a run or a trace session
-is opened. Who starts or reviews a run
-is recorded under the name the token carries, never one the request sends.
+is opened. Starting a run is also limited per person (api.rate_limit, a `429`). Who starts or
+reviews a run is recorded under the name the token carries, never one the request sends.
 
 No response carries raw state: failed traces can hold clinical span data. What leaves the server
 is counts, the actions log and the drafted proposals, plus on the stream the UI spec the small
@@ -25,6 +25,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from api.rate_limit import limit_runs
 from api.schemas import TOTAL_COUNT, ReviewRequest, ReviewResponse, RunRequest
 from api.ui_spec import UiSpecs
 from auth import CurrentUser
@@ -80,7 +81,7 @@ async def _open_run(
         raise _run_failed() from None
 
 
-@router.post("/runs/stream", response_class=EventSourceResponse)
+@router.post("/runs/stream", response_class=EventSourceResponse, dependencies=[Depends(limit_runs)])
 async def stream_run(
     run: Annotated[StartedRun, Depends(_open_run)], request: Request
 ) -> AsyncIterator[ServerSentEvent]:
