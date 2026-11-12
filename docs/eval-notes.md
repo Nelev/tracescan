@@ -2,6 +2,54 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("Other entry points"); the code is in `backend/eval/`.
 
+## Experiment 8: the clustering fix and one fault per cause (2026-11-12)
+
+### Question
+
+Experiment 6 found why the clustering merges faults: the look-alike timeouts have identical failure texts, and two misfits join a cluster with HDBSCAN membership 0.0. Experiment 7 found that the answer key counts a correct merge (the two-failure requests with the provider outage) as a loss. Do the simplest fixes for the three raise separation?
+
+### What changed
+
+- **Answer key.** `Fault.same_cause_as`: `double_failure` names `model_unavailable`. `eval.metrics` maps every trace's kind through `cause_of` before the clustering scores, so the fault day has 8 faults, not 9. The trace judge's scores still use the seeded kinds.
+- **Seconds as a word.** `failure_text` and `normalise_error` turn seconds in the error (`timed out after 1.0s`) into the latency word of `LATENCY_BUCKETS_S` before digits are masked. This only helps when the message states the seconds, as the seeded ones do.
+- **Membership threshold.** A trace HDBSCAN puts in a group with membership under `MIN_MEMBERSHIP` (0.1) is noise: it goes to the step-and-error stage, and stands alone if nothing there matches.
+
+- **Run K.** The fault day of runs G and I. Results file: `out/eval/20261112T201117Z.json`.
+- **Run L.** The control day. Results file: `out/eval/20261112T201130Z.json`.
+
+### Results
+
+Run I is rescored with the new answer key, so both columns count 8 faults.
+
+| Score | Run I (exp 7, new key) | Run K | Run L (control) |
+| --- | --- | --- | --- |
+| Detection | 6/8 | **8/8** | n/a |
+| Purity | 29/34 | **34/34** | 0/0 |
+| Separation | 2/8 | **7/8** | n/a |
+| Rare-failure recall | 0/1 | **1/1** | n/a |
+| False alarms (clusters) | 0 | 0 | 0 |
+| Category / cause accuracy | 6/6, 6/6 | 9/9, 9/9 | n/a |
+| Judge recall, false positives, blame | 34/34, 0/18, 34/34 | 34/34, 0/18, 34/34 | 0/52 flagged |
+| Total cost | $0.13 | $0.17 | $0.02 |
+
+Run K's clusters: `source_timeout` (6), `context_overflow` (5), `tool_arguments` (5), `model_unavailable`'s 5xx face (4), `silent_no_hits` (4), the two `double_failure` traces with `model_unavailable`'s timeout face (3), `tight_timeout` (3, step and error), `unexplained` (3, step and error), `store_down` (1, isolated).
+
+### Findings
+
+1. **Every cluster holds one fault.** Purity is 34/34. The look-alike timeout has its own cluster, found by the second stage once its text differs, and the store outage stands alone and is diagnosed correctly.
+2. **The one miss is a split, not a merge.** The provider outage is two clusters: its four 5xx traces, and its timeout face with the two `double_failure` traces (whose blamed span is a 503 too). Both name the same cause, so a reviewer gets two issues for one bug.
+3. **More clusters cost more.** Nine diagnoses instead of six: $0.17 instead of $0.13.
+
+### Limits
+
+- One run, on the day the fixes were written for. The 0.1 threshold was chosen from experiment 6's values (misfits at 0.0, members at 1.0).
+- The seconds word needs the seconds in the error message. Real httpx timeouts often do not say them; the failing span's own duration on `TraceSummary` would be the sturdier source.
+
+### What to do next
+
+1. A third, unseen day and a second control run, to see how far these results hold.
+2. If the provider split persists, look at why the 503 of `double_failure` sits nearer the timeout face than the 5xx traces.
+
 ## Experiment 7: the judge's unsure, not-found and blame rules (2026-11-12)
 
 ### Question

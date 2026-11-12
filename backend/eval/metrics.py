@@ -18,14 +18,14 @@ from pathlib import Path
 from typing import Any
 
 from agent import actions
-from eval.ground_truth import FAULTS
+from eval.ground_truth import FAULTS, cause_of
 
 OUT_DIR = actions.OUT_DIR / "eval"  # where eval/run.py writes its results files
 
 
-def _mixes(result: dict[str, Any]) -> dict[str, Counter[str]]:
-    """Per cluster: how many of its traces are of each kind."""
-    kinds = result["kinds"]
+def _mixes(result: dict[str, Any], given: dict[str, str] | None = None) -> dict[str, Counter[str]]:
+    """Per cluster: how many of its traces are of each kind (the file's kinds unless given)."""
+    kinds: dict[str, str] = result["kinds"] if given is None else given
     return {c["cluster_id"]: Counter(kinds[t] for t in c["trace_ids"]) for c in result["clusters"]}
 
 
@@ -72,9 +72,10 @@ def _spend(usage: list[dict[str, Any]]) -> tuple[int, int, float]:
 
 
 def score(result: dict[str, Any]) -> dict[str, Any]:
-    kinds = result["kinds"]
+    # Kinds that share a cause count as one fault: one cluster for both is one issue, not a merge.
+    kinds = {trace_id: cause_of(kind) for trace_id, kind in result["kinds"].items()}
     diagnoses = list(result["diagnoses"])
-    mixes = _mixes(result)
+    mixes = _mixes(result, kinds)
     majority = {cluster_id: mix.most_common(1)[0][0] for cluster_id, mix in mixes.items()}
     expected = {c: FAULTS[kind].category for c, kind in majority.items() if kind in FAULTS}
     seeded = Counter(kind for kind in kinds.values() if kind in FAULTS)

@@ -362,9 +362,9 @@ flowchart TD
     j -- "numbered after the others" --> l
 ```
 
-1. **Failure text.** Each failed trace becomes one short string, `<failing step>: <error message> | <signature>`, from fields already on the summary. Digits are masked as `#`, so values that differ between traces do not split one cause. Scores and timings are left out.
+1. **Failure text.** Each failed trace becomes one short string, `<failing step>: <error message> | <signature>`, from fields already on the summary. Digits are masked as `#`, so values that differ between traces do not split one cause; seconds in the error are first read as a latency word (`1.0s` becomes `normal (0.5-2 s)`), so a 1 s timeout and a 10 s one stay apart. Scores and timings are left out.
 2. **Embedding.** `BAAI/bge-small-en-v1.5` runs locally through [fastembed](https://github.com/qdrant/fastembed) (ONNX Runtime, about 65 MB, no API key), so similar failures get nearby vectors.
-3. **HDBSCAN** finds dense groups without being told how many, and labels failures that fit none as noise. The thresholds were tuned on a synthetic set; `agent/const.py` records what was tried.
+3. **HDBSCAN** finds dense groups without being told how many, and labels failures that fit none as noise. A failure it puts in a group with a membership under `MIN_MEMBERSHIP` (0.1) counts as noise too, since it barely fits that group. The thresholds were tuned on a synthetic set; `agent/const.py` records what was tried.
 4. **Second stage.** HDBSCAN cannot see one single dense group (it labels it all noise), and one fault often causes most of a run's failures. So the noise is regrouped by failing step and normalised error (quoted values and digits masked, so `missing 'dose'` and `missing 'unit'` are one error). A group of 3 or more becomes a cluster.
 5. **Small runs.** With fewer than 6 failed traces, embedding is skipped and every step-and-error group becomes a cluster, since nothing can be called noise from so little data.
 6. **Isolated failures.** A trace that fits no group becomes a cluster of one, so it is still diagnosed.
@@ -624,24 +624,24 @@ A control day (`python -m eval.run --control`) seeds only healthy requests and h
 
 #### Results
 
-The latest runs (experiment 7 in the notes): a fault day the judge prompt was not tuned on, and the control day. One run each, so a single trace can change a ratio.
+The latest runs (experiment 8 in the notes): the fault day and the control day, after the clustering fix. One run each, so a single trace can change a ratio. The answer key counts kinds that share an injected cause as one fault (`same_cause_as`), so the fault day has 8 faults, not 9.
 
 | Score | Fault day (2026-02-27) | Control day |
 | --- | --- | --- |
 | Trace judge: faulty traces caught | 34/34 | n/a |
 | Trace judge: harmless traces flagged | 0/18 | 0/52 |
 | Trace judge: blamed the right step | 34/34 | n/a |
-| Detection (faults with a diagnosed cluster) | 6/9 | n/a |
-| Cluster purity | 27/34 | n/a |
-| Cause separation | 2/9 | n/a |
-| Rare-failure recall | 0/1 | n/a |
+| Detection (faults with a diagnosed cluster) | 8/8 | n/a |
+| Cluster purity | 34/34 | n/a |
+| Cause separation | 7/8 | n/a |
+| Rare-failure recall | 1/1 | n/a |
 | False alarms (clusters with no fault) | 0 | 0 |
-| Category accuracy | 6/6 | n/a |
-| Root-cause accuracy (graded on the injected cause) | 6/6 | n/a |
-| Evidence valid and relevant | 6/6, 6/6 | n/a |
-| Cost and time | $0.13 (judge $0.03), 26 s | $0.02 (judge only), 10 s |
+| Category accuracy | 9/9 | n/a |
+| Root-cause accuracy (graded on the injected cause) | 9/9 | n/a |
+| Evidence valid and relevant | 9/9, 9/9 | n/a |
+| Cost and time | $0.17 (judge $0.03), 25 s | $0.02 (judge only), 9 s |
 
-The weak spot is clustering: the look-alike timeout merges with the normal one, and the rare store outage joins the silent retrieval misses. One merge counted as a loss is right: the two-failure requests group with the provider outage, which is their cause, but the answer key seeds them as separate faults.
+Every cluster now holds one fault. The one miss is a split: the provider outage comes out as two clusters, its 5xx failures in one and its timeout face together with the two-failure requests in the other. Two fixes made the difference: seconds in an error read as a latency word before digits are masked (so the 1 s look-alike timeout no longer has the normal timeout's text), and a member HDBSCAN gives less than `MIN_MEMBERSHIP` is treated as noise (so the rare store outage no longer joins the silent retrieval misses).
 
 ## Tests and checks
 

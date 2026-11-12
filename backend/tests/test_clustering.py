@@ -23,7 +23,7 @@ from agent.clustering import (
     normalise_error,
     project,
 )
-from agent.const import MAX_EXEMPLARS, TSNE_MIN_POINTS
+from agent.const import MAX_EXEMPLARS, MIN_MEMBERSHIP, TSNE_MIN_POINTS
 from agent.embeddings import FastEmbedEmbedder
 from agent.graph import build_graph
 from tests.fakes import (
@@ -104,6 +104,15 @@ def test_failure_text_masks_numbers_and_keeps_the_wording():
     )
 
 
+def test_failure_text_keeps_how_long_a_timeout_took_as_a_word():
+    def text(error: str) -> str:
+        return failure_text(summary("t1", failing_span_name="search", error_message=error))
+
+    assert text("timed out after 10.1s") == text("timed out after 10.4s")
+    assert text("timed out after 1.0s") != text("timed out after 10.1s")
+    assert normalise_error("timed out after 1.0s") != normalise_error("timed out after 10.1s")
+
+
 def test_failure_text_names_the_failing_step_and_error():
     text = failure_text(load("tool")[0])
     assert "execute_tool lookup_dosage" in text and "dose_unit" in text
@@ -137,6 +146,30 @@ def test_one_dense_group_plus_one_offs_keeps_the_offs_unclustered():
     [cluster] = clusters
     assert {group_of(t) for t in cluster["trace_ids"]} == {"ret"}
     assert set(unclustered) == OUTLIERS
+
+
+class VectorsByError:
+    """An embedder that places each failure where its error message says."""
+
+    def __init__(self, vectors: dict[str, list[float]]):
+        self.vectors = vectors
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        return np.array([next(v for e, v in self.vectors.items() if e in t) for t in texts])
+
+
+def test_a_failure_that_barely_fits_a_group_is_left_out_of_it():
+    # HDBSCAN puts the stray in alpha's group with a membership near 0.
+    vectors = {"alpha": [1, 0, 0], "beta": [0, 1, 0], "stray": [1, 0.2, 0]}
+    rows = [summary(f"a{i}", failing_span_name="x", error_message="alpha") for i in range(4)]
+    rows += [summary(f"b{i}", failing_span_name="y", error_message="beta") for i in range(4)]
+    rows += [summary("s0", failing_span_name="x", error_message="stray")]
+    grouping = group_failures(rows, VectorsByError(vectors))
+    assert sorted(c["trace_ids"] for c in grouping.clusters) == [
+        [f"a{i}" for i in range(4)],
+        [f"b{i}" for i in range(4)],
+    ]
+    assert grouping.unclustered == ["s0"]
 
 
 def test_small_run_groups_by_step_and_error_without_embedding():
@@ -271,10 +304,10 @@ def test_the_map_keeps_hdbscan_labels_and_marks_noise():
     assert found is not None
     for point in found.points:
         if point.stage == "hdbscan":
-            # A member's strength can be 0: it joined its group only at the edge.
-            assert point.hdbscan_label >= 0
-        else:  # rescued or isolated: HDBSCAN called it noise
-            assert (point.hdbscan_label, point.membership) == (-1, 0)
+            # A member that barely fits its group is not kept in it (MIN_MEMBERSHIP).
+            assert point.hdbscan_label >= 0 and point.membership >= MIN_MEMBERSHIP
+        else:  # rescued or isolated: HDBSCAN called it noise, or a member too weak to keep
+            assert point.hdbscan_label == -1 and point.membership < MIN_MEMBERSHIP
 
 
 def test_the_map_keeps_the_known_groups_apart():
