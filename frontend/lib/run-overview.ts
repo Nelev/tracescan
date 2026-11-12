@@ -83,6 +83,37 @@ export function clusterTitle(
     ? formatCategory(cluster.diagnosis.category)
     : "Undiagnosed failure";
 }
+
+/**
+ * A cluster's signature split into the step that failed and the error it raised: the part before
+ * the first ": " and the rest. A signature without one is all step (an error-free failure).
+ */
+export function signatureParts(signature: string): {
+  step: string;
+  error: string;
+} {
+  const at = signature.indexOf(": ");
+  return at === -1
+    ? { step: signature.trim(), error: "" }
+    : {
+        step: signature.slice(0, at).trim(),
+        error: signature.slice(at + 2).trim(),
+      };
+}
+
+export type ConfidenceLevel = "high" | "medium" | "low";
+
+/** The diagnoser's confidence in a word: high from 0.75, medium from 0.5, low below. */
+export function confidenceLevel(confidence: number): ConfidenceLevel {
+  if (confidence >= 0.75) return "high";
+  if (confidence >= 0.5) return "medium";
+  return "low";
+}
+
+/** How the reproduction of a cluster stands, in words a reviewer reads. */
+export function verificationText(verification: string): string {
+  return verification === "unverified" ? "not reproduced yet" : verification;
+}
 const CHECKS = new Set(["valid", "corrected", "unsupported"]);
 
 function isEvidence(v: unknown): v is Evidence {
