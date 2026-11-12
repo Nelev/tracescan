@@ -347,7 +347,7 @@ function PointTable({
   onToggle: (clusterId: string) => void;
 }) {
   return (
-    <div className="max-h-[26rem] overflow-auto rounded-lg border">
+    <div className="max-h-[26rem] overflow-auto overscroll-contain rounded-lg border">
       <table className="type-body w-full">
         <caption className="sr-only">
           The map's points: one row per distinct failure in a cluster

@@ -327,7 +327,10 @@ export function TraceTree({
     >
       <ol
         aria-label="Spans, as a tree over the trace's timeline"
-        className={cn("type-body py-1", layout === "split" && "overflow-auto")}
+        className={cn(
+          "type-body py-1",
+          layout === "split" && "overflow-auto overscroll-contain",
+        )}
       >
         {rows.map((row) => (
           <SpanRow
@@ -344,7 +347,7 @@ export function TraceTree({
       <div
         className={cn(
           layout === "split"
-            ? "overflow-auto border-t lg:border-t-0 lg:border-l"
+            ? "overflow-auto overscroll-contain border-t lg:border-t-0 lg:border-l"
             : "border-t",
         )}
       >

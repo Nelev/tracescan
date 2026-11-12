@@ -119,7 +119,7 @@ export function TracePage({
       {trace && (
         <>
           <TreeLegend />
-          <div className="flex min-h-[28rem] flex-1 flex-col overflow-hidden surface rounded-xl border lg:h-[calc(100vh-16rem)] lg:flex-none">
+          <div className="flex min-h-[28rem] flex-1 flex-col overflow-hidden surface rounded-xl border lg:h-[calc(100dvh-16rem)] lg:flex-none">
             <TraceTree
               key={`${traceId}:${spanId}`}
               trace={trace}

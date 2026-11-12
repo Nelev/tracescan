@@ -43,47 +43,58 @@ function Bar({ stage }: { stage: Stage }) {
  */
 export function PipelineStepper({ stages }: { stages: Stage[] }) {
   return (
-    <ol
-      aria-label="Pipeline"
-      className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-4 xl:grid-cols-7"
-    >
-      {stages.map((stage) => {
-        const { label, tone } = STATE[stage.state];
-        const current =
-          stage.state === "running" ||
-          stage.state === "waiting" ||
-          stage.state === "failed" ||
-          stage.state === "stopped";
-        return (
-          <li
-            key={stage.key}
-            aria-current={current ? "step" : undefined}
-            aria-label={`${stage.label}: ${label}, ${stage.detail}`}
-            className="flex min-w-0 flex-col gap-2"
-          >
-            <Bar stage={stage} />
-            <span className="flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  "type-h3",
-                  (stage.state === "pending" || stage.state === "skipped") &&
-                    "text-muted-foreground",
+    // Columns follow the stepper's own width, not the window's: the nav and an open console dock
+    // take room, and seven stages in one row need about 170px each to keep their chips whole.
+    <div className="@container">
+      <ol
+        aria-label="Pipeline"
+        className="grid grid-cols-2 gap-x-3 gap-y-4 @xl:grid-cols-4 @7xl:grid-cols-7"
+      >
+        {stages.map((stage) => {
+          const { label, tone } = STATE[stage.state];
+          const current =
+            stage.state === "running" ||
+            stage.state === "waiting" ||
+            stage.state === "failed" ||
+            stage.state === "stopped";
+          return (
+            <li
+              key={stage.key}
+              aria-current={current ? "step" : undefined}
+              aria-label={`${stage.label}: ${label}, ${stage.detail}`}
+              className="flex min-w-0 flex-col gap-2"
+            >
+              <Bar stage={stage} />
+              <span className="flex flex-wrap items-center gap-2">
+                <span
+                  className={cn(
+                    "type-h3",
+                    (stage.state === "pending" || stage.state === "skipped") &&
+                      "text-muted-foreground",
+                  )}
+                >
+                  {stage.label}
+                </span>
+                {/* Kept whole: it moves under the stage's name before it would shorten. */}
+                {current && (
+                  <span className="flex max-w-full shrink-0">
+                    <Chip
+                      tone={tone}
+                      size="sm"
+                      live={stage.state === "running"}
+                    >
+                      {label}
+                    </Chip>
+                  </span>
                 )}
-              >
-                {stage.label}
               </span>
-              {current && (
-                <Chip tone={tone} size="sm" live={stage.state === "running"}>
-                  {label}
-                </Chip>
-              )}
-            </span>
-            <span className="type-body truncate text-muted-foreground tabular-nums">
-              {stage.detail}
-            </span>
-          </li>
-        );
-      })}
-    </ol>
+              <span className="type-body truncate text-muted-foreground tabular-nums">
+                {stage.detail}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
