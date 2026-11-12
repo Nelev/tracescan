@@ -376,10 +376,14 @@ export function ClusterCard({
   const focused = focus !== null;
   const [expanded, setExpanded] = useState(focused);
   const ref = useRef<HTMLElement>(null);
+  // An ask opens the card in the same render; only the scroll, a side effect, waits for the DOM.
+  const [lastFocus, setLastFocus] = useState(focus);
+  if (focus !== lastFocus) {
+    setLastFocus(focus);
+    if (focus !== null) setExpanded(true);
+  }
   useEffect(() => {
-    if (focus === null) return;
-    setExpanded(true);
-    ref.current?.scrollIntoView({ block: "start" });
+    if (focus !== null) ref.current?.scrollIntoView({ block: "start" });
   }, [focus]);
   const { diagnosis } = cluster;
   const { step, error } = signatureParts(cluster.signature);

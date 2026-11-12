@@ -144,9 +144,18 @@ function Frame({ children }: { children: ReactNode }) {
           </Suspense>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-header flex h-14 items-center justify-end gap-3 border-b bg-background px-4 sm:px-6">
-            <ServerStatus />
-            <NewRun />
+          {/* The bar spans the window; its controls sit in the page's own column, so their right
+              edge lines up with the content's on a screen wider than that column. */}
+          <header className="sticky top-0 z-header border-b bg-background">
+            <div
+              className={cn(
+                "mx-auto flex h-14 w-full max-w-[96rem] items-center justify-end gap-3 px-4 sm:px-6",
+                docked && dockOpen && "xl:pr-(--dock-reserve)",
+              )}
+            >
+              <ServerStatus />
+              <NewRun />
+            </div>
           </header>
           <main
             className={cn(

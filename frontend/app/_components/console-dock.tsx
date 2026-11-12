@@ -43,7 +43,9 @@ export function ConsoleDock({
 }) {
   const run = useRun();
   const [raw, setRaw] = useState(false);
-  // How many messages had arrived when the panel was last open.
+  // How many messages had arrived when the panel was last closed: everything up to there is
+  // seen. Set by the close itself, not by an effect, so an open panel does not re-render twice
+  // for every message.
   const [seen, setSeen] = useState(0);
   const launcher = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
@@ -59,10 +61,6 @@ export function ConsoleDock({
     setSeen(0);
     if (run.phase === "running") onOpenChange(true);
   }, [run.runId, run.phase, onOpenChange]);
-
-  useEffect(() => {
-    if (open) setSeen(total);
-  }, [open, total]);
 
   useEffect(() => {
     if (open && focusOnOpen.current) {
@@ -81,11 +79,13 @@ export function ConsoleDock({
   const badge = badgeText(unread);
 
   function toggle() {
-    if (!open) focusOnOpen.current = true;
+    if (open) setSeen(total);
+    else focusOnOpen.current = true;
     onOpenChange(!open);
   }
 
   function minimize() {
+    setSeen(total);
     onOpenChange(false);
     launcher.current?.focus();
   }
