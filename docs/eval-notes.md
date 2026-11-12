@@ -2,6 +2,38 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("Other entry points"); the code is in `backend/eval/`.
 
+## Experiment 8: faults that share a cause count as one (2026-11-12)
+
+### Question
+
+Experiment 7 found that the eval counted a right answer as a loss: the two-failure requests now cluster with the provider outage, which is their injected cause, and `detection` and `separation` called that a merge. What do the scores say once seeded kinds with one cause count as one fault?
+
+### What changed
+
+Scoring only; no new runs. `Fault.same_cause_as` in `eval/ground_truth.py` names the kind whose cause a kind shares, and `cause_of(kind)` maps a kind to it. One pair is set: `double_failure` shares `model_unavailable`'s cause (the model provider answering a chat call with a server error; same category, same failing step). A test keeps such a link to one step, between faults of the same category and failing span. `eval.metrics` counts clusters by `cause_of` for detection, purity, separation, rare recall and the majority kind (which `eval.judge` grades against). The trace judge's scores stay per seeded kind. There are 8 faults now, not 9.
+
+### Results
+
+Runs F (experiment 4), G (experiment 5) and I (experiment 7), rescored:
+
+| Score | Run F | Run G | Run I |
+| --- | --- | --- | --- |
+| Detection | 5/8 | 6/8 | 6/8 |
+| Purity | 23/34 | 27/34 | **29/34** |
+| Separation | 2/8 | 2/8 | 2/8 |
+| Rare-failure recall | 0/1 | 0/1 | 0/1 |
+
+### Findings
+
+1. **Run I's provider merge now counts as right.** Its provider cluster (four 5xx failures and both double failures) is pure, which lifts purity from 27/34 to 29/34. Runs F and G only move in the totals, because they blamed the PubMed timeout and so put the double failures with the timeouts.
+2. **Separation still reads 2/8 in run I**, because the provider fault's one timeout-faced trace sits with the context overflows (experiment 6, finding 2), so no single cluster holds all of that fault.
+3. **The two faults still without a cluster of their own are clustering problems:** `tight_timeout` (identical text to `source_timeout`) and `store_down` (absorbed with membership 0.0). That is experiment 6's next steps 1 and 2.
+
+### What to do next
+
+1. The membership threshold (experiment 6, next step 1): it should give `store_down` its own cluster and move the model timeout out of the overflow cluster.
+2. A duration size word in the failure text, for `tight_timeout`.
+
 ## Experiment 7: the judge's unsure, not-found and blame rules (2026-11-12)
 
 ### Question

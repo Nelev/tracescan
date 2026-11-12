@@ -3,7 +3,7 @@
 from collections import Counter
 
 from api.traces import decode
-from eval.ground_truth import FAULTS, NOT_FAULTS
+from eval.ground_truth import FAULTS, NOT_FAULTS, cause_of
 from eval.run import CONTROL_END, DEFAULT_END
 from scripts.seed_traces import CONTROL_COUNTS, COUNTS, export, healthy, kinds
 from tests.test_seed_traces import END, by_trace
@@ -62,3 +62,15 @@ def test_the_control_day_has_no_fault_and_as_many_traces_as_an_eval_day():
     assert set(answer.values()) <= NOT_FAULTS.keys()
     assert len(answer) == sum(COUNTS.values()) == sum(CONTROL_COUNTS.values())
     assert set(answer).isdisjoint(kinds(DEFAULT_END))
+
+
+def test_a_shared_cause_names_a_fault_of_the_same_category_and_step_that_shares_none():
+    shared = {kind: fault.same_cause_as for kind, fault in FAULTS.items() if fault.same_cause_as}
+    assert shared == {"double_failure": "model_unavailable"}
+    for kind, other in shared.items():
+        assert FAULTS[other].same_cause_as is None  # one step, never a chain
+        assert FAULTS[other].category == FAULTS[kind].category
+        assert FAULTS[other].failing_span == FAULTS[kind].failing_span
+        assert cause_of(kind) == other
+    assert cause_of("source_timeout") == "source_timeout"
+    assert cause_of("healthy") == "healthy"

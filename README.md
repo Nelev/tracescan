@@ -624,16 +624,16 @@ A control day (`python -m eval.run --control`) seeds only healthy requests and h
 
 #### Results
 
-The latest runs (experiment 7 in the notes): a fault day the judge prompt was not tuned on, and the control day. One run each, so a single trace can change a ratio.
+The latest runs (experiment 7 in the notes, scored as in experiment 8: seeded kinds that share an injected cause count as one fault, so a day has 8 faults): a fault day the judge prompt was not tuned on, and the control day. One run each, so a single trace can change a ratio.
 
 | Score | Fault day (2026-02-27) | Control day |
 | --- | --- | --- |
 | Trace judge: faulty traces caught | 34/34 | n/a |
 | Trace judge: harmless traces flagged | 0/18 | 0/52 |
 | Trace judge: blamed the right step | 34/34 | n/a |
-| Detection (faults with a diagnosed cluster) | 6/9 | n/a |
-| Cluster purity | 27/34 | n/a |
-| Cause separation | 2/9 | n/a |
+| Detection (faults with a diagnosed cluster) | 6/8 | n/a |
+| Cluster purity | 29/34 | n/a |
+| Cause separation | 2/8 | n/a |
 | Rare-failure recall | 0/1 | n/a |
 | False alarms (clusters with no fault) | 0 | 0 |
 | Category accuracy | 6/6 | n/a |
@@ -641,7 +641,7 @@ The latest runs (experiment 7 in the notes): a fault day the judge prompt was no
 | Evidence valid and relevant | 6/6, 6/6 | n/a |
 | Cost and time | $0.13 (judge $0.03), 26 s | $0.02 (judge only), 10 s |
 
-The weak spot is clustering: the look-alike timeout merges with the normal one, and the rare store outage joins the silent retrieval misses. One merge counted as a loss is right: the two-failure requests group with the provider outage, which is their cause, but the answer key seeds them as separate faults.
+The weak spot is clustering: the look-alike timeout merges with the normal one, and the rare store outage joins the silent retrieval misses. The two-failure requests group with the provider outage, which is their cause, and the scores count that as right.
 
 ## Tests and checks
 
