@@ -46,7 +46,7 @@ class ClosedTraces:
 class HealthyLookup(Protocol):
     """The slice of the healthy-span store (runs.healthy) the diagnoser reads."""
 
-    async def similar(self, text: str, step: str, app: str, k: int = 3) -> list[HealthyMatch]: ...
+    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]: ...
 
 
 @dataclass

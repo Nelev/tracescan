@@ -25,7 +25,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
-from agent.chunks import span_name, step_text
+from agent.chunks import step_text
 from agent.const import HEALTHY_TWINS, UNSUPPORTED_CONFIDENCE_CAP
 from agent.context import TraceContext
 from agent.evidence import (
@@ -73,32 +73,30 @@ async def healthy_twins(task: ClusterTask, trees: list[SpanNode], context: Trace
     """The prompt section with healthy calls of the cluster's failing step, or "" when there are
     none. The step is the one the trace judge blamed in the first exemplar that has one; the
     query is that span's step_text. Best effort: a failing lookup leaves the section out."""
-    if context.healthy is None:
+    blamed = task["failing_span"]
+    if context.healthy is None or blamed is None:
         return ""
-    for tree in trees:
-        span_id = task["failing_spans"].get(tree.trace_id)
-        if span_id is None:
-            continue
-        try:
-            step, failed = span_name(tree, span_id), step_text(tree, span_id)
-            twins = await context.healthy.similar(failed, step, task["target_app"], HEALTHY_TWINS)
-        except Exception as exc:
-            logger.warning(
-                "healthy twins of %s not found: %s",
-                task["cluster"]["cluster_id"],
-                type(exc).__name__,
-            )
-            return ""
-        if not twins:
-            return ""
-        return (
-            f"\nThe failing step of exemplar {tree.trace_id}, span {span_id}:\n{failed}\n"
-            f"Healthy calls of the same step from requests that went fine, nearest first. Compare "
-            "them with the failure to find what differs. They are not evidence: do not cite them.\n"
-            + "\n---\n".join(twin.text for twin in twins)
-            + "\n"
+    trace_id, span_id = blamed["trace_id"], blamed["span_id"]
+    try:
+        tree = next(tree for tree in trees if tree.trace_id == trace_id)
+        failed = step_text(tree, span_id)
+        twins = await context.healthy.similar(
+            failed, blamed["step"], task["target_app"], HEALTHY_TWINS
         )
-    return ""
+    except Exception as exc:
+        logger.warning(
+            "healthy twins of %s not found: %s", task["cluster"]["cluster_id"], type(exc).__name__
+        )
+        return ""
+    if not twins:
+        return ""
+    return (
+        f"\nThe failing step of exemplar {trace_id}, span {span_id}:\n{failed}\n"
+        "Healthy calls of the same step from requests that went fine, nearest first. Compare "
+        "them with the failure to find what differs. They are not evidence: do not cite them.\n"
+        + "\n---\n".join(twin.text for twin in twins)
+        + "\n"
+    )
 
 
 def _usage(cluster_id: str, spent: Spent) -> dict:
@@ -106,7 +104,7 @@ def _usage(cluster_id: str, spent: Spent) -> dict:
 
 
 async def _diagnose(
-    cluster: Cluster, trees: list[SpanNode], model: BaseChatModel, spent: Spent, twins: str = ""
+    cluster: Cluster, trees: list[SpanNode], model: BaseChatModel, spent: Spent, twins: str
 ) -> dict:
     """One attempt: diagnose the cluster from its exemplar trees, citing their spans as evidence."""
     prompt = (

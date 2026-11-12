@@ -34,7 +34,7 @@ from agent.nodes.diagnose_cluster import diagnose_cluster
 from agent.nodes.draft_proposals import draft_proposals
 from agent.nodes.score_trace import score_trace
 from agent.progress import ProgressTransformer
-from agent.schemas import ClusterTask, TraceTask
+from agent.schemas import Cluster, ClusterTask, FailingSpan, TraceTask
 from agent.state import TriageState
 
 
@@ -76,15 +76,20 @@ def route_after_scores(state: TriageState) -> str:
 
 def route_after_cluster(state: TriageState) -> list[Send] | str:
     """One parallel diagnose branch per cluster; no clusters (e.g. all noise): end the run."""
-    blamed = {t["trace_id"]: t["failing_span_id"] for t in state.get("failed_traces", [])}
+    failed = {t["trace_id"]: t for t in state.get("failed_traces", [])}
+
+    def failing_span(cluster: Cluster) -> FailingSpan | None:
+        t = next((failed[i] for i in cluster["exemplar_trace_ids"] if i in failed), None)
+        if t is None:
+            return None
+        return FailingSpan(
+            trace_id=t["trace_id"], span_id=t["failing_span_id"], step=t["failing_span_name"]
+        )
+
     return [
         Send(
             "diagnose_cluster",
-            ClusterTask(
-                cluster=c,
-                target_app=state["target_app"],
-                failing_spans={t: blamed[t] for t in c["exemplar_trace_ids"] if t in blamed},
-            ),
+            ClusterTask(cluster=c, target_app=state["target_app"], failing_span=failing_span(c)),
         )
         for c in state.get("clusters", [])
     ] or END

@@ -26,13 +26,21 @@ class Cluster(TypedDict):
     method: ClusterMethod
 
 
+class FailingSpan(TypedDict):
+    """The span the trace judge blamed in one exemplar, and its step (the span's name)."""
+
+    trace_id: str
+    span_id: str
+    step: str
+
+
 class ClusterTask(TypedDict):
     """Private input of one diagnose branch: its cluster, not the whole state."""
 
     cluster: Cluster
     target_app: str
-    # Exemplar trace id to the span the trace judge blamed, for the healthy-twin lookup.
-    failing_spans: dict[str, str]
+    # The blamed span of the first exemplar that has one, for the healthy-twin lookup.
+    failing_span: FailingSpan | None
 
 
 class TraceTask(TypedDict):

@@ -47,7 +47,11 @@ FAILURES = [
 ]
 
 
-TASK = ClusterTask(cluster=CLUSTER, target_app="medas", failing_spans={"t1": "s1"})
+TASK = ClusterTask(
+    cluster=CLUSTER,
+    target_app="medas",
+    failing_span={"trace_id": "t1", "span_id": "s1", "step": TREE.name},
+)
 
 
 async def diagnose(model, healthy=None) -> dict:
@@ -57,16 +61,19 @@ async def diagnose(model, healthy=None) -> dict:
 
 
 class FakeHealthy:
-    """A healthy-span store with fixed matches, recording what it was asked; or one that fails."""
+    """A healthy-span store with fixed matches, recording what it was asked."""
 
-    def __init__(self, matches: list[HealthyMatch], fail: bool = False) -> None:
-        self.matches, self.fail, self.asked = matches, fail, []
+    def __init__(self, matches: list[HealthyMatch]) -> None:
+        self.matches, self.asked = matches, []
 
-    async def similar(self, text: str, step: str, app: str, k: int = 3) -> list[HealthyMatch]:
-        if self.fail:
-            raise RuntimeError("store down")
+    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]:
         self.asked.append((text, step, app, k))
         return self.matches
+
+
+class DownHealthy:
+    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]:
+        raise RuntimeError("store down")
 
 
 TWIN = HealthyMatch(trace_id="h1", span_id="hs", text="step: twin\noutcome: ok", distance=0.05)
@@ -94,7 +101,7 @@ async def test_no_twins_and_no_store_leave_the_prompt_as_it_was():
 
 @pytest.mark.anyio
 async def test_a_failing_store_does_not_fail_the_diagnosis(caplog):
-    result = await diagnose(fake_diagnoser(DIAGNOSIS), FakeHealthy([], fail=True))
+    result = await diagnose(fake_diagnoser(DIAGNOSIS), DownHealthy())
     assert result["diagnoses"][0]["cluster_id"] == "c0"
     assert "healthy twins of c0 not found: RuntimeError" in caplog.text
 
