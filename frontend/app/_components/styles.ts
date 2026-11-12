@@ -6,7 +6,7 @@ export const NUMERIC = "text-right tabular-nums";
 
 /** A table's head row: sticky over the rows it heads. */
 export const HEAD =
-  "sticky top-0 z-10 bg-card [&_th]:border-b [&_th]:border-rule";
+  "sticky top-0 z-sticky bg-card [&_th]:border-b [&_th]:border-rule";
 
 /** Text that reads as a link: an id that opens something on another page. */
 /** Monochrome like the rest of the ink, so the underline (always there) is what says "link". */

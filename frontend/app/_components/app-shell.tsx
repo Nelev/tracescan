@@ -10,9 +10,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, Suspense } from "react";
+import { type ReactNode, Suspense, useState } from "react";
 import { runPath, shortId } from "@/lib/runs";
 import { cn } from "@/lib/utils";
+import { ConsoleDock } from "./console-dock";
 import { NewRun } from "./new-run";
 import { RunStreamProvider, useRunStatus } from "./run-stream";
 import { ServerStatus } from "./server-status";
@@ -110,8 +111,24 @@ function CurrentNav() {
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <RunStreamProvider>
+      <Frame>{children}</Frame>
+    </RunStreamProvider>
+  );
+}
+
+/**
+ * The frame inside the run's provider, so it knows whether this window has a run: then the console
+ * dock shows in the corner, the page keeps room at its foot for the launcher, and on a wide screen
+ * it narrows while the dock is open, so the panel never covers it.
+ */
+function Frame({ children }: { children: ReactNode }) {
+  const { runId } = useRunStatus();
+  const [dockOpen, setDockOpen] = useState(false);
+  const docked = runId !== null;
+  return (
+    <>
       <div className="flex min-h-full flex-1">
-        <aside className="sticky top-0 flex h-screen w-14 shrink-0 flex-col gap-6 border-r bg-sidebar px-2 py-3 lg:w-52 lg:px-3">
+        <aside className="sticky top-0 flex h-dvh w-14 shrink-0 flex-col gap-6 border-r bg-sidebar px-2 py-3 lg:w-52 lg:px-3">
           <Link
             href="/"
             className="flex items-center gap-3 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -127,15 +144,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Suspense>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex h-14 items-center justify-end gap-3 border-b bg-background/85 backdrop-blur-md px-4 sm:px-6">
+          <header className="sticky top-0 z-header flex h-14 items-center justify-end gap-3 border-b bg-background px-4 sm:px-6">
             <ServerStatus />
             <NewRun />
           </header>
-          <main className="mx-auto flex w-full max-w-[96rem] flex-1 flex-col px-4 py-6 sm:px-6">
+          <main
+            className={cn(
+              "mx-auto flex w-full max-w-[96rem] flex-1 flex-col px-4 py-6 sm:px-6",
+              docked && "pb-24",
+              docked && dockOpen && "xl:pr-(--dock-reserve)",
+            )}
+          >
             {children}
           </main>
         </div>
       </div>
-    </RunStreamProvider>
+      <ConsoleDock open={dockOpen} onOpenChange={setDockOpen} />
+    </>
   );
 }

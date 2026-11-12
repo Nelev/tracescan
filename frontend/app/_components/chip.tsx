@@ -80,13 +80,18 @@ export function Chip({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border",
+        "inline-flex max-w-full items-center rounded-full border",
         SIZE[size].box,
         CHIP_TONE[tone],
       )}
     >
       <Mark tone={tone} live={live} className={SIZE[size].icon} />
-      <span className="type-h4 text-current">{children}</span>
+      <span
+        className="type-h4 min-w-0 truncate text-current"
+        title={typeof children === "string" ? children : undefined}
+      >
+        {children}
+      </span>
     </span>
   );
 }

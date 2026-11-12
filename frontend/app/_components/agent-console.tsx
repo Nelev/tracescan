@@ -1,8 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { memo, type ReactNode, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { memo, type ReactNode, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useRun } from "./run-stream";
 import { TypingDots } from "./typing-dots";
@@ -84,7 +83,7 @@ function ScrollPane({
             el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }
       }}
-      className="min-h-0 flex-1 overflow-y-auto"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
     >
       {children}
     </div>
@@ -92,81 +91,47 @@ function ScrollPane({
 }
 
 /**
- * The agent's own account of the run: each message the server streams, drawn from the UI spec its
- * small model wrote for it (json-render), or with Raw on, every event as received. It holds the
- * run this window started; another run's page says so instead.
+ * The agent's own account of this window's run, for the console dock: each message the server
+ * streams, drawn from the UI spec its small model wrote for it (json-render), or with `raw` on,
+ * every event as received. Both follow their newest entry unless the reader scrolled up.
  */
-export function AgentConsole({ runId }: { runId: string }) {
+export function ConsoleFeed({ raw }: { raw: boolean }) {
   const run = useRun();
-  const [raw, setRaw] = useState(false);
-  const mine = run.runId === runId;
-  const running = mine && run.phase === "running";
+  const running = run.phase === "running";
 
-  return (
-    <section
-      aria-labelledby="agent-console"
-      className={cn(
-        "surface flex flex-col overflow-hidden rounded-xl border",
-        mine && "h-full min-h-[20rem]",
-      )}
-    >
-      <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
-        <h2 id="agent-console" className="flex items-center gap-2">
-          Agent console
-          {running && <TypingDots label="(the run is streaming)" />}
-        </h2>
-        {mine && (
-          <Button
-            variant={raw ? "secondary" : "ghost"}
-            size="sm"
-            aria-pressed={raw}
-            onClick={() => setRaw((on) => !on)}
-            className="relative after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-['']"
-          >
-            Raw events
-          </Button>
-        )}
-      </div>
-      {!mine ? (
-        <p className="type-body p-4 text-muted-foreground">
-          The console streams the agent's messages for a run started in this
-          window. This run was not, so its findings are all on this page.
+  return raw ? (
+    <ScrollPane watch={run.lines.at(-1)?.id ?? 0}>
+      <ol
+        role="log"
+        aria-label="Events as they arrive"
+        className="type-body flex flex-col gap-2 p-4 font-mono"
+      >
+        {run.lines.map((line) => (
+          <Line key={line.id} line={line} />
+        ))}
+      </ol>
+    </ScrollPane>
+  ) : (
+    <ScrollPane watch={run.messages.length}>
+      {run.error && (
+        <p role="alert" className="type-body px-4 pt-4 text-destructive">
+          {run.error}
         </p>
-      ) : raw ? (
-        <ScrollPane watch={run.lines.at(-1)?.id ?? 0}>
-          <ol
-            role="log"
-            aria-label="Events as they arrive"
-            className="type-body flex flex-col gap-2 p-4 font-mono"
-          >
-            {run.lines.map((line) => (
-              <Line key={line.id} line={line} />
-            ))}
-          </ol>
-        </ScrollPane>
-      ) : (
-        <ScrollPane watch={run.messages.length}>
-          {run.error && (
-            <p role="alert" className="type-body px-4 pt-4 text-destructive">
-              {run.error}
-            </p>
-          )}
-          {run.messages.length === 0 ? (
-            <p className="type-body p-4 text-muted-foreground">
-              {running ? (
-                <span className="inline-flex items-center gap-2">
-                  Waiting for the first message
-                  <TypingDots label="" />
-                </span>
-              ) : (
-                "The run sent no message that could be shown."
-              )}
-            </p>
-          ) : (
-            <UiMessages messages={run.messages} />
-          )}
-        </ScrollPane>
       )}
-    </section>
+      {run.messages.length === 0 ? (
+        <p className="type-body p-4 text-muted-foreground">
+          {running ? (
+            <span className="inline-flex items-center gap-2">
+              Waiting for the first message
+              <TypingDots label="" />
+            </span>
+          ) : (
+            "The run sent no message that could be shown."
+          )}
+        </p>
+      ) : (
+        <UiMessages messages={run.messages} />
+      )}
+    </ScrollPane>
   );
 }

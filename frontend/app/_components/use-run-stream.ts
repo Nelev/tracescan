@@ -51,6 +51,12 @@ type State = {
   messages: UiMessage[];
   /** Where the run stands, from its progress events: drives the run page's stepper. */
   live: LiveProgress;
+  /**
+   * This run was reviewed. The graph pauses at the review before the stream closes (the server
+   * still sends the proposals and their UI specs), so a review can be taken while it is open; its
+   * end then must not set the run back to waiting.
+   */
+  reviewed: boolean;
 };
 
 type Action =
@@ -75,6 +81,7 @@ const IDLE: State = {
   endedAt: null,
   messages: [],
   live: NO_PROGRESS,
+  reviewed: false,
 };
 
 function eventTone(event: RunEvent): Tone {
@@ -115,16 +122,21 @@ function reduce(state: State, action: Action): State {
           action.event.kind === "started" ? action.event.runId : state.runId,
       };
     case "reviewed":
-      // The stream ended at the review; the review ended the run.
-      return state.phase === "review" && state.runId === action.runId
-        ? { ...state, phase: "done" }
-        : state;
+      // The review ended the run, whether the stream had closed at the review or was still
+      // sending the proposals' specs.
+      if (state.runId !== action.runId) return state;
+      return {
+        ...state,
+        reviewed: true,
+        phase: state.phase === "review" ? "done" : state.phase,
+      };
     case "batch":
       return action.actions.reduce(reduce, state);
     case "end":
       return {
         ...state,
-        phase: action.phase,
+        phase:
+          state.reviewed && action.phase === "review" ? "done" : action.phase,
         endedAt: action.at,
         error: action.error ?? null,
       };

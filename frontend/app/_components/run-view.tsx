@@ -28,7 +28,6 @@ import {
 import { plural, RUN_STATUS, type StatusTone, shortId } from "@/lib/runs";
 import type { Decision } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { AgentConsole } from "./agent-console";
 import { Chip } from "./chip";
 import { ClusterCard, type LiveDiagnosis } from "./cluster-card";
 import { ClusterMapPanel } from "./cluster-map-panel";
@@ -121,7 +120,10 @@ export function RunView({
   const stream = run.runId === runId ? run : null;
   // This window's stream, while it is still running: the stepper and the cards follow it.
   const live = stream?.phase === "running" ? stream.live : null;
-  const streaming = live !== null;
+  // The graph has paused at the review, though the stream still sends the proposals and their UI
+  // specs: the run already waits for a person, so it reads as waiting and takes decisions.
+  const paused = live?.nodes.human_review === "paused";
+  const streaming = live !== null && !paused;
   // Refresh reloads the detail and the proposals; a taken review reloads only the detail, so
   // the review's outcome stays on screen.
   const [refreshes, setRefreshes] = useState(0);
@@ -146,10 +148,11 @@ export function RunView({
   const detail = useResource(
     (signal) => getRunOverview(runId, signal),
     true,
-    `${stream?.live.checkpoints ?? 0}:${stream?.phase ?? ""}:${refreshes}:${reviews}`,
+    `${stream?.live.checkpoints ?? 0}:${stream?.phase ?? ""}:${paused}:${refreshes}:${reviews}`,
   );
   // A run streaming in this window may not have a checkpoint to read yet.
-  const overview = detail.value ?? (streaming ? emptyOverview(runId) : null);
+  const overview =
+    detail.value ?? (live !== null ? emptyOverview(runId) : null);
   const waiting = overview?.status === "review_required" && !streaming;
 
   // Loaded with the detail, not after it, so a waiting run shows its pickers at once; again on
@@ -178,7 +181,9 @@ export function RunView({
   const toDecide = progress
     ? progress.total - progress.approved - progress.rejected
     : 0;
-  const status = statusOf(detail.value, stream);
+  const status = paused
+    ? RUN_STATUS.review_required
+    : statusOf(detail.value, stream);
   const clusters = overview?.clusters ?? [];
   const usage = totalUsage(clusters);
 
@@ -259,7 +264,7 @@ export function RunView({
             <TabsList aria-label="Run views">
               <TabsTab value="activity">
                 <Activity className="size-4" aria-hidden="true" />
-                Map &amp; console
+                Map
                 {streaming && <TypingDots label="(the run is streaming)" />}
               </TabsTab>
               <TabsTab value="findings">
@@ -281,25 +286,20 @@ export function RunView({
 
             {/* Both panels stay mounted, so the map keeps its view and the console its place. */}
             <TabsPanel value="activity" keepMounted>
-              <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
-                <div className="min-w-0">
-                  {overview.cluster_map && clusters.length > 0 ? (
-                    <ClusterMapPanel
-                      map={overview.cluster_map}
-                      clusters={clusters}
-                      selected={mapCluster}
-                      onSelect={setMapCluster}
-                      onOpenFinding={openFinding}
-                    />
-                  ) : (
-                    <p className="type-body rounded-xl border border-dashed p-4 text-muted-foreground">
-                      {noMap(overview, streaming)}
-                    </p>
-                  )}
-                </div>
-                <div className={cn(stream && "h-96 xl:h-[calc(100vh-15rem)]")}>
-                  <AgentConsole runId={runId} />
-                </div>
+              <div className="min-w-0">
+                {overview.cluster_map && clusters.length > 0 ? (
+                  <ClusterMapPanel
+                    map={overview.cluster_map}
+                    clusters={clusters}
+                    selected={mapCluster}
+                    onSelect={setMapCluster}
+                    onOpenFinding={openFinding}
+                  />
+                ) : (
+                  <p className="type-body rounded-xl border border-dashed p-4 text-muted-foreground">
+                    {noMap(overview, streaming)}
+                  </p>
+                )}
               </div>
             </TabsPanel>
 
@@ -404,6 +404,7 @@ export function RunView({
                     sending={sending}
                     onSubmit={() => void review.submit()}
                     onReload={review.reload}
+                    clearDock={run.runId !== null}
                   />
                 )}
               </section>
@@ -449,11 +450,13 @@ function FindingsIndex({
               >
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate">{clusterTitle(c)}</span>
+                  {/* The error, not the step: two findings of one kind often fail at the same step. */}
                   <span
                     className="truncate font-mono text-muted-foreground"
                     title={c.signature}
                   >
-                    {signatureParts(c.signature).step}
+                    {signatureParts(c.signature).error ||
+                      signatureParts(c.signature).step}
                   </span>
                   <span className="text-muted-foreground tabular-nums">
                     {plural(c.trace_ids.length, "trace")}
@@ -496,15 +499,23 @@ function ReviewBar({
   sending,
   onSubmit,
   onReload,
+  clearDock,
 }: {
   progress: ReturnType<typeof tally>;
   problem: string | null;
   sending: boolean;
   onSubmit: () => void;
   onReload: () => void;
+  /** This window has a run, so the console's launcher sits in the corner: keep Submit clear of it. */
+  clearDock: boolean;
 }) {
   return (
-    <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border surface-raised px-4 py-3">
+    <div
+      className={cn(
+        "sticky bottom-4 z-sticky flex flex-wrap items-center justify-between gap-3 rounded-xl border surface-raised px-4 py-3",
+        clearDock && "mr-(--dock-clear)",
+      )}
+    >
       <div className="flex min-w-0 flex-col gap-1">
         <span className="type-h3 flex items-center gap-2">
           <UserCheck

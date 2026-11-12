@@ -178,7 +178,7 @@ function Trend({ runs }: { runs: RunRecord[] }) {
             <span
               aria-hidden="true"
               className={cn(
-                "type-body pointer-events-none absolute bottom-full z-10 mb-2 flex w-max translate-y-1 flex-col rounded-md border surface-raised px-2 py-1 tabular-nums opacity-0 transition-[opacity,translate] duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100",
+                "type-body pointer-events-none absolute bottom-full z-sticky mb-2 flex w-max translate-y-1 flex-col rounded-md border surface-raised px-2 py-1 tabular-nums opacity-0 transition-[opacity,translate] duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100",
                 // Kept inside the chart at both ends, so it never widens the page.
                 i < runs.length / 3 && "left-0",
                 i >= (runs.length * 2) / 3 && "right-0",
