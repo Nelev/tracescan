@@ -147,6 +147,9 @@ test("each way a review can fail has its own words", () => {
   assert.equal(new Set(words).size, words.length);
   assert.match(submitProblem(refused(409)), /no longer waiting/);
   assert.match(loadProblem(refused(404)), /does not know this run/);
+  // A 401 is a session that ended, and a review refused with it was not sent.
+  assert.match(loadProblem(refused(401)), /sign in again/);
+  assert.match(submitProblem(refused(401)), /sign in again.*were not sent/);
   assert.equal(loadProblem(refused(null)), submitProblem(refused(null)));
   assert.match(loadProblem(refused(500)), /HTTP 500/);
 });

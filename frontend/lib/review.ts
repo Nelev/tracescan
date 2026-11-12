@@ -141,10 +141,15 @@ export type Failure = { status: number | null; unreadable: boolean };
 
 const UNREACHABLE = "Could not reach the backend. Check that it is running.";
 
+/** A 401 from the backend: the session token was missing or no longer good. */
+export const SIGNED_OUT =
+  "Your session has ended or could not be checked. Reload the page to sign in again.";
+
 /** Why a run could not be opened for review. */
 export function loadProblem({ status, unreadable }: Failure): string {
   if (unreadable) return "The server's answer for this run could not be read.";
   if (status === null) return UNREACHABLE;
+  if (status === 401) return SIGNED_OUT;
   if (status === 404) return "The server does not know this run.";
   return `The run could not be loaded (HTTP ${status}).`;
 }
@@ -160,6 +165,8 @@ export function submitProblem({ status, unreadable }: Failure): string {
   switch (status) {
     case null:
       return UNREACHABLE;
+    case 401:
+      return `${SIGNED_OUT} Your decisions were not sent.`;
     case 409:
       return "This run is no longer waiting for review. It may have been reviewed elsewhere: check it under Runs.";
     case 422:

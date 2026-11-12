@@ -236,7 +236,9 @@ export function useRunStream() {
           "error",
           err.status === null
             ? "could not reach the backend: check that it is running"
-            : `the run did not start (HTTP ${err.status}): check that the backend is running, then its log`,
+            : err.status === 401
+              ? "the run did not start: your session has ended, reload the page to sign in again"
+              : `the run did not start (HTTP ${err.status}): check that the backend is running, then its log`,
         );
       } else {
         lost("the connection was interrupted");

@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { RunView } from "../../_components/run-view";
+import { RunView } from "@/app/_components/run-view";
 
 async function Run({ params, searchParams }: PageProps<"/runs/[id]">) {
   const { id } = await params;
