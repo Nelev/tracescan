@@ -31,7 +31,7 @@ async def test_a_seeded_day_is_triaged_up_to_the_review_and_keeps_its_answer_key
     failed = {v["trace_id"] for v in result["trace_verdicts"] if v["failed"]}
     assert failed and set(result["failing_spans"]) == failed
     assert {t for cluster in result["clusters"] for t in cluster["trace_ids"]} == failed
-    assert result["kinds"] == kinds(END)
+    assert result["kinds"] == kinds(END) and result["control"] is False
     assert {d["cluster_id"] for d in result["diagnoses"]} == {
         cluster["cluster_id"] for cluster in result["clusters"]
     }

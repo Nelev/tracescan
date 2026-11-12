@@ -64,6 +64,7 @@ def test_a_run_that_gets_everything_right_scores_full_marks():
         "calls": 3,
         "tokens": 300,
         "cost_usd": 0.03,
+        "judge_cost_usd": 0.0,
         "seconds": 2.0,
     }
 
@@ -136,3 +137,57 @@ def test_a_judged_file_adds_the_cause_scores_and_how_often_the_judge_agrees_with
 
     judged["human"] = {"c0": 2, "c1": 2}  # c2 was not graded by hand
     assert score(judged)["judge_agreement"] == (1, 2)
+
+
+def verdict(trace_id: str, failed: bool) -> dict:
+    return {"trace_id": trace_id, "failed": failed}
+
+
+def test_the_trace_judge_is_scored_per_kind_and_its_spend_joins_the_cost():
+    judged = result([cluster("c0", "t1", "t2")], [diagnosis("c0", "infra_error", ("t1", "sp_t1"))])
+    assert "judge_recall" not in score(judged)  # a file from before the trace judge
+
+    judged["trace_verdicts"] = [
+        verdict("t1", True),
+        verdict("t2", True),
+        verdict("t3", False),  # a timeout the judge let through
+        verdict("a1", True),
+        verdict("a2", True),
+        verdict("h1", True),  # a healthy request judged failed
+    ]  # s1 is in judge_failures: never judged, so not failed
+    judged["judge_failures"] = ["s1"]
+    judged["judge_usage"] = [{"calls": 1, "tokens": 10, "cost_usd": 0.001}] * 7
+
+    scores = score(judged)
+    assert scores["judge_recall"] == (4, 6)
+    assert scores["judge_false_positives"] == (1, 1)
+    assert scores["judge_failures"] == 1
+    assert scores["judge_by_kind"] == {
+        "healthy": (1, 1),
+        "source_timeout": (2, 3),
+        "store_down": (0, 1),
+        "tool_arguments": (2, 2),
+    }
+    assert scores["calls"] == 1 + 7
+    assert scores["tokens"] == 100 + 70
+    assert scores["judge_cost_usd"] == 0.007
+    assert scores["cost_usd"] == 0.017
+
+
+def test_on_a_control_day_every_cluster_is_a_false_alarm_and_there_is_nothing_to_detect():
+    control = {
+        "kinds": {"h1": "healthy", "h2": "healthy", "r1": "retried_ok", "n1": "not_found"},
+        "failing_spans": {"n1": "sp_n1"},
+        "clusters": [cluster("c0", "n1")],
+        "diagnoses": [diagnosis("c0", "tool_schema_error", ("n1", "sp_n1"))],
+        "model_usage": [{"calls": 1, "tokens": 100, "cost_usd": 0.01}],
+        "trace_verdicts": [verdict("h1", False), verdict("h2", False), verdict("r1", False)]
+        + [verdict("n1", True)],
+        "seconds": 1.0,
+    }
+
+    scores = score(control)
+    assert scores["false_alarms"] == 1
+    assert scores["detection"] == (0, 0) and scores["judge_recall"] == (0, 0)
+    assert scores["judge_false_positives"] == (1, 4)
+    assert scores["category_accuracy"] == (0, 0)  # a false alarm is not a wrong answer too

@@ -5,7 +5,9 @@ Run from backend/:  uv run python -m eval.metrics [out/eval/<file>.json]   (defa
 Pure code: no model and no database. Every cluster gets a majority kind, the seeded kind most
 of its traces are of, and the scores follow from that. A ratio is (how many, out of how many).
 Whether a root cause is the right one takes a judge (eval/judge.py): its scores are added
-when the file has verdicts.
+when the file has verdicts. The trace judge, which decides which traces failed before anything
+is clustered, is scored on its own against the kinds: how many faulty traces it caught, how many
+harmless ones it flagged, per kind too; its spend is in the cost.
 """
 
 import json
@@ -31,6 +33,35 @@ def majority_kinds(result: dict[str, Any]) -> dict[str, str]:
     return {cluster_id: mix.most_common(1)[0][0] for cluster_id, mix in _mixes(result).items()}
 
 
+def judge_scores(result: dict[str, Any]) -> dict[str, Any]:
+    """The trace judge against the answer key: a faulty trace should be judged failed, a
+    harmless one not. A trace the judge could not judge (`judge_failures`) counts as not failed."""
+    kinds = result["kinds"]
+    failed = {v["trace_id"] for v in result["trace_verdicts"] if v["failed"]}
+    by_kind: dict[str, list[int]] = {}
+    for trace_id, kind in kinds.items():
+        hits = by_kind.setdefault(kind, [0, 0])
+        hits[0] += trace_id in failed
+        hits[1] += 1
+    faulty = [t for t, kind in kinds.items() if kind in FAULTS]
+    harmless = [t for t, kind in kinds.items() if kind not in FAULTS]
+    return {
+        "judge_recall": (sum(t in failed for t in faulty), len(faulty)),
+        "judge_false_positives": (sum(t in failed for t in harmless), len(harmless)),
+        "judge_failures": len(result.get("judge_failures", [])),
+        # Per seeded kind: (judged failed, traces of it).
+        "judge_by_kind": {kind: tuple(by_kind[kind]) for kind in sorted(by_kind)},
+    }
+
+
+def _spend(usage: list[dict[str, Any]]) -> tuple[int, int, float]:
+    return (
+        sum(entry["calls"] for entry in usage),
+        sum(entry["tokens"] for entry in usage),
+        sum(entry["cost_usd"] for entry in usage),
+    )
+
+
 def score(result: dict[str, Any]) -> dict[str, Any]:
     kinds = result["kinds"]
     diagnoses = list(result["diagnoses"])
@@ -44,7 +75,9 @@ def score(result: dict[str, Any]) -> dict[str, Any]:
     of_faults = [d for d in diagnoses if d["cluster_id"] in expected]
     rare = {fault for fault, count in seeded.items() if count == 1}
     failing = result["failing_spans"]
-    usage = result["model_usage"]
+    calls, tokens, cost = _spend(result["model_usage"])
+    # Files from before the judge's spend was kept have none: their cost is the diagnoser's alone.
+    judge_calls, judge_tokens, judge_cost = _spend(result.get("judge_usage", []))
     scores: dict[str, Any] = {
         "detection": (len(detected), len(seeded)),
         "purity": (
@@ -79,11 +112,15 @@ def score(result: dict[str, Any]) -> dict[str, Any]:
             ),
             len(diagnoses),
         ),
-        "calls": sum(entry["calls"] for entry in usage),
-        "tokens": sum(entry["tokens"] for entry in usage),
-        "cost_usd": round(sum(entry["cost_usd"] for entry in usage), 4),
+        # The whole run's model spend: the diagnoser's and the trace judge's.
+        "calls": calls + judge_calls,
+        "tokens": tokens + judge_tokens,
+        "cost_usd": round(cost + judge_cost, 4),
+        "judge_cost_usd": round(judge_cost, 4),
         "seconds": result["seconds"],
     }
+    if "trace_verdicts" in result:  # files from before the trace judge have none
+        scores |= judge_scores(result)
     if verdicts := result.get("verdicts"):  # the file has been judged (eval/judge.py)
         # The headline: diagnoses that name the injected cause (2 on the rubric's 0 to 2).
         scores["cause_accuracy"] = (sum(v["score"] == 2 for v in verdicts), len(verdicts))
@@ -108,11 +145,21 @@ def results_path(given: Path | None) -> Path:
 def main() -> None:
     path = results_path(Path(sys.argv[1]) if len(sys.argv) > 1 else None)
     print(path)
-    for name, value in score(json.loads(path.read_text())).items():
-        if isinstance(value, tuple):
-            hits, total = value
-            value = f"{hits}/{total}" + (f" ({hits / total:.0%})" if total else "")
-        print(f"  {name:18} {value}")
+    result = json.loads(path.read_text())
+    if result.get("control"):
+        print("  control day: no fault was seeded, so anything found is a false alarm")
+    for name, value in score(result).items():
+        if isinstance(value, dict):
+            print(f"  {name}")
+            for kind, ratio in value.items():
+                print(f"    {kind:22} {_ratio(ratio)}")
+            continue
+        print(f"  {name:22} {_ratio(value) if isinstance(value, tuple) else value}")
+
+
+def _ratio(value: tuple[int, int]) -> str:
+    hits, total = value
+    return f"{hits}/{total}" + (f" ({hits / total:.0%})" if total else "")
 
 
 if __name__ == "__main__":

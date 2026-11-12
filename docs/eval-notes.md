@@ -2,6 +2,53 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("Other entry points"); the code is in `backend/eval/`.
 
+## Experiment 5: a fresh day and a control day (2026-11-12)
+
+### Question
+
+Run F's judge prompt was tuned on the day it was scored on. Does it hold on a day it has never seen, and on a day with no fault at all?
+
+### What changed
+
+Code only, no prompt change. `eval.metrics` now scores the trace judge itself (`judge_recall`, `judge_false_positives`, per kind in `judge_by_kind`) and counts its spend in `cost_usd` (`judge_cost_usd` on its own). `eval.run --control` seeds a control day (`CONTROL_COUNTS`: 36 healthy requests, 8 retried rate limits, 8 expected not-founds, no fault) on its own fixed day, `CONTROL_END`.
+
+- **Run G.** A fresh fault day, `--end 2026-02-27T12:00:00Z`, the same twelve kinds as `COUNTS`. Results file: `out/eval/20261112T145040Z.json`.
+- **Run H.** The control day (`--control`, ending 2026-02-20). Results file: `out/eval/20261112T145107Z.json`.
+
+### Results
+
+| Score | Run F (exp 4, tuned day) | Run G (fresh day) | Run H (control) |
+| --- | --- | --- | --- |
+| Judge recall | 34/34 | **34/34** | n/a |
+| Judge false positives | 0/14 | **0/18** | 1/52 |
+| Detection | 5/9 | 6/9 | n/a |
+| Purity | 23/34 | 27/34 | 1/1 |
+| Separation | 2/9 | 2/9 | n/a |
+| Rare-failure recall | 0/1 | 0/1 | n/a |
+| False alarms (clusters) | 0 | 0 | 1 |
+| Category / cause accuracy | 5/5, 5/5 | 5/6, 5/6 | n/a |
+| Total cost (judge part) | $0.11 ($0.02) | $0.13 ($0.03) | $0.04 ($0.03) |
+
+Run G's clusters: the three timeout kinds (`source_timeout`, `tight_timeout`, `double_failure`) in one cluster; `context_overflow` with one `model_unavailable`; `tool_arguments` alone; `silent_no_hits` with `store_down`; the other four `model_unavailable` alone; `unexplained` alone (step and error).
+
+### Findings
+
+1. **The judge holds on a fresh day.** It catches every faulty trace and flags none of the 18 harmless ones, so run F was not just a fit to its own day.
+2. **The control day's one false alarm sits on the threshold again.** One expected not-found scored exactly 0.5 because "the trace does not include the final answer", and the judge blamed no valid span, so the code fell back to the error span. It is experiment 4's finding 2 again, on another kind: an unsure judge lands on 0.5, and 0.5 counts as failed. That one trace became a cluster and a diagnosis (`unknown`, confidence 0.35).
+3. **Clustering is the bottleneck, and now the only big one.** Separation is 2/9 on both fault days. The timeouts merge (look-alike and double failure included), and the store outage, the rare fault, joins the silent misses in both runs, so rare recall stays 0/1.
+4. **The one cause the grader marked down was `silent_no_hits` (1 of 2).** The diagnosis saw the zero hits but blamed retrieval rather than the model answering without the record, partly because the store outage in the same cluster pulled it towards a connection failure. A clustering fix would likely fix this too.
+5. **The judge is now most of a small run's cost.** About $0.026 for 52 calls on each day, against $0.01 to $0.10 for the diagnoser.
+
+### Limits
+
+- One run per day. The 0.5 false alarm shows the judge is not deterministic near the threshold, so a second control run could differ.
+
+### What to do next
+
+1. Clustering (as in experiments 2 and 4): keep look-alike timeouts and the rare store outage apart. It is now the biggest loss in every fault-day score.
+2. Make an unsure judge score below or above the threshold, not on it: tell the prompt that 0.5 counts as failed, or make the threshold strictly below 0.5 (`FAILED_MAX_SCORE`). Re-run the control day to check.
+3. Average over two or three runs per day before trusting any change of one trace.
+
 ## Experiment 4: the judge prompt's recovery rule (2026-11-11)
 
 ### Question
