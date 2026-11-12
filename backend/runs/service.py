@@ -11,7 +11,7 @@ that only the store knows a run failed or was aborted.
 """
 
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -45,6 +45,7 @@ from runs.schemas import (
     StartedRun,
     StoredStatus,
 )
+from runs.scores import TraceScores
 from runs.store import NotClaimable, RunStore
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,7 @@ class Runs:
         open_traces: OpenTraces,
         store: RunStore,
         healthy: HealthySpans | None = None,
+        scores: TraceScores | None = None,
     ) -> None:
         self._graph = graph  # must have a checkpointer: status and review read it
         # What every run segment gets, set once by the server so no request reaches it. Its
@@ -182,6 +184,7 @@ class Runs:
         self._open_traces = open_traces
         self._store = store
         self._healthy = healthy  # None: the judge's healthy picks are not saved
+        self._scores = scores  # None: the judge's verdicts are not saved as scores
 
     async def _mark(
         self, run_id: str, status: StoredStatus, counts: RunCounts | None = None
@@ -192,14 +195,23 @@ class Runs:
         except Exception as exc:
             logger.error("run %s: status %s not recorded: %s", run_id, status, type(exc).__name__)
 
-    async def _save_healthy(self, run_id: str, values: Mapping) -> None:
-        """Store the judge's healthy picks. Best effort, like `_mark`: a run never fails on it."""
-        if self._healthy is None:
-            return
-        try:
-            await self._healthy.save(values["target_app"], values.get("verdicts", []))
-        except Exception as exc:
-            logger.error("run %s: healthy spans not saved: %s", run_id, type(exc).__name__)
+    async def _save_verdicts(self, run_id: str, values: Mapping) -> None:
+        """Store the judge's healthy picks and scores, side by side. Best effort, like `_mark`: a
+        run never fails on either."""
+        verdicts = values.get("verdicts", [])
+
+        async def save(what: str, write: Callable[[], Awaitable[object]]) -> None:
+            try:
+                await write()
+            except Exception as exc:
+                logger.error("run %s: %s not saved: %s", run_id, what, type(exc).__name__)
+
+        async with anyio.create_task_group() as group:
+            if (healthy := self._healthy) is not None:
+                app = values["target_app"]
+                group.start_soon(save, "healthy spans", lambda: healthy.save(app, verdicts))
+            if (scores := self._scores) is not None:
+                group.start_soon(save, "scores", lambda: scores.save(verdicts))
 
     @asynccontextmanager
     async def start(
@@ -269,7 +281,7 @@ class Runs:
             return
         ended.append(status.status)
         await self._mark(run_id, status.status, _counts(status.summary))
-        await self._save_healthy(run_id, values)
+        await self._save_verdicts(run_id, values)
         yield Ended(status)
 
     async def _find_snapshot(self, run_id: str) -> StateSnapshot | None:

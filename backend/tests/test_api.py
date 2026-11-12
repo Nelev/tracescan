@@ -33,7 +33,9 @@ from tests.fakes import (
 )
 
 
-def use_runs(traces: FakeTraces | None = None, model=None, open_traces=None, healthy=None) -> None:
+def use_runs(
+    traces: FakeTraces | None = None, model=None, open_traces=None, healthy=None, scores=None
+) -> None:
     """Give the app a runs module over `traces` (or a session factory of the test's own).
 
     The context is the shared fake one: an offline embedder, so the real model is never downloaded,
@@ -46,7 +48,12 @@ def use_runs(traces: FakeTraces | None = None, model=None, open_traces=None, hea
 
     app.state.run_store = store = InMemoryRunStore()
     app.state.runs = Runs(
-        app.state.graph, fake_context(FakeTraces(), model), open_traces or session, store, healthy
+        app.state.graph,
+        fake_context(FakeTraces(), model),
+        open_traces or session,
+        store,
+        healthy,
+        scores,
     )
 
 
@@ -155,37 +162,47 @@ async def test_stream_reports_progress_and_stops_at_the_review_with_counts(clien
     }
 
 
-class SavedHealthy:
-    """A healthy-span store that records what it was given, or fails with clinical text."""
+class Saved:
+    """A post-run store (healthy spans or scores) that records what it was given, or fails with
+    clinical text."""
 
     def __init__(self, fail: bool = False) -> None:
-        self.saved: list[tuple[str, list]] = []
+        self.saved: list[tuple] = []
         self.fail = fail
 
-    async def save(self, app: str, verdicts: list) -> int:
+    async def save(self, *args) -> int:
         if self.fail:
             raise RuntimeError(f"span says: {PHI}")
-        self.saved.append((app, verdicts))
+        self.saved.append(args)
         return 0
 
 
 @pytest.mark.anyio
 async def test_a_run_that_reaches_the_review_saves_the_judges_verdicts(client):
-    healthy = SavedHealthy()
-    use_runs(two_failures(), fake_diagnoser(DIAGNOSIS), healthy=healthy)
+    healthy, scores = Saved(), Saved()
+    use_runs(two_failures(), fake_diagnoser(DIAGNOSIS), healthy=healthy, scores=scores)
     events = parse_sse((await post_stream(client)).text)
     assert events[-1][0] == "review_required"
     ((saved_app, verdicts),) = healthy.saved
     assert saved_app == "medas" and {v["trace_id"] for v in verdicts} == {"tr_1", "tr_2"}
+    assert scores.saved == [(verdicts,)]
 
 
 @pytest.mark.anyio
-async def test_a_healthy_store_that_fails_does_not_fail_the_run(client, caplog):
-    use_runs(two_failures(), fake_diagnoser(DIAGNOSIS), healthy=SavedHealthy(fail=True))
+@pytest.mark.parametrize("failing", ["healthy", "scores"])
+async def test_a_store_that_fails_neither_fails_the_run_nor_stops_the_other(
+    client, caplog, failing
+):
+    stores = {"healthy": Saved(), "scores": Saved()}
+    stores[failing] = Saved(fail=True)
+    use_runs(two_failures(), fake_diagnoser(DIAGNOSIS), **stores)
     events = parse_sse((await post_stream(client)).text)
     assert events[-1][0] == "review_required"
-    assert "healthy spans not saved: RuntimeError" in caplog.text
+    label = {"healthy": "healthy spans", "scores": "scores"}[failing]
+    assert f"{label} not saved: RuntimeError" in caplog.text
     assert "John" not in caplog.text
+    (working,) = (store for name, store in stores.items() if name != failing)
+    assert len(working.saved) == 1
 
 
 @pytest.mark.anyio

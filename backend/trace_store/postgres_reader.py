@@ -4,8 +4,8 @@ There is no traces table: a trace is the spans that share a trace_id, and a trac
 once its root span is stored. search_traces reads no scores: which traces failed is the agent's
 trace judge's call. The trace browser's reads (list_traces, get_trace_detail) show what `scores`
 holds: a trace is failed there when its lowest score is at most FAILED_MAX_SCORE, and its failing
-span is the one that score blames. Nothing writes `scores` since the heuristic scoring job was
-removed, so new traces read as unscored.
+span is the one that score blames. The rows are the trace judge's verdicts, saved after each run
+(runs/scores.py), so a trace no run has judged yet reads as unscored.
 Give it TRACE_DATABASE_URL; the session is opened read-only, whatever the role may do.
 """
 
