@@ -2,6 +2,46 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("Other entry points"); the code is in `backend/eval/`.
 
+## Experiment 6: why the clustering merges faults (2026-11-12)
+
+### Question
+
+Experiment 5's fault day (run G) left three faults without a cluster of their own: `tight_timeout`, `double_failure` and `store_down`. Is HDBSCAN the cause, or what it is given?
+
+### What changed
+
+Nothing in the code, and no model call. Run G's 34 failure texts (`failure_text`, rebuilt from its `trace_verdicts`) were embedded again with the real model and passed to HDBSCAN with the app's settings (`MIN_CLUSTER_SIZE` 3, `MIN_SAMPLES` 4, cosine). For each fault, the labels, HDBSCAN's membership (`probabilities_`) and the cosine distance to the nearest other fault were read.
+
+### Results
+
+| Fault | Cluster | Membership | Nearest other fault (cosine distance) |
+| --- | --- | --- | --- |
+| source_timeout, tight_timeout, double_failure | one cluster | 1.0 | 0.000 to each other: identical texts |
+| silent_no_hits | its own | 1.0 | store_down, 0.137 |
+| store_down | silent_no_hits' | **0.0** | silent_no_hits 0.137; every other fault 0.35 or more |
+| context_overflow | its own | 1.0 | model_unavailable, 0.112 |
+| model_unavailable, timeout face (1 trace) | context_overflow's | **0.0** | context_overflow 0.112; its own 5xx siblings 0.114 |
+| model_unavailable, 5xx face (4 traces) | its own | 1.0 | |
+| tool_arguments | its own | 1.0 | model_unavailable, 0.298 |
+| unexplained | noise (then `step_error`) | 0.0 | 0.35 or more from everything |
+
+### Findings
+
+1. **The timeouts merge before HDBSCAN.** Their texts are identical: the look-alike differs only in its timeout length, which digit masking erases, and the double failure's text describes the PubMed timeout the judge blamed, not the provider's 503 the answer key calls the cause. No algorithm can separate identical inputs. The fixes are in the text (a coarse size word for durations instead of `#`) and in the judge (which error to blame when a request has two; experiment 4, next step 2).
+2. **HDBSCAN absorbs a lone outlier into the nearest cluster and says so.** A point that joins a cluster after the cluster has formed counts as a member, with low membership; only a point that joins nothing before the root merge is noise. The store outage (one trace, below `MIN_CLUSTER_SIZE`) sits 0.137 from the silent misses, which share its step `retrieval record_chunks`, and is attached to them with membership 0.0. The same happens to the one model timeout, absorbed into the context overflows. `group_failures` reads only the labels, so a 0.0 member counts the same as a 1.0 member.
+3. **The embedding weights the step more than the error.** "Connection refused" and "no error" at the same step are 0.137 apart; two different failures of a `chat` step are 0.11 apart, about as far as one cause's two faces. The error type does not separate failures of one step well.
+4. **`MIN_SAMPLES` works as intended for small identical groups.** The three `unexplained` traces are identical but have no fourth neighbour, so HDBSCAN calls them noise and the second stage makes them a `step_error` cluster.
+
+### Limits
+
+- One day, one embedding of each text. The distances are from this model (`bge-small-en-v1.5`) and these seeded texts; real Medas errors will be more varied.
+
+### What to do next
+
+1. Treat a point whose membership is below a threshold (try 0.5) as noise, so it goes through the second stage and, with nothing sharing its step and error, is diagnosed alone. Expected: `store_down` gets its own cluster (rare recall 1/1, detection +1); the model timeout becomes a one-trace finding instead of joining the overflows. Check on runs G and H, and that the control day gains no cluster.
+2. Put durations in the text as a size word (bucketed like `chunks.py`'s latency), so the look-alike timeout differs from the normal one.
+3. Settle which error the judge blames in a request with two (experiment 4, next step 2).
+
 ## Experiment 5: a fresh day and a control day (2026-11-12)
 
 ### Question
