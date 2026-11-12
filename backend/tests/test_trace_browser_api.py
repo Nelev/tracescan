@@ -80,6 +80,21 @@ async def test_the_list_filters(browser):
 
 
 @pytest.mark.anyio
+async def test_the_list_pages_with_the_total_over_its_filters(browser):
+    first = await browser.get("/v1/traces", params={"limit": 1})
+    second = await browser.get("/v1/traces", params={"limit": 1, "offset": 1})
+    assert [r["trace_id"] for r in first.json()] == [HEALTHY]
+    assert [r["trace_id"] for r in second.json()] == [FAILED]
+    # The total is over every page, with the same filters as the list.
+    assert first.headers["X-Total-Count"] == second.headers["X-Total-Count"] == "2"
+    failed = await browser.get("/v1/traces", params={"failed_only": "true"})
+    assert failed.headers["X-Total-Count"] == "1"
+    other = await browser.get("/v1/traces", params={"app": "someone-else"})
+    assert (other.json(), other.headers["X-Total-Count"]) == ([], "0")
+    assert (await browser.get("/v1/traces", params={"offset": -1})).status_code == 422
+
+
+@pytest.mark.anyio
 async def test_an_unscored_trace_is_listed_without_a_score(browser, spans_engine):
     async with spans_engine.begin() as conn:
         await conn.execute(text("DELETE FROM scores WHERE trace_id = :id"), {"id": HEALTHY})

@@ -316,9 +316,12 @@ class InMemoryRunStore:
     async def get_run(self, run_id: str) -> RunRecord | None:
         return self.runs.get(run_id)
 
-    async def list_runs(self, limit: int) -> list[RunRecord]:
+    async def list_runs(self, limit: int, offset: int = 0) -> list[RunRecord]:
         newest_first = sorted(self.runs.values(), key=lambda r: r.created_at, reverse=True)
-        return newest_first[:limit]
+        return newest_first[offset : offset + limit]
+
+    async def count_runs(self) -> int:
+        return len(self.runs)
 
     async def reviews(self, run_id: str) -> list[ReviewRecord]:
         return self.decided.get(run_id, [])

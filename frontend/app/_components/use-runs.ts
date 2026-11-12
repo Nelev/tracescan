@@ -1,8 +1,8 @@
 "use client";
 
-import { listRuns } from "@/lib/api";
+import { listRuns, listRunsPage } from "@/lib/api";
 import { useRunStatus } from "./run-stream";
-import { useList } from "./use-list";
+import { useList, usePage } from "./use-list";
 
 /**
  * The recorded runs, loaded when the page opens, again when this window's run changes phase or
@@ -16,6 +16,20 @@ export function useRuns() {
     listRuns,
     true,
     `${phase}:${started}`,
+    phase === "cancelled" || phase === "lost",
+  );
+}
+
+/**
+ * One page of the recorded runs, with how many there are, reloaded on the same signals as
+ * `useRuns` and whenever the page changes. A new run lands on page 1.
+ */
+export function useRunsPage(page: number, size: number) {
+  const { phase, started } = useRunStatus();
+  return usePage(
+    (signal) => listRunsPage(page, size, signal),
+    true,
+    `${phase}:${started}:${page}:${size}`,
     phase === "cancelled" || phase === "lost",
   );
 }

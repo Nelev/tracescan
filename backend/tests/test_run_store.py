@@ -74,6 +74,17 @@ async def test_runs_are_listed_newest_first_with_who_started_each(store):
 
 
 @pytest.mark.anyio
+async def test_the_list_reads_page_by_page_and_counts_every_run(store):
+    first = await new_run(store)
+    second = await new_run(store)
+    third = await new_run(store)
+    assert await store.count_runs() == 3
+    assert [r.run_id for r in await store.list_runs(2, offset=0)] == [third, second]
+    assert [r.run_id for r in await store.list_runs(2, offset=2)] == [first]
+    assert await store.list_runs(2, offset=3) == []
+
+
+@pytest.mark.anyio
 async def test_an_ending_status_stamps_the_end_and_keeps_the_counts(store):
     run_id = await new_run(store, "in_progress")
     await store.set_status(run_id, "review_required", RunCounts(5, 2, 2))

@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { RunError } from "@/lib/api";
+import type { Page } from "@/lib/pages";
 
 export type ListState<T> = {
   /** `error`: the last load failed; `items` still holds what an earlier load returned. */
@@ -60,6 +61,27 @@ export function useList<T>(
   return { ...state, refresh: () => setRefreshes((n) => n + 1) };
 }
 
+/**
+ * One page of a list from the server, with how many rows the whole list holds: `useList` over a
+ * page, so it loads, reloads and keeps the last page on a failed load the same way. `total` is
+ * null until the first page arrives.
+ */
+export function usePage<T>(
+  load: (signal: AbortSignal) => Promise<Page<T>>,
+  enabled: boolean,
+  reloadOn: unknown,
+  recheck = false,
+) {
+  const list = useList(
+    (signal) => load(signal).then((page) => [page]),
+    enabled,
+    reloadOn,
+    recheck,
+  );
+  const page = list.items.at(0);
+  return { ...list, items: page?.items ?? [], total: page?.total ?? null };
+}
+
 export type ResourceState<T> = {
   /** `error`: the last load failed; `value` still holds what an earlier load returned. */
   status: "loading" | "ready" | "error";
@@ -108,9 +130,17 @@ export function useResource<T>(
   return state;
 }
 
-/** The console's footer for a list: how many, and when they were loaded. */
+/**
+ * The console's footer for a list: how many, and when they were loaded. A paged list passes its
+ * `total`, so the count is the whole list's, not the page's.
+ */
 export function listFooter(
-  { status, items, loadedAt }: ListState<unknown>,
+  {
+    status,
+    items,
+    loadedAt,
+    total = null,
+  }: ListState<unknown> & { total?: number | null },
   noun: string,
 ): string {
   if (loadedAt === null) {
@@ -119,7 +149,8 @@ export function listFooter(
       ? `${nouns[0].toUpperCase()}${nouns.slice(1)} not loaded`
       : `Loading ${nouns}…`;
   }
-  const count = `${items.length} ${items.length === 1 ? noun : `${noun}s`}`;
+  const n = total ?? items.length;
+  const count = `${n} ${n === 1 ? noun : `${noun}s`}`;
   const at = new Date(loadedAt).toLocaleTimeString();
   return status === "error"
     ? `${count} · last loaded ${at} · refresh failed`

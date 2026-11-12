@@ -620,6 +620,22 @@ async def test_runs_are_listed_newest_first_with_who_started_them_and_no_state(c
 
 
 @pytest.mark.anyio
+async def test_the_run_list_pages_with_the_total_in_a_header(client):
+    use_diagnosed_run()
+    ids = []
+    for _ in range(3):
+        text = (await client.post("/v1/runs/stream", json={"target_app": "medas"})).text
+        ids.append(parse_sse(text)[0][1]["run_id"])
+    newest_first = ids[::-1]
+
+    page = await client.get("/v1/runs", params={"limit": 2, "offset": 2})
+    assert page.status_code == 200
+    assert page.headers["X-Total-Count"] == "3"
+    assert [r["run_id"] for r in page.json()] == newest_first[2:]
+    assert (await client.get("/v1/runs", params={"offset": -1})).status_code == 422
+
+
+@pytest.mark.anyio
 async def test_a_review_is_recorded_with_its_decisions_and_the_reviewer(client):
     use_diagnosed_run()
     run_id = await start(client)
