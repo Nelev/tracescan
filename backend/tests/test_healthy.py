@@ -91,4 +91,4 @@ async def test_similar_finds_the_nearest_calls_of_the_same_step_only(engine):
 async def test_similar_finds_nothing_for_a_step_with_no_healthy_calls(engine):
     store = HealthyStore(engine, HashingEmbedder(EMBEDDING_DIMENSIONS))
     await store.save("medas", VERDICTS)
-    assert await store.similar("step: x", "execute_tool never_seen", "medas") == []
+    assert await store.similar("step: x", "execute_tool never_seen", "medas", 3) == []

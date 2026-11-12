@@ -1,5 +1,6 @@
 """Data contracts of the graph: what nodes put into state, the failure categories and the diagnosis."""
 
+from dataclasses import dataclass
 from typing import Literal, TypedDict, get_args
 
 from pydantic import BaseModel, Field
@@ -25,10 +26,21 @@ class Cluster(TypedDict):
     method: ClusterMethod
 
 
+class FailingSpan(TypedDict):
+    """The span the trace judge blamed in one exemplar, and its step (the span's name)."""
+
+    trace_id: str
+    span_id: str
+    step: str
+
+
 class ClusterTask(TypedDict):
     """Private input of one diagnose branch: its cluster, not the whole state."""
 
     cluster: Cluster
+    target_app: str
+    # The blamed span of the first exemplar that has one, for the healthy-twin lookup.
+    failing_span: FailingSpan | None
 
 
 class TraceTask(TypedDict):
@@ -220,3 +232,13 @@ class ProgressEvent(TypedDict, total=False):
     # False when a node finished but recorded a failure (a cluster whose diagnosis failed).
     ok: bool
     counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class HealthyMatch:
+    """A stored healthy call of a step (runs.healthy), near the text that was searched for."""
+
+    trace_id: str
+    span_id: str
+    text: str  # its step_text (agent.chunks): names, error types and bucketed numbers only
+    distance: float  # cosine distance: 0 is the same text, smaller is nearer

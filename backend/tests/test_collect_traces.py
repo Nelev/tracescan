@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from langgraph.types import Send
 
 from agent.graph import (
     build_graph,
@@ -93,12 +94,26 @@ def test_routes():
     assert route_after_scores(state(failed_traces=[])) == "__end__"
     assert route_after_scores(state(failed_traces=[{"trace_id": "t"}])) == "cluster_failures"
     assert route_after_cluster(state()) == "__end__"
-    clusters = [{"cluster_id": "c0"}, {"cluster_id": "c1"}]
-    sends = route_after_cluster(state(clusters=clusters))
+    clusters = [
+        {"cluster_id": "c0", "exemplar_trace_ids": ["t1", "t2"]},
+        {"cluster_id": "c1", "exemplar_trace_ids": ["t3"]},
+    ]
+    failed = [
+        {"trace_id": t, "failing_span_id": f"s{t[1]}", "failing_span_name": "lookup"}
+        for t in ("t2", "t3")
+    ]
+    sends = route_after_cluster(state(clusters=clusters, failed_traces=failed))
     assert isinstance(sends, list)
     assert [(s.node, s.arg) for s in sends] == [
-        ("diagnose_cluster", {"cluster": c}) for c in clusters
+        ("diagnose_cluster", {"cluster": c, "target_app": "medas", "failing_span": blamed})
+        for c, blamed in zip(
+            clusters,
+            [{"trace_id": t, "span_id": f"s{t[1]}", "step": "lookup"} for t in ("t2", "t3")],
+            strict=True,
+        )
     ]
+    (unblamed,) = route_after_cluster(state(clusters=clusters[:1]))
+    assert isinstance(unblamed, Send) and unblamed.arg["failing_span"] is None
     assert route_after_review(state(decisions={"c0": "reject"})) == "__end__"
     assert route_after_review(state(decisions={"c0": "approve"})) == "apply_actions"
 

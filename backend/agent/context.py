@@ -21,6 +21,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.actions import OUT_DIR
 from agent.const import MAX_PARALLEL_DIAGNOSES
 from agent.embeddings import Embedder
+from agent.schemas import HealthyMatch
 from trace_store.models import SpanNode, TraceQuery, TraceSummary
 
 
@@ -42,6 +43,12 @@ class ClosedTraces:
         raise RuntimeError("this run segment has no trace session")
 
 
+class HealthyLookup(Protocol):
+    """The slice of the healthy-span store (runs.healthy) the diagnoser reads."""
+
+    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]: ...
+
+
 @dataclass
 class TraceContext:
     traces: TraceAccess
@@ -49,6 +56,8 @@ class TraceContext:
     model: BaseChatModel  # the diagnoser's chat model; tests pass a fake
     # The trace judge's model (agent.judge); None uses `model`. The app sets TRACE_JUDGE_MODEL's.
     judge_model: BaseChatModel | None = None
+    # Healthy calls of a failing step, shown to the diagnoser next to the failure; None: none.
+    healthy: HealthyLookup | None = None
     # Read by apply_actions only. The server sets both; nothing in a request can change them.
     dry_run: bool = True  # off is refused until the real writers exist
     out_dir: Path = OUT_DIR  # where a dry run writes its files

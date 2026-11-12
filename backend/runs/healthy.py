@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from agent.const import CHUNK_TEMPLATE_VERSION, EMBEDDING_DIMENSIONS
 from agent.embeddings import Embedder
-from runs.schemas import HealthyMatch
+from agent.schemas import HealthyMatch
 
 COLLECTION = "healthy_spans"
 
@@ -88,7 +88,7 @@ class HealthyStore:
             await self._vectors.aadd_documents(docs)
         return len(docs)
 
-    async def similar(self, text: str, step: str, app: str, k: int = 3) -> list[HealthyMatch]:
+    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]:
         """The `k` stored healthy calls of `step` in `app` nearest to `text`, nearest first.
 
         Only rows of the current chunk template: a text of another version is not comparable.
