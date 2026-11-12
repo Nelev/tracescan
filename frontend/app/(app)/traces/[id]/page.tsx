@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { TracePage } from "../../_components/trace-page";
+import { TracePage } from "@/app/_components/trace-page";
 
 async function Trace({ params, searchParams }: PageProps<"/traces/[id]">) {
   const { id } = await params;

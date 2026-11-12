@@ -518,7 +518,7 @@ A run is one graph thread. Its state is checkpointed in Postgres (`AsyncPostgres
 
 The stream sends `run_started`, `progress` events (node, counts; never state), one `proposal` event per draft, and last `review_required`, `run_completed` or `run_failed`. Behind most messages comes a `ui_spec`: a small model (`UI_SPEC_MODEL`) describes the message as a [json-render](https://github.com/vercel-labs/json-render) spec, which the run page's agent console checks and draws.
 
-A review holds a row lock for the length of the resume, so a second review of the same run gets a `409`, and the decisions and the new status are committed together. Every route except `/health` and the trace collector needs a Clerk session token (`Authorization: Bearer`): `401` without a valid one, `503` when it cannot be verified. A run or a review is recorded under the name the token carries (its `name` claim, else `email`, else Clerk's user id). The web app does not send the token yet, so until it does it cannot read the API.
+A review holds a row lock for the length of the resume, so a second review of the same run gets a `409`, and the decisions and the new status are committed together. Every route except `/health` and the trace collector needs a Clerk session token (`Authorization: Bearer`): `401` without a valid one, `503` when it cannot be verified. A run or a review is recorded under the name the token carries (its `name` claim, else `email`, else Clerk's user id). The web app signs in with Clerk and sends that token on every call.
 
 ## The web app
 
@@ -570,7 +570,7 @@ Start the backend (API docs at `http://localhost:8000/docs`):
 cd backend && uv run --env-file .env uvicorn main:app --reload
 ```
 
-Start the frontend, then open `http://localhost:3000`:
+Start the frontend, then open `http://localhost:3000` and sign in. It needs the same Clerk application's keys: copy `frontend/.env.example` to `frontend/.env.local` and fill in `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. In the Clerk dashboard, restrict sign-up to invited accounts and add `{"name": "{{user.full_name}}", "email": "{{user.primary_email_address}}"}` to the session token (Sessions → Customize session token), so runs are recorded under your name.
 
 ```bash
 cd frontend && npm install && npm run dev

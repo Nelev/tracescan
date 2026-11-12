@@ -8,6 +8,7 @@ import {
 } from "./review";
 import { parseRunOverview, type RunOverview } from "./run-overview";
 import { parseRuns } from "./runs";
+import { withSessionToken } from "./session-token";
 import { readSse, type SseMessage } from "./sse";
 import {
   parseTraceDetail,
@@ -50,12 +51,15 @@ export async function openRunStream(
 ): Promise<RunStream> {
   let res: Response;
   try {
-    res = await fetch(RUN_STREAM_PATH, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal,
-    });
+    res = await fetch(
+      RUN_STREAM_PATH,
+      await withSessionToken({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal,
+      }),
+    );
   } catch (err) {
     if (signal.aborted) throw err;
     throw new RunError(null);
@@ -110,7 +114,7 @@ async function fetchParsed<T>(
   const aborted = () => init.signal?.aborted ?? false;
   let res: Response;
   try {
-    res = await fetch(path, init);
+    res = await fetch(path, await withSessionToken(init));
   } catch (err) {
     if (aborted()) throw err;
     throw new RunError(null);
@@ -215,6 +219,7 @@ export function getTrace(
   );
 }
 
+/** Whether the backend is up: the one call that goes without a session token. */
 export async function checkHealth(signal: AbortSignal): Promise<boolean> {
   try {
     const res = await fetch("/api/health", { signal });

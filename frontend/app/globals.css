@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* Clerk's sign-in, sign-up and account menu, drawn with the shadcn tokens below. */
+@import "@clerk/ui/themes/shadcn.css";
 /* Tailwind does not scan node_modules: the classes of the json-render shadcn components, which
    draw the part of a server UI spec that ui-parts.tsx does not, are found here. */
 @source "../node_modules/@json-render/shadcn/dist/*.mjs";

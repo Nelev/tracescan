@@ -13,6 +13,7 @@ import { usePathname } from "next/navigation";
 import { type ReactNode, Suspense, useState } from "react";
 import { runPath, shortId } from "@/lib/runs";
 import { cn } from "@/lib/utils";
+import { AccountMenu } from "./account-menu";
 import { ConsoleDock } from "./console-dock";
 import { NewRun } from "./new-run";
 import { RunStreamProvider, useRunStatus } from "./run-stream";
@@ -155,6 +156,7 @@ function Frame({ children }: { children: ReactNode }) {
             >
               <ServerStatus />
               <NewRun />
+              <AccountMenu />
             </div>
           </header>
           <main
