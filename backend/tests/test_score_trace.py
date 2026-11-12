@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 from langgraph.runtime import Runtime
 
+from agent.chunks import step_text
 from agent.context import ClosedTraces
 from agent.judge import error_type, failure_fields
 from agent.nodes.score_trace import score_trace
@@ -57,12 +58,31 @@ async def test_a_trace_that_went_fine_gets_its_verdict_and_one_usage_entry():
 
 
 @pytest.mark.anyio
+async def test_a_healthy_pick_carries_the_text_it_is_embedded_as():
+    tree = span_tree(
+        "t1",
+        span_id="root",
+        name="invoke_agent medas",
+        children=[
+            span_tree(
+                "t1", span_id="tool", parent_span_id="root", name="execute_tool lookup", status="ok"
+            )
+        ],
+    )
+    fine = FINE.model_copy(update={"healthy_span_ids": ["tool"]})
+    (verdict,) = (await score(scripted(fine), trees=FakeTraces(trees={"t1": tree})))["verdicts"]
+    assert verdict["healthy_spans"] == [{"span_id": "tool", "text": step_text(tree, "tool")}]
+    assert "healthy_span_ids" not in verdict
+
+
+@pytest.mark.anyio
 async def test_a_failed_trace_carries_what_clustering_reads_of_its_blamed_span():
     (verdict,) = (await score(scripted(FAILED)))["verdicts"]
     assert verdict["blamed_span_id"] == "tool"
     assert verdict["failing_span_name"] == "execute_tool lookup"
     assert verdict["error_type"] == "ToolReportedError"
     assert verdict["error_message"] == "source unavailable"
+    assert verdict["healthy_spans"] == []
 
 
 @pytest.mark.anyio

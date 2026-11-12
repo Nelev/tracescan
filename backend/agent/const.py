@@ -2,6 +2,20 @@
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # fastembed ONNX model, runs locally
 
+# The span texts agent.chunks builds for retrieval. Bump the version on any change to the text
+# or a bucket: a stored embedding is only comparable to one built from the same version.
+CHUNK_TEMPLATE_VERSION = 1
+# (exclusive upper bound, word): numbers read as words.
+LATENCY_BUCKETS_S = (
+    (0.5, "fast (<0.5 s)"),
+    (2.0, "normal (0.5-2 s)"),
+    (5.0, "slow (2-5 s)"),
+    (float("inf"), "very slow (>5 s)"),
+)
+HITS_BUCKETS = ((1, "none"), (11, "some (1-10)"), (float("inf"), "many (>10)"))
+# Healthy spans the trace judge may pick in one trace that went fine (agent.judge.healthy_picks).
+MAX_HEALTHY_PICKS = 3
+
 # An OpenRouter slug ("vendor/model"); the DIAGNOSER_MODEL environment variable overrides it.
 DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"
 # The small, cheap model for generated UI, which only arranges text it is given. The UI_SPEC_MODEL

@@ -6,7 +6,7 @@ import pytest
 
 from agent import model_guard
 from agent.const import MAX_MODEL_ATTEMPTS
-from agent.judge import JUDGE_PROMPT, fallback_span, judge_trace
+from agent.judge import JUDGE_PROMPT, fallback_span, healthy_picks, judge_trace
 from agent.model_guard import Spent
 from agent.schemas import TraceVerdict
 from tests.fakes import FakeApiError, span_tree
@@ -48,8 +48,36 @@ async def test_a_failed_trace_blames_the_span_the_model_named():
         "blamed_span_id": "tool",
         "blame_check": "valid",
         "attribution": "app",
+        "healthy_span_ids": [],
     }
     assert spent == Spent(calls=1, tokens=150, cost_usd=0.001)
+
+
+@pytest.mark.anyio
+async def test_healthy_picks_keep_only_spans_of_the_tree_that_worked():
+    # The root, an error span, an unknown id and a repeat are dropped.
+    picks = ["search", "root", "tool", "made-up", "search"]
+    fine = FINE.model_copy(update={"healthy_span_ids": picks})
+    verdict = await judge_trace(TREE, scripted(fine), Spent())
+    assert verdict["healthy_span_ids"] == ["search"]
+
+
+@pytest.mark.anyio
+async def test_a_failed_trace_keeps_no_healthy_picks():
+    failed = FAILED.model_copy(update={"healthy_span_ids": ["search"]})
+    verdict = await judge_trace(TREE, scripted(failed), Spent())
+    assert verdict["healthy_span_ids"] == []
+
+
+def test_healthy_picks_stop_at_the_cap():
+    tree = span_tree(
+        "t1",
+        span_id="root",
+        children=[
+            span_tree("t1", span_id=f"s{i}", parent_span_id="root", status="ok") for i in range(5)
+        ],
+    )
+    assert healthy_picks(tree, [f"s{i}" for i in range(5)]) == ["s0", "s1", "s2"]
 
 
 @pytest.mark.anyio
