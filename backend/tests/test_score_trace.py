@@ -7,6 +7,7 @@ import pytest
 from langgraph.runtime import Runtime
 
 from agent.chunks import step_key, step_text
+from agent.const import MAX_MODEL_ATTEMPTS
 from agent.context import ClosedTraces
 from agent.judge import error_type, failure_fields
 from agent.nodes.score_trace import score_trace
@@ -96,11 +97,21 @@ async def test_the_judge_model_is_used_when_set():
 
 
 @pytest.mark.anyio
-async def test_a_model_error_records_the_trace_as_failed_to_judge_with_its_spend():
+async def test_a_model_error_that_persists_records_the_trace_as_failed_to_judge_with_its_spend():
     result = await score(scripted(FakeApiError(503)))
     assert result["judge_failures"] == ["t1"]
     assert "verdicts" not in result
-    assert result["judge_usage"] == [{"trace_id": "t1", "calls": 1, "tokens": 0, "cost_usd": 0.0}]
+    assert result["judge_usage"] == [
+        {"trace_id": "t1", "calls": MAX_MODEL_ATTEMPTS, "tokens": 0, "cost_usd": 0.0}
+    ]
+
+
+@pytest.mark.anyio
+async def test_a_trace_whose_judge_was_throttled_once_is_still_judged():
+    result = await score(scripted(FakeApiError(429), FINE))
+    assert "judge_failures" not in result
+    assert [v["trace_id"] for v in result["verdicts"]] == ["t1"]
+    assert result["judge_usage"][0]["calls"] == 2
 
 
 @pytest.mark.anyio

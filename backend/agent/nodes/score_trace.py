@@ -1,11 +1,11 @@
 """score_trace: one judge branch per trace, reached through Send with a TraceTask.
 
-The simplest version: one attempt. It fetches the trace's tree and asks the judge (agent.judge)
-whether the request failed; a failed verdict also gets what clustering reads of its blamed span
+It fetches the trace's tree once and asks the judge (agent.judge) whether the request failed; a failed verdict also gets what clustering reads of its blamed span
 (`failure_fields`), and each healthy span the judge picked gets its text (`agent.chunks.step_text`).
-Any error, from the fetch or the model, records the trace in
-`judge_failures`, logged by exception type only, and the run goes on with the others. There is
-no retry round: the judge's own re-ask is its only second call, within the trace budget.
+The judge retries a transient model error (throttling, a timeout, a server error) call by call
+within the trace budget, which its own re-ask shares, so a burst of 429s across the run's parallel
+judge calls does not hide failures. Any error left, from the fetch or the model, records the trace
+in `judge_failures`, logged by exception type only, and the run goes on with the others.
 
 Every run appends one `judge_usage` entry, failed or not, so the spend shows.
 """

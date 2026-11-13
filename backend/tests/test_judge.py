@@ -188,11 +188,37 @@ async def test_a_retry_that_changes_its_mind_counts_as_not_failed():
 
 
 @pytest.mark.anyio
-async def test_a_model_error_is_raised_and_still_counted():
+async def test_a_transient_model_error_is_retried_and_the_answer_kept():
+    model, spent = scripted(FakeApiError(429), FAILED), Spent()
+    verdict = await judge_trace(TREE, model, spent)
+    assert (verdict["failed"], verdict["blamed_span_id"]) == (True, "tool")
+    assert spent.calls == 2  # the throttled call counts too
+
+
+@pytest.mark.anyio
+async def test_a_model_error_that_persists_is_raised_once_the_trace_budget_is_spent():
     spent = Spent()
     with pytest.raises(FakeApiError):
         await judge_trace(TREE, scripted(FakeApiError(503)), spent)
+    assert spent.calls == MAX_MODEL_ATTEMPTS
+
+
+@pytest.mark.anyio
+async def test_a_model_error_that_is_not_transient_is_raised_at_once():
+    spent = Spent()
+    with pytest.raises(FakeApiError):
+        await judge_trace(TREE, scripted(FakeApiError(400), FAILED), spent)
     assert spent.calls == 1
+
+
+@pytest.mark.anyio
+async def test_a_retried_call_leaves_the_re_ask_only_what_is_left_of_the_budget():
+    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
+    # Throttled once, then a span that is not in the tree: the re-ask is the third and last call.
+    model, spent = scripted(FakeApiError(429), wrong, FAILED), Spent()
+    verdict = await judge_trace(TREE, model, spent)
+    assert (verdict["blamed_span_id"], verdict["blame_check"]) == ("tool", "corrected")
+    assert spent.calls == MAX_MODEL_ATTEMPTS
 
 
 def test_fallback_span_is_the_deepest_error_or_the_root():

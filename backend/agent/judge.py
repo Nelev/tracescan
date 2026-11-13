@@ -23,7 +23,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from agent.const import HEALTHY_MIN_SCORE, MAX_HEALTHY_PICKS
 from agent.evidence import error_spans, span_index, walk
-from agent.model_guard import Spent, structured_asker, trace_budget
+from agent.model_guard import Spent, retrying, structured_asker, trace_budget
 from agent.schemas import BlameCheck, TraceVerdict
 from trace_store.models import SpanNode, is_failed
 
@@ -133,10 +133,14 @@ def retry_message(blamed: str | None, valid: set[str]) -> str:
 async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
     """Judge one trace; returns the verdict as a plain dict. Every call is added to `run`.
 
-    The re-ask runs only while `run` is within the trace budget. A model error is raised for the
-    caller to handle.
+    A transient model error (throttling, a timeout, a server error) is retried call by call after
+    a doubling wait, and the re-ask runs, only while `run` is within the trace budget: up to
+    MAX_MODEL_ATTEMPTS calls in all. Any other error, or one with no budget left, is raised for
+    the caller to handle.
     """
-    ask = structured_asker(model, TraceVerdict, run)
+    ask = retrying(
+        structured_asker(model, TraceVerdict, run), run, trace_budget(), f"judge of {tree.trace_id}"
+    )
     messages: list[BaseMessage] = [
         SystemMessage(JUDGE_PROMPT),
         HumanMessage(prompt_json(tree)),
