@@ -36,6 +36,9 @@ SAFE_ATTRIBUTE_KEYS = frozenset(
         "retrieval.min_similarity",
         "exception.type",
         "error.type",
+        # Medas's own, on the root span: whether its reply had the shape its prompt asks for
+        # (ok, no_severity, malformed). A fixed word, never the reply.
+        "medas.reply.format",
     }
 )
 SAFE_ATTRIBUTE_PREFIXES = ("gen_ai.request.", "gen_ai.response.", "gen_ai.usage.")
