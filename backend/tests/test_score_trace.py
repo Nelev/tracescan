@@ -63,6 +63,7 @@ async def test_a_healthy_pick_carries_the_text_it_is_embedded_as():
         "t1",
         span_id="root",
         name="invoke_agent medas",
+        status="ok",
         children=[
             span_tree(
                 "t1", span_id="tool", parent_span_id="root", name="execute_tool lookup", status="ok"
