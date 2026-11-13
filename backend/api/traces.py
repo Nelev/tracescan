@@ -24,7 +24,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from db.models import Span
-from trace_store.const import ALLOWED_APPS
+from trace_store.const import ALLOWED_APPS, APP_VERSION_MAX, SCHEMA_URL_MAX
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
@@ -62,12 +62,18 @@ def _time(unix_nano: int) -> datetime:
     return EPOCH + timedelta(microseconds=unix_nano // 1000)
 
 
-def _row(app: str, span: OtlpSpan) -> dict[str, Any]:
+def _cut(value: Any, width: int) -> str | None:
+    """A version string as stored: text only, at most `width` characters, None when absent."""
+    return value[:width] if isinstance(value, str) and value else None
+
+
+def _row(app: str, version: dict[str, str | None], span: OtlpSpan) -> dict[str, Any]:
     return {
         "trace_id": span.trace_id.hex(),
         "span_id": span.span_id.hex(),
         "parent_span_id": span.parent_span_id.hex() or None,
         "app": app,
+        **version,
         "name": span.name,
         "kind": KINDS.get(span.kind, "unspecified"),
         "start_time": _time(span.start_time_unix_nano),
@@ -92,11 +98,18 @@ def decode(body: bytes) -> list[dict[str, Any]]:
     export.ParseFromString(body)
     rows = []
     for resource_spans in export.resource_spans:
-        app = _attributes(resource_spans.resource.attributes).get("service.name")
+        resource = _attributes(resource_spans.resource.attributes)
+        app = resource.get("service.name")
         if app not in ALLOWED_APPS:
             continue
+        app_version = _cut(resource.get("service.version"), APP_VERSION_MAX)
         for scope in resource_spans.scope_spans:
-            rows.extend(_row(app, span) for span in scope.spans)
+            # The resource's schema URL, else the instrumentation scope's.
+            version = {
+                "app_version": app_version,
+                "schema_url": _cut(resource_spans.schema_url or scope.schema_url, SCHEMA_URL_MAX),
+            }
+            rows.extend(_row(app, version, span) for span in scope.spans)
     return rows
 
 

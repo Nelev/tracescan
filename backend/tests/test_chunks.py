@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent.chunks import step_text
+from agent.chunks import UNKNOWN, step_key, step_text
 from trace_store.models import SpanNode
 
 START = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)
@@ -112,3 +112,30 @@ def test_durations_become_words(seconds, word):
 def test_an_unknown_span_is_a_key_error():
     with pytest.raises(KeyError):
         step_text(medas_trace(), "nope")
+
+
+def test_a_step_key_names_the_step_its_operation_and_the_versions_it_was_sent_with():
+    tool = span(
+        "tool",
+        "execute_tool search_pubmed",
+        at=0,
+        seconds=1,
+        attributes={"gen_ai.operation.name": "execute_tool"},
+        app_version="2.3.1",
+        schema_url="https://opentelemetry.io/schemas/1.37.0",
+    )
+    tree = span("root", "invoke_agent medas", at=0, seconds=2, children=[tool])
+    assert step_key(tree, "tool") == {
+        "step": "execute_tool search_pubmed",
+        "operation": "execute_tool",
+        "app_version": "2.3.1",
+        "schema": "https://opentelemetry.io/schemas/1.37.0",
+    }
+
+
+def test_what_a_trace_did_not_send_is_unknown_in_the_key():
+    tree = span("root", "invoke_agent medas", at=0, seconds=2)
+    key = step_key(tree, "root")
+    assert (key["operation"], key["app_version"], key["schema"]) == (UNKNOWN,) * 3
+    with pytest.raises(KeyError):
+        step_key(tree, "missing")

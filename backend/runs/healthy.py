@@ -7,12 +7,18 @@ extension comes from migration 0006). A document is a pick's `step_text` (agent.
 error types and bucketed numbers only, never span content. Its id is the trace, the span and the
 chunk template version, so saving a window again replaces rows instead of adding them.
 
+A failed step is compared only with healthy calls it is compatible with: the same app, step,
+operation, app version, telemetry schema and chunk template version, all hard filters applied in
+the same query as the vector search. The nearest few within MAX_TWIN_DISTANCE come back, with
+identical texts merged, so the diagnoser may see fewer than it asked for, or none.
+
 Written for every run that ends or pauses at the review, without a person's approval: the one
 write outside apply_actions. It holds no clinical text and never leaves the database.
 """
 
 import asyncio
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Protocol
 
 from langchain_core.documents import Document
@@ -20,11 +26,13 @@ from langchain_core.embeddings import Embeddings
 from langchain_postgres import PGVector
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from agent.const import CHUNK_TEMPLATE_VERSION, EMBEDDING_DIMENSIONS
+from agent.const import CHUNK_TEMPLATE_VERSION, EMBEDDING_DIMENSIONS, MAX_TWIN_DISTANCE
 from agent.embeddings import Embedder
-from agent.schemas import HealthyMatch
+from agent.schemas import HealthyMatch, StepKey
 
 COLLECTION = "healthy_spans"
+# Candidates fetched per twin asked for, so merging identical texts still leaves enough.
+OVERFETCH = 4
 
 
 class LocalEmbeddings(Embeddings):
@@ -60,17 +68,44 @@ def documents(app: str, verdicts: Sequence[Mapping]) -> list[Document]:
                 "app": app,
                 "trace_id": verdict["trace_id"],
                 "span_id": pick["span_id"],
-                "step": pick["step"],
+                **{field: pick[field] for field in StepKey.__annotations__},
                 "v": CHUNK_TEMPLATE_VERSION,
             },
         )
         for verdict in verdicts
         for pick in verdict.get("healthy_spans", [])
+        # A pick saved before the step key existed cannot be filtered: left out.
+        if StepKey.__annotations__.keys() <= pick.keys()
     ]
 
 
+def compatible(app: str, key: StepKey) -> dict:
+    """The metadata filter a healthy call must pass to be compared with a step of `key`. Pure."""
+    fields = {"app": app, **key, "v": CHUNK_TEMPLATE_VERSION}
+    return {"$and": [{field: {"$eq": value}} for field, value in fields.items()]}
+
+
+def pick_twins(
+    found: Sequence[HealthyMatch], k: int, max_distance: float = MAX_TWIN_DISTANCE
+) -> list[HealthyMatch]:
+    """At most `k` of the matches, nearest first: none farther than `max_distance`, and one per
+    distinct text, counting the calls that share it. Fewer, or none, when no more qualify. Pure."""
+    kept: dict[str, HealthyMatch] = {}
+    for match in sorted(found, key=lambda m: m.distance):
+        if match.distance > max_distance:
+            break
+        if (same := kept.get(match.text)) is not None:
+            kept[match.text] = replace(same, calls=same.calls + match.calls)
+        elif len(kept) < k:
+            kept[match.text] = match
+    return list(kept.values())
+
+
 class HealthyStore:
-    def __init__(self, engine: AsyncEngine, embedder: Embedder) -> None:
+    def __init__(
+        self, engine: AsyncEngine, embedder: Embedder, max_distance: float = MAX_TWIN_DISTANCE
+    ) -> None:
+        self._max_distance = max_distance
         self._vectors = PGVector(
             embeddings=LocalEmbeddings(embedder),
             collection_name=COLLECTION,
@@ -88,29 +123,22 @@ class HealthyStore:
             await self._vectors.aadd_documents(docs)
         return len(docs)
 
-    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]:
-        """The `k` stored healthy calls of `step` in `app` nearest to `text`, nearest first.
-
-        Only rows of the current chunk template: a text of another version is not comparable.
-        No threshold yet: bge-small's scores bunch together, so one is tuned on the eval later.
-        """
+    async def similar(self, text: str, app: str, key: StepKey, k: int) -> list[HealthyMatch]:
+        """Up to `k` stored healthy calls compatible with a step of `key` in `app`, nearest to
+        `text` first (pick_twins): fewer, or none, when not enough are near enough."""
         found = await self._vectors.asimilarity_search_with_score(
-            text,
-            k=k,
-            filter={
-                "$and": [
-                    {"app": {"$eq": app}},
-                    {"step": {"$eq": step}},
-                    {"v": {"$eq": CHUNK_TEMPLATE_VERSION}},
-                ]
-            },
+            text, k=k * OVERFETCH, filter=compatible(app, key)
         )
-        return [
-            HealthyMatch(
-                trace_id=doc.metadata["trace_id"],
-                span_id=doc.metadata["span_id"],
-                text=doc.page_content,
-                distance=distance,
-            )
-            for doc, distance in found
-        ]
+        return pick_twins(
+            [
+                HealthyMatch(
+                    trace_id=doc.metadata["trace_id"],
+                    span_id=doc.metadata["span_id"],
+                    text=doc.page_content,
+                    distance=distance,
+                )
+                for doc, distance in found
+            ],
+            k,
+            self._max_distance,
+        )

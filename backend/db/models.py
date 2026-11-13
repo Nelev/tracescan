@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from agent.schemas import Decision
+from trace_store.const import APP_VERSION_MAX, SCHEMA_URL_MAX
 from trace_store.models import SpanStatus
 
 # A new status or decision also needs a migration: the check constraints list them.
@@ -92,6 +93,10 @@ class Span(Base):
     span_id: Mapped[str] = mapped_column(String(16), primary_key=True)
     parent_span_id: Mapped[str | None] = mapped_column(String(16))
     app: Mapped[str]  # the resource's service.name
+    # The resource's service.version and the export's telemetry schema URL, when sent; the
+    # healthy-span store matches on both (runs/healthy.py).
+    app_version: Mapped[str | None] = mapped_column(String(APP_VERSION_MAX))
+    schema_url: Mapped[str | None] = mapped_column(String(SCHEMA_URL_MAX))
     name: Mapped[str]
     kind: Mapped[str] = mapped_column(String(20))
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))

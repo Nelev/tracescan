@@ -39,3 +39,8 @@ SAFE_ATTRIBUTE_KEYS = frozenset(
     }
 )
 SAFE_ATTRIBUTE_PREFIXES = ("gen_ai.request.", "gen_ai.response.", "gen_ai.usage.")
+
+# Widths of the resource's service.version and the telemetry schema URL as stored on a span; a
+# longer value is cut by the collector (api/traces.py).
+APP_VERSION_MAX = 128
+SCHEMA_URL_MAX = 256

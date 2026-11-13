@@ -7,7 +7,7 @@ import pytest
 from agent import model_guard
 from agent.const import MAX_MODEL_ATTEMPTS
 from agent.evidence import span_index
-from agent.judge import JUDGE_PROMPT, fallback_span, healthy_picks, judge_trace
+from agent.judge import JUDGE_PROMPT, fallback_span, healthy_picks, judge_trace, prompt_json
 from agent.model_guard import Spent
 from agent.schemas import TraceVerdict
 from tests.fakes import FakeApiError, span_tree
@@ -120,6 +120,21 @@ async def test_the_model_sees_the_prompt_and_the_tree():
     (messages,) = model.seen
     assert messages[0].content == JUDGE_PROMPT
     assert '"span_id":"search"' in str(messages[1].content)
+
+
+def test_the_models_read_the_versions_once_on_the_root():
+    versioned = {"app_version": "2.3.1", "schema_url": "https://opentelemetry.io/schemas/1.37.0"}
+    tree = TREE.model_copy(
+        update={
+            **versioned,
+            "children": [child.model_copy(update=versioned) for child in TREE.children],
+        }
+    )
+    dumped = json.loads(prompt_json(tree))
+    assert (dumped["app_version"], dumped["schema_url"]) == tuple(versioned.values())
+    assert all("app_version" not in child for child in dumped["children"])
+    # Without versions it is the plain dump the prompt always had.
+    assert prompt_json(TREE) == TREE.model_dump_json(exclude_defaults=True)
 
 
 @pytest.mark.anyio

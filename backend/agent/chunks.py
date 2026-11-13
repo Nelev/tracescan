@@ -8,7 +8,11 @@ attribute value, which can hold clinical text. Bump CHUNK_TEMPLATE_VERSION on an
 
 from agent.const import HITS_BUCKETS, LATENCY_BUCKETS_S
 from agent.judge import error_type
+from agent.schemas import StepKey
 from trace_store.models import SpanNode
+
+# A key field the trace did not send: matches only calls that did not send it either.
+UNKNOWN = "unknown"
 
 
 def bucket_word(value: float, buckets: tuple[tuple[float, str], ...]) -> str:
@@ -23,14 +27,6 @@ def _find(span: SpanNode, span_id: str, parent: SpanNode | None = None):
         if found := _find(child, span_id, span):
             return found
     return None
-
-
-def span_name(tree: SpanNode, span_id: str) -> str:
-    """Raises KeyError for a span id that is not in the tree."""
-    found = _find(tree, span_id)
-    if found is None:
-        raise KeyError(span_id)
-    return found[0].name
 
 
 def step_text(tree: SpanNode, span_id: str) -> str:
@@ -58,3 +54,19 @@ def step_text(tree: SpanNode, span_id: str) -> str:
             f"latency: {bucket_word(seconds, LATENCY_BUCKETS_S)}",
         ]
     )
+
+
+def step_key(tree: SpanNode, span_id: str) -> StepKey:
+    """What a span's healthy twins must share with it. Raises KeyError for a span id that is
+    not in the tree."""
+    found = _find(tree, span_id)
+    if found is None:
+        raise KeyError(span_id)
+    span = found[0]
+    operation = span.attributes.get("gen_ai.operation.name")
+    return {
+        "step": span.name,
+        "operation": operation if isinstance(operation, str) and operation else UNKNOWN,
+        "app_version": span.app_version or UNKNOWN,
+        "schema": span.schema_url or UNKNOWN,
+    }

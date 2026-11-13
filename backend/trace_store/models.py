@@ -55,6 +55,9 @@ class SpanNode(BaseModel):
     status_message: str | None = None
     attributes: dict[str, Any] = Field(default_factory=dict)
     events: list[dict[str, Any]] = Field(default_factory=list)
+    # The app's service.version and the telemetry schema URL it was exported with, if sent.
+    app_version: str | None = None
+    schema_url: str | None = None
     children: list["SpanNode"] = Field(default_factory=list)
 
 

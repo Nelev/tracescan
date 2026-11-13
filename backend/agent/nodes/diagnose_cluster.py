@@ -26,7 +26,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
-from agent.chunks import step_text
+from agent.chunks import step_key, step_text
 from agent.const import HEALTHY_TWINS, UNSUPPORTED_CONFIDENCE_CAP
 from agent.context import TraceContext
 from agent.evidence import (
@@ -36,8 +36,9 @@ from agent.evidence import (
     retry_message,
     span_index,
 )
+from agent.judge import prompt_json
 from agent.model_guard import Spent, cluster_budget, retrying, structured_asker
-from agent.schemas import Cluster, ClusterTask, Diagnosis, EvidenceCheck
+from agent.schemas import Cluster, ClusterTask, Diagnosis, EvidenceCheck, HealthyMatch
 from trace_store.models import SpanNode
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ async def healthy_twins(
         tree = next(tree for tree in trees if tree.trace_id == trace_id)
         failed = step_text(tree, span_id)
         twins = await context.healthy.similar(
-            failed, blamed["step"], task["target_app"], HEALTHY_TWINS
+            failed, task["target_app"], step_key(tree, span_id), HEALTHY_TWINS
         )
     except Exception as exc:
         logger.warning(
@@ -97,12 +98,15 @@ async def healthy_twins(
         return "", 0
     section = (
         f"\nThe failing step of exemplar {trace_id}, span {span_id}:\n{failed}\n"
-        "Healthy calls of the same step from requests that went fine, nearest first. Compare "
-        "them with the failure to find what differs. They are not evidence: do not cite them.\n"
-        + "\n---\n".join(twin.text for twin in twins)
-        + "\n"
+        "Healthy calls of the same step, on the same app version, from requests that went fine, "
+        "nearest first. Compare them with the failure to find what differs. They are not "
+        "evidence: do not cite them.\n" + "\n---\n".join(_twin(twin) for twin in twins) + "\n"
     )
     return section, len(twins)
+
+
+def _twin(twin: HealthyMatch) -> str:
+    return twin.text if twin.calls == 1 else f"{twin.text}\n(seen in {twin.calls} healthy calls)"
 
 
 def _usage(cluster_id: str, spent: Spent) -> dict:
@@ -117,7 +121,7 @@ async def _diagnose(
         f"Cluster {cluster['cluster_id']}: {len(cluster['trace_ids'])} failed traces, most common "
         f"failure: {cluster['signature']}\n"
         "Cite only trace ids and span ids that appear in the exemplar traces below.\n"
-        + "\n".join(tree.model_dump_json(exclude_defaults=True) for tree in trees)
+        + "\n".join(prompt_json(tree) for tree in trees)
         + twins
     )
     budget = cluster_budget()

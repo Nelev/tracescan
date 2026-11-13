@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from api.traces import PROTOBUF, decode
 from main import app
+from trace_store.const import APP_VERSION_MAX
 
 TRACE_ID = bytes.fromhex("0af7651916cd43dd8448eb211c80319c")
 ROOT_ID = bytes.fromhex("b7ad6b7169203331")
@@ -22,12 +23,14 @@ START_NS = 1_793_000_000_123_456_789
 START = datetime(2026, 10, 26, 7, 33, 20, 123456, tzinfo=UTC)
 
 
-def export(service: str = "medas") -> bytes:
+def export(service: str = "medas", version: str | None = None, schema: str = "") -> bytes:
     """An export of one trace: a root span and an errored retrieval span below it."""
     request = ExportTraceServiceRequest()
-    resource_spans = request.resource_spans.add()
+    resource_spans = request.resource_spans.add(schema_url=schema)
     name = resource_spans.resource.attributes.add(key="service.name")
     name.value.string_value = service
+    if version is not None:
+        resource_spans.resource.attributes.add(key="service.version").value.string_value = version
     spans = resource_spans.scope_spans.add().spans
 
     spans.add(
@@ -65,6 +68,8 @@ def test_an_export_becomes_one_row_per_span():
         "span_id": ROOT_ID.hex(),
         "parent_span_id": None,
         "app": "medas",
+        "app_version": None,
+        "schema_url": None,
         "name": "request",
         "kind": "server",
         "start_time": START,
@@ -89,6 +94,17 @@ def test_an_export_becomes_one_row_per_span():
             "attributes": {"exception.type": "EmptyRetrieval"},
         }
     ]
+
+
+def test_every_span_keeps_the_app_version_and_the_schema_url():
+    schema = "https://opentelemetry.io/schemas/1.37.0"
+    rows = decode(export(version="2.3.1", schema=schema))
+    assert {(row["app_version"], row["schema_url"]) for row in rows} == {("2.3.1", schema)}
+
+
+def test_a_version_too_long_is_cut_to_the_column():
+    (root, _) = decode(export(version="v" * 500))
+    assert root["app_version"] == "v" * APP_VERSION_MAX
 
 
 def test_spans_of_an_app_that_is_not_allowed_are_left_out():
