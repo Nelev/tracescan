@@ -784,9 +784,11 @@ async def test_a_run_whose_client_went_away_is_recorded_as_aborted(client):
 
 
 @pytest.mark.anyio
-async def test_the_app_refuses_to_start_with_dry_run_off(monkeypatch):
+async def test_the_app_refuses_to_start_with_dry_run_off_and_no_github_repo(monkeypatch):
     monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.delenv("GITHUB_REPO", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)  # refused before the database is needed
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError):
         async with app.router.lifespan_context(app):
             pass

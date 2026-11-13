@@ -9,9 +9,9 @@ from langgraph.store.memory import InMemoryStore
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from agent.actions import require_dry_run
 from agent.context import ClosedTraces, TraceContext
 from agent.embeddings import FastEmbedEmbedder
+from agent.github import github_from_env
 from agent.graph import build_graph
 from agent.mcp_client import TraceClient
 from agent.model import build_diagnoser_model, build_trace_judge_model, build_ui_spec_model
@@ -38,8 +38,12 @@ def dry_run_setting() -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     dry_run = dry_run_setting()
+    github = github_from_env()
     # Checked before anything opens: better to refuse at startup than after a run's review.
-    require_dry_run(dry_run)
+    if not dry_run and github is None:
+        raise RuntimeError("DRY_RUN is off: set GITHUB_REPO and GITHUB_TOKEN")
+    if github is not None:
+        await github.check()  # refuses a public repo: issues may hold clinical text
     # CLERK_SECRET_KEY is required: without it the app stops here, not on each signed-in request.
     app.state.auth = AuthSettings.from_env()
     # DATABASE_URL: a role separate from the read-only trace role. One database, two owners: the
@@ -66,6 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             build_trace_judge_model(),
             healthy=healthy,
             dry_run=dry_run,
+            github=github,
         )
         # Where each run's trace server reads spans and scores: meant for a read-only role.
         trace_database_url = os.environ["TRACE_DATABASE_URL"]

@@ -1,7 +1,8 @@
-"""The dry-run writes of apply_actions: issues as markdown files, regression cases as JSONL.
+"""The local writes of apply_actions: issues as markdown files (a dry run), regression cases as JSONL.
 
 Plain functions over a directory: no LangGraph and no model call, so they are testable offline.
-A dry run writes these files and nothing else. The issue text is the diagnoser's own prose, which
+A dry run writes these files and nothing else; a real run opens GitHub issues (agent.github) and
+appends the same regression cases. The issue text is the diagnoser's own prose, which
 a human approved before it got here; it stays on local disk and is never logged.
 """
 
@@ -20,12 +21,16 @@ REGRESSION_FILE = "regression_cases.jsonl"
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
-def require_dry_run(dry_run: bool) -> None:
-    """Refuse a run that is not a dry run: the real writers (GitHub, the eval dataset, the
-    known-issues store) are not built. The one place that says so; the app checks it at startup
-    and apply_actions before it writes. Drop it when they exist."""
-    if not dry_run:
-        raise NotImplementedError("the real writers are not built yet: run with DRY_RUN on")
+def append_regression_cases(proposals: list[Proposal], out_dir: Path) -> list[str]:
+    """Append the regression case of each proposal that has one to `regression_cases.jsonl`, in
+    one append; return the log lines. A proposal without one (never diagnosed) adds nothing."""
+    cases = {p.cluster_id: p.regression_case for p in proposals if p.regression_case is not None}
+    if not cases:
+        return []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with (out_dir / REGRESSION_FILE).open("a", encoding="utf-8") as file:
+        file.writelines(case.model_dump_json() + "\n" for case in cases.values())
+    return [f"appended the regression case of {c} to {REGRESSION_FILE}" for c in cases]
 
 
 def write_dry_run(proposals: list[Proposal], out_dir: Path) -> list[str]:
@@ -44,17 +49,9 @@ def write_dry_run(proposals: list[Proposal], out_dir: Path) -> list[str]:
     issues = out_dir / ISSUES_DIR
     issues.mkdir(parents=True, exist_ok=True)
     log = []
-    cases = []
     for proposal in proposals:
         issue = issues / f"{proposal.cluster_id}.md"
         issue.write_text(f"# {proposal.title}\n\n{proposal.body}", encoding="utf-8")
         log.append(f"[dry-run] wrote {ISSUES_DIR}/{issue.name}")
-        if proposal.regression_case is not None:
-            cases.append(proposal.regression_case.model_dump_json() + "\n")
-            log.append(
-                f"[dry-run] appended the regression case of {proposal.cluster_id} to {REGRESSION_FILE}"
-            )
-    if cases:  # one append for the run, after its issues
-        with (out_dir / REGRESSION_FILE).open("a", encoding="utf-8") as file:
-            file.writelines(cases)
-    return log
+    # One append for the run, after its issues.
+    return log + [f"[dry-run] {line}" for line in append_regression_cases(proposals, out_dir)]
