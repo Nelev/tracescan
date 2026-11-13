@@ -18,6 +18,7 @@ from agent.model import build_diagnoser_model, build_trace_judge_model, build_ui
 from api.rate_limit import limiter
 from api.runs import router as runs_router
 from api.trace_browser import router as trace_browser_router
+from api.traces import CollectorTokens
 from api.traces import router as traces_router
 from auth import AuthSettings, session_claims
 from db.engine import create_engine
@@ -46,6 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await github.check()  # refuses a public repo: issues may hold clinical text
     # CLERK_SECRET_KEY is required: without it the app stops here, not on each signed-in request.
     app.state.auth = AuthSettings.from_env()
+    # A collector token per allowed app is required too (COLLECTOR_TOKEN_MEDAS): the collector
+    # takes spans only from an app with its token.
+    app.state.collector_tokens = CollectorTokens.from_env()
     # DATABASE_URL: a role separate from the read-only trace role. One database, two owners: the
     # checkpointer creates its own tables, Alembic creates ours (runs, reviews, spans, scores).
     database_url = os.environ["DATABASE_URL"]
@@ -96,8 +100,8 @@ app = FastAPI(title="TraceScan", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # pyright: ignore[reportArgumentType]
 # Every route needs a Clerk session token except these two: /health, and the collector, which
-# Medas's exporter calls with no session. tests/test_auth.py walks app.routes, so a route added
-# without a session check fails it unless it is named public there too. A router's dependencies
+# Medas's exporter calls with its own app token instead (api.traces). tests/test_auth.py walks
+# app.routes, so a route added without a session check fails it unless it is named there too. A router's dependencies
 # run before its routes' own, so a request without a session never starts a run or a trace server.
 app.include_router(runs_router, dependencies=[Depends(session_claims)])
 app.include_router(trace_browser_router, dependencies=[Depends(session_claims)])

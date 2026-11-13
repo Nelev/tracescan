@@ -18,6 +18,7 @@ from auth import AuthSettings, session_claims
 from auth.session import auth_settings, current_user
 from db.models import NAME_MAX
 from main import app
+from tests.conftest import bearer
 
 ORIGIN = "http://localhost:3010"
 
@@ -56,10 +57,6 @@ def token(signer: str = "clerk", **overrides) -> str:
     return jwt.encode(claims, key(signer), algorithm="RS256")
 
 
-def bearer(value: str) -> dict:
-    return {"Authorization": f"Bearer {value}"}
-
-
 class UntouchableRuns:
     """The runs module of a test where no request may get as far as it."""
 
@@ -81,7 +78,7 @@ async def anon(collector):
     del app.dependency_overrides[auth_settings]
 
 
-# The only routes anyone may call without a session.
+# The only routes that take no session: /health, and the collector, which takes an app token.
 PUBLIC = {("GET", "/health"), ("POST", "/v1/traces")}
 # A well-formed value for each path parameter, so a route refused for its path would not pass.
 PATH_PARAMS = {
@@ -115,11 +112,12 @@ def test_the_public_routes_are_still_served():
 
 
 @pytest.mark.anyio
-async def test_health_and_the_collector_stay_open(anon):
+async def test_health_is_open_and_the_collector_needs_its_own_token(anon):
     assert (await anon.get("/health")).status_code == 200
-    # Refused for its content type, not for want of a session: the collector is for Medas's
-    # exporter, which has none.
-    assert (await anon.post("/v1/traces", content=b"{}")).status_code == 415
+    # The collector takes no session (Medas's exporter has none) but an app token instead.
+    assert (await anon.post("/v1/traces", content=b"{}")).status_code == 401
+    session = await anon.post("/v1/traces", content=b"{}", headers=bearer(token()))
+    assert session.status_code == 401
 
 
 class NoRuns:

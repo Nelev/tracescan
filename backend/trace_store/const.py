@@ -44,3 +44,17 @@ SAFE_ATTRIBUTE_PREFIXES = ("gen_ai.request.", "gen_ai.response.", "gen_ai.usage.
 # longer value is cut by the collector (api/traces.py).
 APP_VERSION_MAX = 128
 SCHEMA_URL_MAX = 256
+
+# What the collector (api/traces.py) takes in. An export over either limit is a 413; the
+# OTel SDK's BatchSpanProcessor sends at most 512 spans per export by default.
+MAX_EXPORT_BYTES = 4 * 1024 * 1024
+MAX_EXPORT_SPANS = 2000
+# Free text on a span is cut to these widths on the way in (span and event names, status message).
+SPAN_NAME_MAX = 256
+STATUS_MESSAGE_MAX = 1000
+# A span that starts further in the future than this is dropped: a wrong or forged clock would
+# otherwise keep it at the top of every newest-first window.
+MAX_CLOCK_SKEW_S = 300
+# The shortest collector token accepted at startup (COLLECTOR_TOKEN_<APP>): 32 random bytes as
+# url-safe base64 are 43 characters.
+COLLECTOR_TOKEN_MIN = 32

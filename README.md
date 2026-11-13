@@ -77,7 +77,7 @@ Look at the root's status: `ok`. As far as the status goes, the request succeede
 
 ### 1. Gathered
 
-Medas is instrumented in its own repo. A LangChain callback handler builds one trace per agent run and sends it over **OTLP/HTTP** to TraceScan's collector (`POST /v1/traces`). The collector decodes the protobuf, keeps only spans from allowed apps, and writes one row per span to Postgres (`spans`). A span that is already stored is skipped, so an exporter's retry changes nothing. There is no `traces` table: a trace is just the spans that share a `trace_id`.
+Medas is instrumented in its own repo. A LangChain callback handler builds one trace per agent run and sends it over **OTLP/HTTP** to TraceScan's collector (`POST /v1/traces`). Each export carries the app's own collector token (`Authorization: Bearer …`, from `COLLECTOR_TOKEN_MEDAS`); the collector refuses one without it, keeps only the spans of the app the token belongs to, drops spans that start in the future, cuts over-long names and status messages, strips what Postgres cannot store (NUL characters, NaN), refuses an export over 4 MiB or 2,000 spans, decodes the protobuf and writes one row per span to Postgres (`spans`). A span that is already stored is skipped, so an exporter's retry changes nothing. There is no `traces` table: a trace is just the spans that share a `trace_id`.
 
 For development and the eval, `scripts/seed_traces.py` writes realistic synthetic Medas traffic through the same decoder.
 
@@ -156,7 +156,7 @@ Each cluster becomes a **proposal**: an issue title and body, and a regression c
 
 ## The APIs
 
-Every route needs a Clerk session token (`Authorization: Bearer …`) except `/health` and the collector.
+Every route needs a Clerk session token (`Authorization: Bearer …`) except `/health` and the collector, which takes an app's collector token instead.
 
 ### Runs
 
@@ -174,7 +174,7 @@ The stream sends, in order: `run_started`, the `progress` events, one `proposal`
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| `POST` | `/v1/traces` | The OTLP collector: binary protobuf in, rows in `spans`. No credential yet, so localhost only |
+| `POST` | `/v1/traces` | The OTLP collector: binary protobuf in, rows in `spans`. Needs the app's collector token (`COLLECTOR_TOKEN_MEDAS`); 413 over 4 MiB or 2,000 spans |
 | `GET` | `/v1/traces` | One page of traces with their verdicts (`app`, `since`, `until`, `failed_only`, `limit`, `offset`) |
 | `GET` | `/v1/traces/{id}` | One trace's span tree (attributes outside the allowlist read `[redacted]`) and its scores |
 | `GET` | `/health` | Liveness |
@@ -440,7 +440,7 @@ No Medas? Seed a day of synthetic traffic:
 cd backend && uv run --env-file .env python -m scripts.seed_traces
 ```
 
-To run next to Medas (which uses ports 8000 and 3000), use 8010 and 3010, and point Medas's `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at `http://localhost:8010/v1/traces`.
+To run next to Medas (which uses ports 8000 and 3000), use 8010 and 3010, point Medas's `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at `http://localhost:8010/v1/traces`, and give Medas its token with `OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer%20<token>` (TraceScan's `COLLECTOR_TOKEN_MEDAS`).
 
 **Checks:**
 

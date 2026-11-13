@@ -45,6 +45,15 @@
         "cd frontend && BACKEND_URL=http://localhost:8020 exec npx next dev --port 3020"
       ],
       "port": 3020
+    },
+    {
+      "name": "medas-api-8000",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd ../medas/medas-api && exec uv run fastapi dev main.py"
+      ],
+      "port": 8000
     }
   ]
 }
