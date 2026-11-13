@@ -181,3 +181,14 @@ test("a run past its limit names the wait in whole minutes, rounded up", () => {
   assert.match(limited(null), /Try again later\.$/);
   assert.match(startProblem({ status: 500, unreadable: false }), /HTTP 500/);
 });
+
+test("a resume the server refuses says why", () => {
+  assert.match(
+    startProblem({ status: 409, unreadable: false }),
+    /cannot be resumed/,
+  );
+  assert.match(
+    startProblem({ status: 404, unreadable: false }),
+    /does not know this run/,
+  );
+});

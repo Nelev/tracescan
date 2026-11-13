@@ -1,4 +1,4 @@
-"""The life of a triage run: start it, read its status, resume it with the review decisions.
+"""The life of a triage run: start it, read its status, review it, and resume it if it stopped.
 
 The one module that knows a run is a graph thread. The thread id, the graph config, the
 `TraceContext` and the trace session stay behind `Runs`; callers get typed events and summaries,
@@ -8,10 +8,21 @@ A run has two records. The checkpoint holds its state and proposals and decides 
 can do next. The run store (runs.store) is the index around it: which runs exist, who started
 them, how each ended, and who decided what. Where the two disagree the checkpoint wins, except
 that only the store knows a run failed or was aborted.
+
+A run that failed or was aborted is not lost: its checkpoint holds every step that finished (and
+the parallel branches that finished before a failure), so `resume` goes on from there on the same
+thread, running only what is left.
 """
 
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Mapping,
+)
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -46,7 +57,7 @@ from runs.schemas import (
     StoredStatus,
 )
 from runs.scores import TraceScores
-from runs.store import NotClaimable, RunStore
+from runs.store import CLAIMABLE, RESUMABLE, RUNNING, NotClaimable, RunStore
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +77,11 @@ class RunNotFound(Exception):
 
 class NotWaitingForReview(Exception):
     """The run is not paused at the review, or its review is already being applied."""
+
+
+class NotResumable(Exception):
+    """The run did not stop (it runs, waits for review or ended), has nothing left to run, or is
+    being resumed right now."""
 
 
 class IncompleteDecisions(Exception):
@@ -107,7 +123,7 @@ def _status(run_id: str, values: Mapping, state: RunState) -> RunStatus:
     return RunStatus(status=state, summary=_summary(run_id, values), proposals=proposals)
 
 
-def _detail(run_id: str, values: Mapping, state: RunState) -> RunDetail:
+def _detail(run_id: str, values: Mapping, state: RunState, resumable: bool = False) -> RunDetail:
     diagnoses = {d["cluster_id"]: d for d in values.get("diagnoses", [])}
     failures = set(values.get("diagnosis_failures", []))
     spent = spent_by(values.get("model_usage", []))
@@ -135,6 +151,7 @@ def _detail(run_id: str, values: Mapping, state: RunState) -> RunDetail:
         )
     return RunDetail(
         status=state,
+        resumable=resumable,
         summary=_summary(run_id, values),
         clusters=clusters,
         cluster_map=values.get("cluster_map"),
@@ -149,7 +166,7 @@ def _state_of(snapshot: StateSnapshot) -> RunState:
 
 def _resolve(snapshot: StateSnapshot | None, record: RunRecord | None) -> RunState:
     """Where a run stands, from its two records. Raises `RunNotFound` when it has neither."""
-    if record is not None and record.status in {"failed", "aborted"}:
+    if record is not None and record.status in RESUMABLE:
         # Only the store knows the run stopped for good. The checkpoint of a run cut short
         # cannot tell: between the clustering and the diagnose branches it even reads as ended.
         return record.status
@@ -159,6 +176,18 @@ def _resolve(snapshot: StateSnapshot | None, record: RunRecord | None) -> RunSta
         raise RunNotFound
     # Recorded, but it never got as far as a checkpoint: it just started.
     return record.status
+
+
+def _resumable(snapshot: StateSnapshot | None, record: RunRecord | None) -> bool:
+    """Whether the run stopped before it ended with steps left in its checkpoint: a resume goes on
+    from there. A run paused at the review whose stream was cut is one too (its resume pauses at
+    the review again)."""
+    return (
+        record is not None
+        and record.status in RESUMABLE
+        and snapshot is not None
+        and bool(snapshot.next)
+    )
 
 
 def _counts(summary: RunSummary) -> RunCounts:
@@ -187,11 +216,17 @@ class Runs:
         self._scores = scores  # None: the judge's verdicts are not saved as scores
 
     async def _mark(
-        self, run_id: str, status: StoredStatus, counts: RunCounts | None = None
+        self,
+        run_id: str,
+        status: StoredStatus,
+        counts: RunCounts | None = None,
+        only_from: Collection[str] = RUNNING,
     ) -> None:
-        """Record where a run stands. Best effort: the checkpoint, not this row, drives the run."""
+        """Record where a run stands, if it is still in one of `only_from` (by default: running),
+        so a late write never undoes a review's or a resume's. Best effort: the checkpoint, not this
+        row, drives the run."""
         try:
-            await self._store.set_status(run_id, status, counts)
+            await self._store.set_status(run_id, status, counts, only_from)
         except Exception as exc:
             logger.error("run %s: status %s not recorded: %s", run_id, status, type(exc).__name__)
 
@@ -224,9 +259,9 @@ class Runs:
         """Start a run on a fresh thread, in `user`'s name, and yield its id and events.
 
         The trace session and the graph stream live as long as this context. Leaving it early
-        aborts the run, which is recorded as `aborted`: a run is durable only once it waits for
-        review. Raises `RunFailed` when the run cannot be recorded or the trace session or the
-        stream cannot open.
+        aborts the run, which is recorded as `aborted` (or as waiting for review, if it got that
+        far); `resume` can go on with it. Raises `RunFailed` when the run cannot be recorded or
+        the trace session or the stream cannot open.
         """
         state = TriageState(target_app=target_app)
         if since is not None:
@@ -235,13 +270,63 @@ class Runs:
             state["until"] = until.isoformat()
         # A fresh thread per run: reusing a thread id would continue the earlier run's state.
         run_id = str(uuid4())
+        try:
+            await self._store.create_run(run_id, target_app, since, until, "in_progress", user)
+        except Exception as exc:
+            _log_failure(exc)
+            raise RunFailed from None
+        async with self._segment(run_id, state, self._open_traces) as run:
+            yield run
+
+    @asynccontextmanager
+    async def resume(self, run_id: str) -> AsyncGenerator[StartedRun]:
+        """Go on with a run that failed or was aborted, from its last checkpoint, on its own
+        thread: only what had not finished runs again. Yields its id and events, like `start`.
+
+        A run whose review failed while being applied resumes at the apply, with no trace session
+        (it reads no traces). Raises `RunNotFound`, `NotResumable` (also when another resume got
+        it first), or `RunFailed` when the store, the trace session or the stream fails.
+        """
+        try:
+            record = await self._store.get_run(run_id)
+            snapshot = await self._find_snapshot(run_id)
+        except Exception as exc:
+            _log_failure(exc)
+            raise RunFailed from None
+        if record is None and snapshot is None:
+            raise RunNotFound
+        if snapshot is None or not _resumable(snapshot, record):
+            raise NotResumable
+        try:
+            # Of two resumes only one moves the run from where it stopped.
+            claimed = await self._store.set_status(run_id, "in_progress", only_from=RESUMABLE)
+        except Exception as exc:
+            _log_failure(exc)
+            raise RunFailed from None
+        if not claimed:
+            raise NotResumable
+        applying = snapshot.next == ("apply_actions",)
+        # None as the input: go on from the checkpoint rather than start over.
+        async with self._segment(run_id, None, None if applying else self._open_traces) as run:
+            yield run
+
+    @asynccontextmanager
+    async def _segment(
+        self, run_id: str, graph_input: TriageState | None, open_traces: OpenTraces | None
+    ) -> AsyncGenerator[StartedRun]:
+        """Run the graph on the run's thread from `graph_input` (None: from its checkpoint) with a
+        trace session of its own (none when `open_traces` is None: a segment that reads no
+        traces), and yield its events. The run is already recorded as running."""
         ended: list[RunState] = []  # filled by the events once the run has ended or failed
         async with AsyncExitStack() as stack:
             try:
-                await self._store.create_run(run_id, target_app, since, until, "in_progress", user)
-                traces = await stack.enter_async_context(self._open_traces())
+                traces = (
+                    ClosedTraces()
+                    if open_traces is None
+                    else await stack.enter_async_context(open_traces())
+                )
                 run = self._graph.astream_events(
-                    state,
+                    graph_input,
                     _config(run_id),
                     version="v3",
                     context=replace(self._context, traces=traces),
@@ -258,7 +343,18 @@ class Runs:
                     # Left early, usually by a client that disconnected: the request is being
                     # cancelled, so shield the one write that says what happened.
                     with anyio.CancelScope(shield=True):
-                        await self._mark(run_id, "aborted")
+                        await self._left(run_id)
+
+    async def _left(self, run_id: str) -> None:
+        """Record a run whose stream was left before it ended: waiting for review if the graph had
+        already paused there (the stream was only sending its last messages), else aborted."""
+        try:
+            snapshot = await self._find_snapshot(run_id)
+        except Exception as exc:
+            logger.error("run %s: checkpoint not read: %s", run_id, type(exc).__name__)
+            snapshot = None
+        paused = snapshot is not None and _state_of(snapshot) == "review_required"
+        await self._mark(run_id, "review_required" if paused else "aborted")
 
     async def _events(
         self, run_id: str, stream: AsyncGraphRunStream, ended: list[RunState]
@@ -266,6 +362,10 @@ class Runs:
         try:
             # Only the progress channel: the raw stream carries full state.
             async for progress in progress_events(stream):
+                if progress.get("event") == "node_paused":
+                    # From here the run waits for review, though the stream still has messages to
+                    # send: record it now, so a client that leaves or reviews meanwhile finds it.
+                    await self._mark(run_id, "review_required")
                 yield Progress(progress)
             values = await stream.output()  # raises what a failing node raised
             if values is None:  # no final state: a failure, not an empty run
@@ -280,7 +380,9 @@ class Runs:
             yield Failed()
             return
         ended.append(status.status)
-        await self._mark(run_id, status.status, _counts(status.summary))
+        # The counts, also onto a run already recorded as waiting for review, but never onto one a
+        # review has meanwhile applied.
+        await self._mark(run_id, status.status, _counts(status.summary), CLAIMABLE)
         await self._save_verdicts(run_id, values)
         yield Ended(status)
 
@@ -305,20 +407,26 @@ class Runs:
         """How many runs are recorded, for the pages of the list."""
         return await self._store.count_runs()
 
-    async def _load(self, run_id: str) -> tuple[Mapping, RunState]:
-        """The run's state values and where it stands, from its two records."""
+    async def _load(self, run_id: str) -> tuple[StateSnapshot | None, RunRecord | None]:
+        """The run's two records: its checkpoint and its row. Raises `RunNotFound` with neither."""
         record = await self._store.get_run(run_id)
         snapshot = await self._find_snapshot(run_id)
-        state = _resolve(snapshot, record)
-        return (snapshot.values if snapshot else {}), state
+        if snapshot is None and record is None:
+            raise RunNotFound
+        return snapshot, record
 
     async def status(self, run_id: str) -> RunStatus:
         """The run's status, counts and proposals. Raises `RunNotFound`."""
-        return _status(run_id, *await self._load(run_id))
+        snapshot, record = await self._load(run_id)
+        values = snapshot.values if snapshot else {}
+        return _status(run_id, values, _resolve(snapshot, record))
 
     async def detail(self, run_id: str) -> RunDetail:
-        """What the run found, cluster by cluster. Raises `RunNotFound`."""
-        return _detail(run_id, *await self._load(run_id))
+        """What the run found, cluster by cluster, and whether it can be resumed. Raises
+        `RunNotFound`."""
+        snapshot, record = await self._load(run_id)
+        values = snapshot.values if snapshot else {}
+        return _detail(run_id, values, _resolve(snapshot, record), _resumable(snapshot, record))
 
     async def review(
         self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
@@ -358,4 +466,22 @@ class Runs:
             raise NotWaitingForReview from None
         except Exception as exc:
             _log_failure(exc)
+            await self._after_failed_review(run_id, decisions, reviewer)
             raise RunFailed from None
+
+    async def _after_failed_review(
+        self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
+    ) -> None:
+        """The review was rolled back, but the graph may already have taken the decisions (only
+        the apply failed): then the run no longer waits for review. Record the decisions, which
+        the checkpoint holds anyway, and the run as failed, so `resume` can finish the apply.
+        Best effort, like `_mark`."""
+        try:
+            snapshot = await self._find_snapshot(run_id)
+            if snapshot is None or _state_of(snapshot) == "review_required":
+                return  # it still waits: the review can simply be sent again
+            await self._store.record_decisions(run_id, decisions, reviewer)
+        except Exception as exc:
+            logger.error("run %s: failed review not recorded: %s", run_id, type(exc).__name__)
+            return
+        await self._mark(run_id, "failed", only_from=CLAIMABLE)

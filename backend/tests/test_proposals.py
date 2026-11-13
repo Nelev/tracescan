@@ -79,6 +79,7 @@ def test_a_diagnosed_cluster_gets_a_regression_case_of_ids_only():
         "category": "retrieval_miss",
         "exemplar_trace_ids": ["t1", "t2"],
         "failing_spans": [{"trace_id": "t1", "span_id": "s1"}],
+        "run_id": None,  # stamped when it is written (agent.actions)
     }
 
 

@@ -167,6 +167,7 @@ Every route needs a Clerk session token (`Authorization: Bearer …`) except `/h
 | `GET` | `/v1/runs/{id}` | The status (`in_progress`, `review_required`, `completed`, `failed`, `aborted`), the counts and the proposals |
 | `GET` | `/v1/runs/{id}/detail` | Per cluster: signature, traces, diagnosis, spend and decision; plus the 3D cluster map |
 | `POST` | `/v1/runs/{id}/review` | `{"decisions": {"c0": "approve", "c1": "reject"}}` resumes the paused run. `409` if it isn't waiting, `422` if the decisions don't match the proposals |
+| `POST` | `/v1/runs/{id}/resume/stream` | Goes on with a run that failed or was aborted, from its last checkpoint: only what had not finished runs again, streamed like a new run. `409` when it cannot be resumed; counts against the same run limit |
 
 The stream sends, in order: `run_started`, the `progress` events, one `proposal` per drafted issue, then `review_required` or `run_completed` (or `run_failed`). Each message except `run_failed` is followed by a `ui_spec` (see [the console](#the-json-render-console)).
 

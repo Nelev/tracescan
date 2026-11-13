@@ -78,6 +78,8 @@ class RunDetail(BaseModel):
     """
 
     status: RunState
+    # It failed or was aborted with steps left in its checkpoint: `Runs.resume` can go on with it.
+    resumable: bool = False
     summary: RunSummary
     clusters: list[ClusterDetail]  # a failure that fit no cluster is an `isolated` one
     # The failures in 3D, for the run page's map. None before clustering, for a run too small

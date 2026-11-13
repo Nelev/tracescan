@@ -6,7 +6,7 @@ Tests use the in-memory one in tests/fakes.py, so they need no database.
 Rows hold ids, counts and decisions, never issue text or span content.
 """
 
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -26,10 +26,16 @@ ENDED: frozenset[str] = frozenset({"completed", "failed", "aborted"})
 # What a review may take. `in_progress` too: the checkpoint has already shown that the run waits
 # for review, so such a row is only one whose last status write was lost.
 CLAIMABLE: frozenset[str] = frozenset({"review_required", "in_progress"})
+# A run that stopped before it ended (only the store knows it): what a resume may take back.
+RESUMABLE: frozenset[str] = frozenset({"failed", "aborted"})
+# The only status a run's own stream may move: once a run waits for review, ended, or was taken
+# by a review or a resume, a late write from the stream must change nothing.
+RUNNING: frozenset[str] = frozenset({"in_progress"})
 
 
 class NotClaimable(Exception):
-    """The run is not there to review: unknown, ended, or held by another review right now."""
+    """The run is not there to review or resume: unknown, in another state, or held by another
+    review or resume right now."""
 
 
 # Ends a review: sets where the run stands after it, in the review's own transaction.
@@ -50,9 +56,26 @@ class RunStore(Protocol):
         ...
 
     async def set_status(
-        self, run_id: str, status: StoredStatus, counts: RunCounts | None = None
+        self,
+        run_id: str,
+        status: StoredStatus,
+        counts: RunCounts | None = None,
+        only_from: Collection[str] | None = None,
+    ) -> bool:
+        """Set the status, and the counts when given; return whether the run changed. An ending
+        status sets `ended_at`, any other clears it (a resumed run is running again).
+
+        With `only_from`, only a run whose status is one of those changes; any other is left as
+        it is, so a write that arrives late cannot undo one that came first, and of two writes
+        from the same status (two resumes) only one changes the run.
+        """
+        ...
+
+    async def record_decisions(
+        self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
     ) -> None:
-        """Set the status, and the counts when given. An ending status also sets `ended_at`."""
+        """Record decisions that are already in the checkpoint, outside a review: those of a review
+        whose apply failed after the graph had taken them. A decision already recorded is kept."""
         ...
 
     def reviewing(
@@ -98,13 +121,33 @@ def _record(row) -> RunRecord:
     return RunRecord(**{**row._mapping, "run_id": str(row.run_id)})
 
 
-def _set_status(run_id: str, status: StoredStatus, counts: RunCounts | None) -> Update:
-    values: dict = {"status": status}
-    if status in ENDED:
-        values["ended_at"] = func.now()
+def _set_status(
+    run_id: str,
+    status: StoredStatus,
+    counts: RunCounts | None,
+    only_from: Collection[str] | None = None,
+) -> Update:
+    values: dict = {"status": status, "ended_at": func.now() if status in ENDED else None}
     if counts is not None:
         values |= asdict(counts)
-    return update(Run).where(Run.id == UUID(run_id)).values(**values)
+    query = update(Run).where(Run.id == UUID(run_id))
+    if only_from is not None:
+        # Checked again after waiting on a row lock (READ COMMITTED), so a write that waited
+        # behind a review sees the review's status, not the one before it.
+        query = query.where(Run.status.in_(only_from))
+    return query.values(**values).returning(Run.id)
+
+
+def _review_rows(run_id: str, decisions: Mapping[str, Decision], reviewer: str) -> list[dict]:
+    return [
+        {
+            "run_id": UUID(run_id),
+            "cluster_id": cluster_id,
+            "decision": decision,
+            "reviewer": reviewer,
+        }
+        for cluster_id, decision in decisions.items()
+    ]
 
 
 class PostgresRunStore:
@@ -145,10 +188,27 @@ class PostgresRunStore:
             )
 
     async def set_status(
-        self, run_id: str, status: StoredStatus, counts: RunCounts | None = None
-    ) -> None:
+        self,
+        run_id: str,
+        status: StoredStatus,
+        counts: RunCounts | None = None,
+        only_from: Collection[str] | None = None,
+    ) -> bool:
         async with self._engine.begin() as conn:
-            await conn.execute(_set_status(run_id, status, counts))
+            changed = await conn.execute(_set_status(run_id, status, counts, only_from))
+            return changed.first() is not None
+
+    async def record_decisions(
+        self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
+    ) -> None:
+        if not decisions:
+            return
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                pg_insert(Review)
+                .values(_review_rows(run_id, decisions, reviewer))
+                .on_conflict_do_nothing(index_elements=[Review.run_id, Review.cluster_id])
+            )
 
     @asynccontextmanager
     async def reviewing(
@@ -165,18 +225,7 @@ class PostgresRunStore:
             if held.first() is None:
                 raise NotClaimable
             if decisions:
-                await conn.execute(
-                    insert(Review),
-                    [
-                        {
-                            "run_id": UUID(run_id),
-                            "cluster_id": cluster_id,
-                            "decision": decision,
-                            "reviewer": reviewer,
-                        }
-                        for cluster_id, decision in decisions.items()
-                    ],
-                )
+                await conn.execute(insert(Review), _review_rows(run_id, decisions, reviewer))
 
             async def finish(status: StoredStatus, counts: RunCounts) -> None:
                 await conn.execute(_set_status(run_id, status, counts))

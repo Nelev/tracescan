@@ -58,6 +58,8 @@ export type RunCounts = {
 
 export type RunOverview = {
   status: RunStatus;
+  /** It failed or was aborted with steps left in its checkpoint: it can be resumed from there. */
+  resumable: boolean;
   summary: RunCounts;
   clusters: ClusterDetail[];
   /** The failures in 3D: null before clustering, for a run too small to embed, or an older run. */
@@ -198,7 +200,12 @@ export function parseRunOverview(body: unknown): RunOverview | null {
     return null;
   const map = body.cluster_map ?? null;
   if (map !== null && !isClusterMap(map)) return null;
-  return { ...(body as Omit<RunOverview, "cluster_map">), cluster_map: map };
+  return {
+    ...(body as Omit<RunOverview, "cluster_map" | "resumable">),
+    // Optional: a server from before resuming existed sends none.
+    resumable: body.resumable === true,
+    cluster_map: map,
+  };
 }
 
 /**
@@ -253,6 +260,7 @@ export type StageKey = keyof typeof NODES;
 export function emptyOverview(runId: string): RunOverview {
   return {
     status: "in_progress",
+    resumable: false,
     summary: {
       run_id: runId,
       traces: 0,

@@ -21,7 +21,7 @@ export type RunStream = ReturnType<typeof useRunStream>;
  */
 export type RunStatus = Pick<
   RunStream,
-  "runId" | "phase" | "error" | "start" | "cancel"
+  "runId" | "phase" | "error" | "start" | "resume" | "cancel"
 > & {
   /** The server sent its first event: it has recorded the run. */
   started: boolean;
@@ -38,11 +38,11 @@ export function RunStreamProvider({ children }: { children: ReactNode }) {
   const run = useRunStream();
   const router = useRouter();
   const opened = useRef<string | null>(null);
-  const { runId, phase, error, start, cancel } = run;
+  const { runId, phase, error, start, resume, cancel } = run;
   const started = run.events > 0;
   const status = useMemo<RunStatus>(
-    () => ({ runId, phase, error, start, cancel, started }),
-    [runId, phase, error, start, cancel, started],
+    () => ({ runId, phase, error, start, resume, cancel, started }),
+    [runId, phase, error, start, resume, cancel, started],
   );
 
   useEffect(() => {

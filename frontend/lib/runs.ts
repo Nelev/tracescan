@@ -24,7 +24,7 @@ export const RUN_STATUS: Record<
   review_required: { label: "Awaiting review", tone: "warning" },
   completed: { label: "Completed", tone: "success" },
   failed: { label: "Failed", tone: "destructive" },
-  aborted: { label: "Aborted", tone: "stopped" }, // stopped by its reader, not a failure
+  aborted: { label: "Stopped", tone: "stopped" }, // stopped by its reader, not a failure
 };
 
 export const isText = (v: unknown): v is string => typeof v === "string";

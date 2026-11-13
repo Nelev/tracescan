@@ -94,12 +94,14 @@ export type ResourceState<T> = {
  * One thing from the server, loaded while `enabled` and only when `reloadOn` (a string or number)
  * differs from what was last loaded: a panel kept mounted and shown again loads nothing, and a
  * reload keeps showing the previous value until the new one arrives. `load` is always the latest
- * one passed; whatever it depends on goes in `reloadOn`.
+ * one passed; whatever it depends on goes in `reloadOn`. `recheck` loads once more a moment
+ * later, for a change the server records late, as `useList`'s does.
  */
 export function useResource<T>(
   load: (signal: AbortSignal) => Promise<T>,
   enabled: boolean,
   reloadOn: string | number,
+  recheck = false,
 ): ResourceState<T> {
   const [state, setState] = useState<ResourceState<T>>({
     status: "loading",
@@ -112,20 +114,27 @@ export function useResource<T>(
   useEffect(() => {
     if (!enabled || loadedFor.current === reloadOn) return;
     const controller = new AbortController();
-    setState((s) => ({ ...s, status: "loading" }));
-    latestLoad(controller.signal).then(
-      (value) => {
-        loadedFor.current = reloadOn;
-        setState({ status: "ready", value, missing: false });
-      },
-      (err) => {
-        if (controller.signal.aborted) return;
-        const missing = err instanceof RunError && err.status === 404;
-        setState((s) => ({ ...s, status: "error", missing }));
-      },
-    );
-    return () => controller.abort();
-  }, [enabled, reloadOn]);
+    const run = () => {
+      setState((s) => ({ ...s, status: "loading" }));
+      latestLoad(controller.signal).then(
+        (value) => {
+          loadedFor.current = reloadOn;
+          setState({ status: "ready", value, missing: false });
+        },
+        (err) => {
+          if (controller.signal.aborted) return;
+          const missing = err instanceof RunError && err.status === 404;
+          setState((s) => ({ ...s, status: "error", missing }));
+        },
+      );
+    };
+    run();
+    const again = recheck ? setTimeout(run, RECHECK_MS) : undefined;
+    return () => {
+      clearTimeout(again);
+      controller.abort();
+    };
+  }, [enabled, reloadOn, recheck]);
 
   return state;
 }
