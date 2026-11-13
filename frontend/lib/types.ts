@@ -6,6 +6,12 @@ export type RunRequest = {
   until?: string; // timezone-aware ISO 8601, exclusive
 };
 
+/**
+ * Traces one run judges at most, the newest in its window: MAX_JUDGED_TRACES in
+ * backend/agent/const.py (also the trace server's cap on one search). Older ones are not judged.
+ */
+export const MAX_JUDGED_TRACES = 200;
+
 /** A run's status as GET /v1/runs reports it. */
 export type RunStatus =
   | "in_progress"

@@ -8,7 +8,7 @@ import { isRecord as isObj } from "./guards.ts";
 import { diagnosesIn, type LiveProgress } from "./progress.ts";
 import { isCount, isRunStatus, isText, plural } from "./runs.ts";
 import { isNum } from "./traces.ts";
-import type { Decision, RunStatus } from "./types.ts";
+import { type Decision, MAX_JUDGED_TRACES, type RunStatus } from "./types.ts";
 
 export type ClusterMethod = "hdbscan" | "step_error" | "isolated";
 export type EvidenceCheck = "valid" | "corrected" | "unsupported";
@@ -341,7 +341,10 @@ export function pipeline(
     {
       key: "collect",
       label: "Collect",
-      detail: plural(n.traces, "trace"),
+      detail:
+        n.traces >= MAX_JUDGED_TRACES
+          ? `${MAX_JUDGED_TRACES} newest traces`
+          : plural(n.traces, "trace"),
       // A window with no traces ends the run here: collected, nothing to judge.
       done: n.traces > 0 || ended,
     },
@@ -445,4 +448,12 @@ export function totalUsage(clusters: ClusterDetail[]): ClusterUsage {
 /** Spend as "2 calls · 12,345 tokens · $0.012". */
 export function formatUsage({ calls, tokens, cost_usd }: ClusterUsage): string {
   return `${plural(calls, "call")} · ${tokens.toLocaleString("en-US")} tokens · $${cost_usd.toFixed(3)}`;
+}
+
+/**
+ * Whether the run collected as many traces as one run may judge: its window may hold older traces
+ * that were never judged (MAX_JUDGED_TRACES).
+ */
+export function reachedTraceLimit(summary: Pick<RunCounts, "traces">): boolean {
+  return summary.traces >= MAX_JUDGED_TRACES;
 }

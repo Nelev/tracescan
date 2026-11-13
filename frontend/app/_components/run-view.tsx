@@ -19,9 +19,11 @@ import {
   formatUsage,
   pipeline,
   type RunOverview,
+  reachedTraceLimit,
   totalUsage,
 } from "@/lib/run-overview";
 import { plural, RUN_STATUS, type StatusTone, shortId } from "@/lib/runs";
+import { MAX_JUDGED_TRACES } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
 import type { LiveDiagnosis } from "./cluster-card";
@@ -261,9 +263,17 @@ export function RunView({
 
       {overview && (
         <>
-          <section className="surface rounded-xl border p-4">
+          <section className="surface flex flex-col gap-3 rounded-xl border p-4">
             <h2 className="sr-only">Pipeline</h2>
             <PipelineStepper stages={pipeline(overview, live)} />
+            {reachedTraceLimit(overview.summary) ? (
+              <p className="type-body text-muted-foreground">
+                This run reached the limit of {MAX_JUDGED_TRACES} traces: it
+                judged the newest {MAX_JUDGED_TRACES} in its window, so any
+                older ones were not judged. To cover them, run a window that
+                ends earlier.
+              </p>
+            ) : null}
           </section>
 
           <Tabs value={tab} onValueChange={(value) => setTab(value as RunTab)}>
