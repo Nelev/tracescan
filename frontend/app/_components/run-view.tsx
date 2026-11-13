@@ -324,20 +324,20 @@ export function RunView({
                 aria-labelledby="findings"
                 className="flex min-w-0 flex-col gap-4"
               >
-                <div className="flex flex-col gap-1">
-                  <h2 id="findings" className="flex items-baseline gap-2">
-                    Findings
-                    <span className="type-body font-normal text-muted-foreground">
-                      {clusters.length > 0 &&
-                        `${plural(clusters.length, "finding")} from ${plural(overview.summary.failed_traces, "failed trace")}`}
-                    </span>
-                  </h2>
+                {/* The tab already says "Findings": the heading is for screen readers, one line says the rest. */}
+                <h2 id="findings" className="sr-only">
+                  Findings
+                </h2>
+                {clusters.length > 0 && (
                   <p className="type-body max-w-prose text-muted-foreground">
-                    {decidable
-                      ? "Each finding groups failed traces that share one cause. Approve the ones worth an issue, reject the rest, then submit your decisions together."
-                      : "Each finding groups failed traces that share one cause: what went wrong, how to fix it, and the evidence it rests on."}
+                    {plural(overview.summary.failed_traces, "failed trace")}{" "}
+                    grouped by cause into {plural(clusters.length, "finding")}.
+                    {decidable &&
+                      (clusters.length === 1
+                        ? " Approve it if it is worth an issue, then submit."
+                        : " Approve the ones worth an issue, then submit.")}
                   </p>
-                </div>
+                )}
                 {review.state.step === "unavailable" && (
                   <div className="flex flex-wrap items-center gap-3">
                     <p role="alert" className="type-body text-destructive">
