@@ -33,7 +33,7 @@ TREE = span_tree(
 FAILED = TraceVerdict(
     reason="The lookup tool failed.", score=0.1, blamed_span_id="tool", attribution="app"
 )
-FINE = TraceVerdict(reason="Every step worked.", score=0.9)
+FINE = TraceVerdict(reason="Every step worked.", score=1.0)
 
 
 async def score(model, trees=None, judge_model=None) -> dict:

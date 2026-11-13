@@ -24,6 +24,11 @@ def walk(span: SpanNode, depth: int = 0) -> Iterator[tuple[int, SpanNode]]:
         yield from walk(child, depth + 1)
 
 
+def error_spans(tree: SpanNode) -> Iterator[tuple[int, SpanNode]]:
+    """The spans of a tree whose status is error, top down, with their depth."""
+    return ((depth, span) for depth, span in walk(tree) if span.status == "error")
+
+
 def span_index(trees: Iterable[SpanNode]) -> SpanIndex:
     return {tree.trace_id: {span.span_id for _, span in walk(tree)} for tree in trees}
 
@@ -57,7 +62,7 @@ def fallback_evidence(trees: Sequence[SpanNode]) -> list[Evidence]:
     return [
         Evidence(
             trace_id=tree.trace_id,
-            span_id=next((s for _, s in walk(tree) if s.status == "error"), tree).span_id,
+            span_id=next((span for _, span in error_spans(tree)), tree).span_id,
             note=FALLBACK_NOTE,
         )
         for tree in trees

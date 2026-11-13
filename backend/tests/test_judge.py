@@ -6,6 +6,7 @@ import pytest
 
 from agent import model_guard
 from agent.const import MAX_MODEL_ATTEMPTS
+from agent.evidence import span_index
 from agent.judge import JUDGE_PROMPT, fallback_span, healthy_picks, judge_trace
 from agent.model_guard import Spent
 from agent.schemas import TraceVerdict
@@ -32,23 +33,31 @@ TREE = span_tree(
 FAILED = TraceVerdict(
     reason="The lookup tool failed.", score=0.1, blamed_span_id="tool", attribution="app"
 )
-FINE = TraceVerdict(reason="Every step worked.", score=0.9)
-# A request where every step worked and the retrieval found records.
-CLEAN = span_tree(
-    "t2",
-    span_id="root",
-    status="ok",
-    children=[
-        span_tree("t2", span_id="chat", parent_span_id="root", status="ok"),
-        span_tree(
-            "t2",
-            span_id="search",
-            parent_span_id="root",
-            status="ok",
-            attributes={"retrieval.hits": 4},
-        ),
-    ],
-)
+FINE = TraceVerdict(reason="Every step worked.", score=1.0)
+
+
+def picks(tree, picked, score):
+    """healthy_picks with the tree's span ids, the way judge_trace calls it."""
+    return healthy_picks(tree, span_index([tree])[tree.trace_id], picked, score)
+
+
+def clean_tree(hits: int = 4):
+    """A request where every step worked; its retrieval found `hits` records."""
+    return span_tree(
+        "t2",
+        span_id="root",
+        status="ok",
+        children=[
+            span_tree("t2", span_id="chat", parent_span_id="root", status="ok"),
+            span_tree(
+                "t2",
+                span_id="search",
+                parent_span_id="root",
+                status="ok",
+                attributes={"retrieval.hits": hits},
+            ),
+        ],
+    )
 
 
 @pytest.mark.anyio
@@ -70,40 +79,26 @@ async def test_a_failed_trace_blames_the_span_the_model_named():
 
 
 @pytest.mark.anyio
-async def test_a_trace_with_an_error_span_gives_no_references():
-    # Judged fine, but a span failed: a retry or a reported failure is not a clean example.
-    fine = FINE.model_copy(update={"healthy_span_ids": ["search"]})
-    verdict = await judge_trace(TREE, scripted(fine), Spent())
-    assert verdict["healthy_span_ids"] == []
-
-
-@pytest.mark.anyio
 async def test_healthy_picks_keep_only_spans_of_a_clean_tree():
     # The root, an unknown id and a repeat are dropped.
     picks = ["search", "root", "made-up", "search", "chat"]
     fine = FINE.model_copy(update={"healthy_span_ids": picks})
-    verdict = await judge_trace(CLEAN, scripted(fine), Spent())
+    verdict = await judge_trace(clean_tree(), scripted(fine), Spent())
     assert verdict["healthy_span_ids"] == ["search", "chat"]
 
 
-def test_a_borderline_fine_gives_no_references():
-    assert healthy_picks(CLEAN, ["search"], score=0.6) == []
-
-
-def test_a_retrieval_that_found_nothing_gives_no_references():
-    # silent_no_hits: no error anywhere, but the answer has no records behind it.
-    chat, search = CLEAN.children
-    empty = CLEAN.model_copy(
-        update={"children": [chat, search.model_copy(update={"attributes": {"retrieval.hits": 0}})]}
-    )
-    assert healthy_picks(empty, ["chat"], score=1.0) == []
-
-
-@pytest.mark.anyio
-async def test_a_failed_trace_keeps_no_healthy_picks():
-    failed = FAILED.model_copy(update={"healthy_span_ids": ["search"]})
-    verdict = await judge_trace(TREE, scripted(failed), Spent())
-    assert verdict["healthy_span_ids"] == []
+@pytest.mark.parametrize(
+    ("tree", "score"),
+    [
+        (clean_tree(), 0.1),  # failed
+        (clean_tree(), 0.6),  # fine, but only just
+        (TREE, 1.0),  # a span failed: a retried or reported failure is not a clean example
+        (clean_tree(hits=0), 1.0),  # silent_no_hits: no error, but no records behind the answer
+    ],
+    ids=["failed", "borderline", "error span", "no hits"],
+)
+def test_a_trace_not_clearly_fine_and_clean_gives_no_references(tree, score):
+    assert picks(tree, ["chat", "search"], score) == []
 
 
 def test_healthy_picks_stop_at_the_cap():
@@ -115,7 +110,7 @@ def test_healthy_picks_stop_at_the_cap():
             span_tree("t1", span_id=f"s{i}", parent_span_id="root", status="ok") for i in range(5)
         ],
     )
-    assert healthy_picks(tree, [f"s{i}" for i in range(5)], score=1.0) == ["s0", "s1", "s2"]
+    assert picks(tree, [f"s{i}" for i in range(5)], 1.0) == ["s0", "s1", "s2"]
 
 
 @pytest.mark.anyio

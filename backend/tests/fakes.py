@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sklearn.feature_extraction.text import HashingVectorizer
 
 from agent.context import TraceAccess, TraceContext
-from agent.evidence import walk
+from agent.evidence import error_spans
 from agent.judge import fallback_span
 from agent.schemas import Decision, Diagnosis, Evidence, TraceVerdict
 from runs.schemas import ReviewRecord, RunCounts, RunRecord, StoredStatus
@@ -177,7 +177,7 @@ def fake_judge() -> FakeStructuredModel:
 
     def answer(messages: list[BaseMessage]) -> TraceVerdict:
         tree = SpanNode.model_validate_json(str(messages[1].content))
-        if not any(span.status == "error" for _, span in walk(tree)):
+        if not any(error_spans(tree)):
             return TraceVerdict(reason="Every step worked.", score=0.9)
         return TraceVerdict(
             reason="A step failed.",

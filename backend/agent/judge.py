@@ -21,7 +21,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from agent.const import HEALTHY_MIN_SCORE, MAX_HEALTHY_PICKS
-from agent.evidence import span_index, walk
+from agent.evidence import error_spans, span_index, walk
 from agent.model_guard import Spent, structured_asker, trace_budget
 from agent.schemas import BlameCheck, TraceVerdict
 from trace_store.models import SpanNode, is_failed
@@ -35,7 +35,7 @@ def fallback_span(tree: SpanNode) -> str:
     Deeper than the diagnoser's fallback (agent.evidence.fallback_evidence), which takes the
     first error top down: an error marks every span up to the root, so the deepest is the cause.
     """
-    errors = [(depth, span) for depth, span in walk(tree) if span.status == "error"]
+    errors = list(error_spans(tree))
     if not errors:
         return tree.span_id
     return min(errors, key=lambda found: (-found[0], found[1].start_time))[1].span_id
@@ -79,20 +79,22 @@ def failed_summary(trace: dict, verdict: dict) -> dict:
 def clean(tree: SpanNode) -> bool:
     """Nothing in the trace hints that it went wrong: no error span (a retried or reported
     failure is not a clean example) and no retrieval that found nothing (an answer with no
-    records behind it raises no error). Proxies only: the judge never sees the answer."""
+    records behind it raises no error). Proxies only: the judge never sees the answer.
+    One pass, stopping at the first span that rules the trace out."""
     return not any(
         span.status == "error" or span.attributes.get("retrieval.hits") == 0
         for _, span in walk(tree)
     )
 
 
-def healthy_picks(tree: SpanNode, picked: list[str], score: float) -> list[str]:
+def healthy_picks(tree: SpanNode, valid: set[str], picked: list[str], score: float) -> list[str]:
     """The judge's healthy picks that become references. A pick is a candidate: none is kept
-    unless the score is clear and the trace is clean; then spans of the tree, not the root, each
-    once, the first MAX_HEALTHY_PICKS. A bad pick is dropped, never asked about again."""
+    unless the score is clear and the trace is clean; then spans of the tree (`valid`, its span
+    ids, which judge_trace already has), not the root, each once, the first MAX_HEALTHY_PICKS.
+    A bad pick is dropped, never asked about again."""
     if score < HEALTHY_MIN_SCORE or not clean(tree):
         return []
-    ok = {span.span_id for _, span in walk(tree)} - {tree.span_id}
+    ok = valid - {tree.span_id}
     return [span_id for span_id in dict.fromkeys(picked) if span_id in ok][:MAX_HEALTHY_PICKS]
 
 
@@ -147,8 +149,6 @@ async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
         "blame_check": check,
         # Only a failure has one; a failed trace the model did not attribute is unclear.
         "attribution": (verdict.attribution or "unclear") if failed else None,
-        # Only a trace that went fine has examples of steps working.
-        "healthy_span_ids": (
-            [] if failed else healthy_picks(tree, verdict.healthy_span_ids, verdict.score)
-        ),
+        # Only a trace that clearly went fine has examples of steps working.
+        "healthy_span_ids": healthy_picks(tree, valid, verdict.healthy_span_ids, verdict.score),
     }
