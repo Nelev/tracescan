@@ -42,6 +42,7 @@ ignore = ["E501"]  # the formatter wraps code; long comments and docstrings are 
 dev = [
     "opentelemetry-exporter-otlp-proto-common>=1.45.2",
     "opentelemetry-sdk>=1.45.2",
+    "pre-commit>=4.7.0",
     "pyright>=1.1.414",
     "pytest>=9.2.0",
     "ruff>=0.17.4",

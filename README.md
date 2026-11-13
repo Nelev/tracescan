@@ -667,6 +667,12 @@ Backend (what CI runs):
 cd backend && uv run ruff check . && uv run ruff format --check . && uv run pyright -p .. && uv run pytest
 ```
 
+A pre-commit hook refuses a commit whose staged backend Python fails the two ruff checks above, using the ruff pinned in `uv.lock` (`.pre-commit-config.yaml` at the repo root). Install it once per clone:
+
+```bash
+cd backend && uv run pre-commit install
+```
+
 Tests never call a model and never download the embedding model: they use fake chat models and `HashingEmbedder` from `tests/fakes.py`. The Postgres tests run with `TEST_DATABASE_URL` (CI sets it); `RUN_SLOW=1 uv run pytest -k fastembed` repeats the clustering check with the real embedding model.
 
 Frontend:

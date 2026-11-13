@@ -100,7 +100,9 @@ The eval on seeded traces (needs `DATABASE_URL`, `TRACE_DATABASE_URL` and `OPENR
 
 `uv run ruff check --fix .` and `uv run ruff format .` fix what they report. Ruff is configured in `backend/pyproject.toml` (rules `E,F,I,UP,B`, line length 100).
 
-Planned: a ruff pre-commit hook, `langgraph dev` for Studio (compile without a local checkpointer/store and point `langgraph.json` at the module's `graph`).
+A pre-commit hook (`.pre-commit-config.yaml` at the repo root, `pre-commit` a backend dev dependency) runs the same two ruff checks on staged backend Python and refuses the commit when one fails; install it once per clone with `cd backend && uv run pre-commit install`. It runs the ruff in `uv.lock` through `uv run --project backend --frozen`, so it needs `uv` on the PATH git sees.
+
+Planned: `langgraph dev` for Studio (compile without a local checkpointer/store and point `langgraph.json` at the module's `graph`).
 
 ## Conventions
 
