@@ -7,8 +7,9 @@ server already sanitized, so the model sees no attribute outside the allowlist.
 The score is the model's; whether that counts as failed is the code's (`trace_store.models.is_failed`,
 the same threshold the trace browser reads the stored score with).
 A failed trace must blame a span of the tree it was shown: if it does not, the model is asked once
-more with the valid ids, and if it still names an unknown span, or none, the code blames the
-deepest error span (the root when no span failed). A trace that did not fail blames nothing.
+more with the valid ids, and if it still names an unknown span, or none, or the re-ask fails, the
+code blames the deepest error span (the root when no span failed). A trace that did not fail
+blames nothing.
 
 A trace that went fine may name healthy spans, steps that worked, for the planned healthy-span
 store; `healthy_picks` keeps the ones that hold up, from a clearly fine, clean trace only (`clean`):
@@ -16,6 +17,7 @@ no exception does not mean a right answer.
 """
 
 import json
+import logging
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
@@ -26,6 +28,8 @@ from agent.evidence import error_spans, span_index, walk
 from agent.model_guard import Spent, retrying, structured_asker, trace_budget
 from agent.schemas import BlameCheck, TraceVerdict
 from trace_store.models import SpanNode, is_failed
+
+logger = logging.getLogger(__name__)
 
 JUDGE_PROMPT = (Path(__file__).parent / "judge_prompt.md").read_text()
 
@@ -136,7 +140,8 @@ async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
     A transient model error (throttling, a timeout, a server error) is retried call by call after
     a doubling wait, and the re-ask runs, only while `run` is within the trace budget: up to
     MAX_MODEL_ATTEMPTS calls in all. Any other error, or one with no budget left, is raised for
-    the caller to handle.
+    the caller to handle, except on the re-ask: then the first verdict is kept, with the fallback
+    blame.
     """
     ask = retrying(
         structured_asker(model, TraceVerdict, run), run, trace_budget(), f"judge of {tree.trace_id}"
@@ -154,8 +159,16 @@ async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
             AIMessage(verdict.model_dump_json()),
             HumanMessage(retry_message(verdict.blamed_span_id, valid)),
         ]
-        verdict = await ask(messages)
-        retried = True
+        try:
+            verdict = await ask(messages)
+            retried = True
+        except Exception as exc:
+            # The first verdict is paid for: keep it, with the fallback blame below.
+            logger.warning(
+                "judge of %s: re-ask failed: %s, keeping the first answer",
+                tree.trace_id,
+                type(exc).__name__,
+            )
     # Decided once, on the last answer, which may have changed its mind about the failure.
     failed = is_failed(verdict.score)
     blamed: str | None = None

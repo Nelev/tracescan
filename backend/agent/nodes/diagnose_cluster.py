@@ -7,9 +7,10 @@ spans it was not shown, those are dropped and the confidence is capped (see agen
 
 A transient model error is retried call by call (`retrying` in agent.model_guard), after a
 doubling wait, while the cluster's budget has room; any other error, or one with no budget left,
-records the cluster in `diagnosis_failures`. The evidence re-ask draws on the same budget; when it is spent the
-diagnosis is kept as `unsupported`, never dropped. The retries live in the node, not in the
-graph: a run is durable only once it waits for review, so nothing is gained by checkpointing them.
+records the cluster in `diagnosis_failures`. The evidence re-ask draws on the same budget; when
+it is spent, or the re-ask fails, the first diagnosis is kept as `unsupported`, never dropped.
+The retries live in the node, not in the graph: a run is durable only once it waits for review,
+so nothing is gained by checkpointing them.
 
 With a healthy-span store in the context, the prompt also gets the nearest healthy calls of the
 failing step (`healthy_twins`), as comparison only: they are not spans of the exemplars, so the
@@ -155,9 +156,19 @@ async def _diagnose(
                 AIMessage(diagnosis.model_dump_json()),
                 HumanMessage(retry_message(bad, index)),
             ]
-            diagnosis = await ask(messages)
-            bad = invalid_citations(diagnosis, index)
-            check = "unsupported" if bad else "corrected"
+            try:
+                retried = await ask(messages)
+            except Exception as exc:
+                # The first answer is paid for: keep it as unsupported rather than drop it.
+                logger.warning(
+                    "diagnosis of %s: re-ask failed: %s, keeping the first answer",
+                    cluster["cluster_id"],
+                    type(exc).__name__,
+                )
+            else:
+                diagnosis = retried
+                bad = invalid_citations(diagnosis, index)
+                check = "unsupported" if bad else "corrected"
 
     # The cluster id is known, so the model does not get to name it.
     result = {

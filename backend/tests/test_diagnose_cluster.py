@@ -262,25 +262,6 @@ async def test_with_no_valid_citation_left_the_clusters_own_failing_span_is_cite
 
 
 @pytest.mark.anyio
-async def test_a_failing_retry_is_a_failed_cluster_not_a_dropped_one():
-    calls = []
-
-    def answer(_):
-        calls.append(1)
-        if len(calls) == 2:
-            raise RuntimeError("model down")
-        return citing(("t9", "s9"))
-
-    result = await diagnose(FakeStructuredModel(messages=iter(()), answer=answer))
-    assert result["diagnosis_failures"] == ["c0"]
-    assert "diagnoses" not in result
-    # The failed cluster still reports what it spent: both calls, the first one answered.
-    assert result["model_usage"] == [
-        {"cluster_id": "c0", "calls": 2, "tokens": 150, "cost_usd": pytest.approx(0.001)}
-    ]
-
-
-@pytest.mark.anyio
 async def test_a_cluster_puts_what_its_model_calls_cost_in_state():
     result = await diagnose(scripted_model(GOOD))
     (usage,) = result["model_usage"]
@@ -400,6 +381,32 @@ async def test_a_transient_error_on_the_re_ask_retries_that_call_only():
     assert len(model.seen) == 3  # the first answer is kept, not asked for again
     assert len(model.seen[2]) == 4  # the retried call is the re-ask, with the correction
     assert result["diagnoses"][0]["evidence_check"] == "corrected"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "errors",
+    [[FakeApiError(503), FakeApiError(503)], [FakeApiError(400)], [RuntimeError("model down")]],
+    ids=["transient-until-spent", "not-transient", "unexpected"],
+)
+async def test_a_failing_re_ask_keeps_the_first_diagnosis_as_unsupported(errors):
+    model = scripted_model(citing(("t9", "s9")), *errors)
+    result = await diagnose(model)
+
+    assert "diagnosis_failures" not in result  # the paid-for first answer is not dropped
+    (diagnosis,) = result["diagnoses"]
+    assert diagnosis["evidence_check"] == "unsupported"
+    assert diagnosis["confidence"] == UNSUPPORTED_CONFIDENCE_CAP
+    (evidence,) = diagnosis["evidence"]
+    assert (evidence["trace_id"], evidence["span_id"]) == ("t1", "s1")  # the failing span
+    # The failed calls still count; the tokens and cost are the first, answered call's.
+    (usage,) = result["model_usage"]
+    assert usage == {
+        "cluster_id": "c0",
+        "calls": 1 + len(errors),
+        "tokens": 150,
+        "cost_usd": pytest.approx(0.001),
+    }
 
 
 # --- the run's budget
