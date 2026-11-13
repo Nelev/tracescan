@@ -74,8 +74,9 @@ class Principal:
     name: str
 
 
-# auto_error=False so a missing header is our 401, the same shape as a bad token.
-_bearer = HTTPBearer(auto_error=False)
+# auto_error=False so a missing header is our 401, the same shape as a bad token. The trace
+# collector reads its app tokens with it too (api.traces).
+bearer_scheme = HTTPBearer(auto_error=False)
 
 # Failures that are ours or Clerk's, not the caller's: the same token could pass on a retry, so
 # a 503 rather than a 401.
@@ -91,7 +92,8 @@ def auth_settings(request: Request) -> AuthSettings:
     return request.app.state.auth
 
 
-def _unauthorized(detail: str) -> HTTPException:
+def unauthorized(detail: str) -> HTTPException:
+    """A 401 that asks for a bearer token."""
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=detail,
@@ -100,19 +102,19 @@ def _unauthorized(detail: str) -> HTTPException:
 
 
 async def session_claims(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     settings: Annotated[AuthSettings, Depends(auth_settings)],
 ) -> dict[str, Any]:
     """The claims of the request's session token, once it has verified."""
     if credentials is None:
-        raise _unauthorized("Not signed in")
+        raise unauthorized("Not signed in")
     token = credentials.credentials
 
     # verify_token_async also takes API keys, OAuth and machine tokens, which it checks against
     # Clerk's API. This API answers only a person's session, so those are refused before
     # verification, by the same classification the SDK dispatches on.
     if get_token_type(token) != TokenType.SESSION_TOKEN:
-        raise _unauthorized("Not a session token")
+        raise unauthorized("Not a session token")
 
     try:
         claims = await verify_token_async(
@@ -129,13 +131,13 @@ async def session_claims(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Could not verify the session",
             ) from None
-        raise _unauthorized("Invalid session token") from None
+        raise unauthorized("Invalid session token") from None
 
     # A session token always names its session and its user. One without either verified, but
     # is nothing this API knows how to answer.
     subject = claims.get("sub")
     if not claims.get("sid") or not isinstance(subject, str) or not subject:
-        raise _unauthorized("Not a session token")
+        raise unauthorized("Not a session token")
     return claims
 
 

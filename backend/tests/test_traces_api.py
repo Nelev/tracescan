@@ -1,5 +1,7 @@
 """The trace collector: decoding an OTLP export, and POST /v1/traces."""
 
+import json
+import math
 from datetime import UTC, datetime
 
 import httpx
@@ -12,9 +14,16 @@ from opentelemetry.proto.trace.v1.trace_pb2 import Span as OtlpSpan
 from opentelemetry.proto.trace.v1.trace_pb2 import Status
 from sqlalchemy import text
 
-from api.traces import PROTOBUF, decode
+from api.traces import PROTOBUF, CollectorTokens, ExportTooLarge, decode, token_variable
 from main import app
-from trace_store.const import APP_VERSION_MAX
+from tests.conftest import bearer, collector_headers
+from trace_store.const import (
+    APP_VERSION_MAX,
+    MAX_EXPORT_BYTES,
+    MAX_EXPORT_SPANS,
+    SPAN_NAME_MAX,
+    STATUS_MESSAGE_MAX,
+)
 
 TRACE_ID = bytes.fromhex("0af7651916cd43dd8448eb211c80319c")
 ROOT_ID = bytes.fromhex("b7ad6b7169203331")
@@ -23,15 +32,21 @@ START_NS = 1_793_000_000_123_456_789
 START = datetime(2026, 10, 26, 7, 33, 20, 123456, tzinfo=UTC)
 
 
-def export(service: str = "medas", version: str | None = None, schema: str = "") -> bytes:
-    """An export of one trace: a root span and an errored retrieval span below it."""
+def empty_export(service: str = "medas", schema: str = ""):
+    """An export with one app's resource and an empty scope: the request, the resource's
+    attributes and the scope's spans, to add to."""
     request = ExportTraceServiceRequest()
     resource_spans = request.resource_spans.add(schema_url=schema)
-    name = resource_spans.resource.attributes.add(key="service.name")
-    name.value.string_value = service
+    attributes = resource_spans.resource.attributes
+    attributes.add(key="service.name").value.string_value = service
+    return request, attributes, resource_spans.scope_spans.add().spans
+
+
+def export(service: str = "medas", version: str | None = None, schema: str = "") -> bytes:
+    """An export of one trace: a root span and an errored retrieval span below it."""
+    request, attributes, spans = empty_export(service, schema)
     if version is not None:
-        resource_spans.resource.attributes.add(key="service.version").value.string_value = version
-    spans = resource_spans.scope_spans.add().spans
+        attributes.add(key="service.version").value.string_value = version
 
     spans.add(
         trace_id=TRACE_ID,
@@ -111,8 +126,72 @@ def test_spans_of_an_app_that_is_not_allowed_are_left_out():
     assert decode(export("someone-else")) == []
 
 
+def test_only_the_named_app_is_kept():
+    assert decode(export(), "someone-else") == []
+    assert len(decode(export(), "medas")) == 2
+
+
+def test_an_export_of_too_many_spans_is_refused():
+    request, _, spans = empty_export()
+    for i in range(MAX_EXPORT_SPANS + 1):
+        spans.add(trace_id=TRACE_ID, span_id=i.to_bytes(8, "big"), name="s")
+    with pytest.raises(ExportTooLarge):
+        decode(request.SerializeToString())
+
+
+def awkward_export() -> bytes:
+    """One span with what Postgres refuses (NUL characters, NaN) and over-long text."""
+    request, _, spans = empty_export()
+    span = spans.add(
+        trace_id=TRACE_ID,
+        span_id=ROOT_ID,
+        name="n" * 1000,
+        start_time_unix_nano=START_NS,
+        end_time_unix_nano=START_NS,
+        status=Status(code=Status.STATUS_CODE_ERROR, message="bad\x00" + "m" * 5000),
+    )
+    span.attributes.add(key="text\x00").value.string_value = "a\x00b"
+    span.attributes.add(key="nan").value.double_value = math.nan
+    span.attributes.add(key="inf").value.double_value = math.inf
+    span.attributes.add(key="fine").value.double_value = 0.5
+    span.events.add(name="e" * 1000, time_unix_nano=START_NS)
+    return request.SerializeToString()
+
+
+def test_text_postgres_refuses_is_cleaned_and_long_text_is_cut():
+    (row,) = decode(awkward_export())
+    assert row["name"] == "n" * SPAN_NAME_MAX
+    assert row["status_message"] == "bad" + "m" * (STATUS_MESSAGE_MAX - 3)
+    assert row["attributes"] == {"text": "ab", "nan": None, "inf": None, "fine": 0.5}
+    assert row["events"][0]["name"] == "e" * SPAN_NAME_MAX
+    # What Postgres would be given: no NUL anywhere, and valid JSON (no NaN).
+    assert "\\u0000" not in json.dumps(row, default=str, allow_nan=False)
+
+
+def test_collector_tokens_are_read_from_the_environment(monkeypatch):
+    token = "t" * 40
+    monkeypatch.setenv(token_variable("medas"), token)
+    read = CollectorTokens.from_env()
+    assert read.app_of(token) == "medas"
+    assert read.app_of(token + "x") is None
+    assert read.app_of("") is None
+
+
+def test_a_short_collector_token_stops_the_app(monkeypatch):
+    monkeypatch.setenv(token_variable("medas"), "short")
+    with pytest.raises(ValueError):
+        CollectorTokens.from_env()
+
+
+def test_a_missing_collector_token_stops_the_app(monkeypatch):
+    monkeypatch.delenv(token_variable("medas"), raising=False)
+    with pytest.raises(KeyError):
+        CollectorTokens.from_env()
+
+
 async def post(client, body: bytes, content_type: str = PROTOBUF) -> httpx.Response:
-    return await client.post("/v1/traces", content=body, headers={"content-type": content_type})
+    headers = collector_headers() | {"content-type": content_type}
+    return await client.post("/v1/traces", content=body, headers=headers)
 
 
 @pytest.mark.anyio
@@ -159,3 +238,54 @@ async def test_a_store_that_fails_is_a_503_with_no_detail(collector):
         del app.state.engine
     assert response.status_code == 503
     assert "row content" not in response.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("token", [None, "wrong-token-of-the-right-length-0000000"])
+async def test_an_export_without_the_apps_token_is_refused(collector, token):
+    headers = {"content-type": PROTOBUF} | ({} if token is None else bearer(token))
+    # No engine on the app: a request that got past the token would fail differently.
+    response = await collector.post("/v1/traces", content=export(), headers=headers)
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+@pytest.mark.anyio
+async def test_a_content_type_with_parameters_is_taken(collector):
+    response = await post(collector, export("someone-else"), f"{PROTOBUF}; charset=binary")
+    assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_a_body_over_the_limit_is_refused(collector):
+    assert (await post(collector, b"\x00" * (MAX_EXPORT_BYTES + 1))).status_code == 413
+
+
+@pytest.mark.anyio
+async def test_a_body_over_the_limit_is_refused_without_a_declared_length(collector):
+    async def chunks():
+        for _ in range(5):
+            yield b"\x00" * (MAX_EXPORT_BYTES // 4)
+
+    response = await collector.post("/v1/traces", content=chunks(), headers=collector_headers())
+    assert "content-length" not in response.request.headers
+    assert response.status_code == 413
+
+
+@pytest.mark.anyio
+async def test_spans_from_the_future_are_not_stored(collector, spans_engine):
+    future = ExportTraceServiceRequest()
+    future.ParseFromString(export())
+    for span in future.resource_spans[0].scope_spans[0].spans:
+        span.start_time_unix_nano += 10 * 365 * 24 * 3600 * 10**9  # ten years on
+    assert (await post(collector, future.SerializeToString())).status_code == 200
+    async with spans_engine.connect() as conn:
+        assert (await conn.execute(text("SELECT count(*) FROM spans"))).scalar() == 0
+
+
+@pytest.mark.anyio
+async def test_text_postgres_refuses_is_stored_cleaned(collector, spans_engine):
+    assert (await post(collector, awkward_export())).status_code == 200
+    async with spans_engine.connect() as conn:
+        attributes = (await conn.execute(text("SELECT attributes FROM spans"))).scalar()
+    assert attributes == {"text": "ab", "nan": None, "inf": None, "fine": 0.5}

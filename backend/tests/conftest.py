@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from agent import model_guard
 from api.rate_limit import limiter
+from api.traces import PROTOBUF, CollectorTokens, token_variable
 from auth import session_claims
 from db.engine import create_engine
 from main import app
@@ -63,13 +64,31 @@ def postgres_url(monkeypatch) -> str:
     return url
 
 
+# The collector token the tests' Medas sends. The lifespan reads it, but ASGITransport skips the
+# lifespan, so the `collector` fixture reads it the same way and sets it on the app.
+COLLECTOR_TOKEN = "test-collector-token-for-medas-000000"
+
+
+def bearer(value: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {value}"}
+
+
 @pytest.fixture
-async def collector():
-    """An HTTP client on the app, for POST /v1/traces."""
+async def collector(monkeypatch):
+    """An HTTP client on the app, for POST /v1/traces. It sends no token of its own: a test
+    posting spans adds `collector_headers()`."""
+    monkeypatch.setenv(token_variable("medas"), COLLECTOR_TOKEN)
+    app.state.collector_tokens = CollectorTokens.from_env()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         yield client
+    del app.state.collector_tokens
+
+
+def collector_headers(token: str = COLLECTOR_TOKEN) -> dict[str, str]:
+    """What Medas's exporter sends with an export."""
+    return {"content-type": PROTOBUF} | bearer(token)
 
 
 @pytest.fixture
