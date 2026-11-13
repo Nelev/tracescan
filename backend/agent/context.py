@@ -22,6 +22,7 @@ from agent.actions import OUT_DIR
 from agent.const import MAX_PARALLEL_DIAGNOSES
 from agent.embeddings import Embedder
 from agent.github import GitHubIssues
+from agent.model_guard import Spent
 from agent.schemas import HealthyMatch, StepKey
 from trace_store.models import SpanNode, TraceQuery, TraceSummary
 
@@ -69,3 +70,6 @@ class TraceContext:
     diagnose_slots: asyncio.Semaphore = field(
         default_factory=lambda: asyncio.Semaphore(MAX_PARALLEL_DIAGNOSES), init=False, repr=False
     )
+    # What the run has spent over all its branches; see MAX_RUN_COST_USD in agent.const. Fresh per
+    # run segment, like diagnose_slots.
+    run_spent: Spent = field(default_factory=Spent, init=False, repr=False)

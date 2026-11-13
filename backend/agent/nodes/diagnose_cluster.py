@@ -37,7 +37,7 @@ from agent.evidence import (
     span_index,
 )
 from agent.judge import prompt_json
-from agent.model_guard import Spent, cluster_budget, retrying, structured_asker
+from agent.model_guard import Spent, cluster_budget, retrying, run_budget, structured_asker
 from agent.schemas import Cluster, ClusterTask, Diagnosis, EvidenceCheck, HealthyMatch
 from trace_store.models import SpanNode
 
@@ -58,6 +58,10 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
     try:
         # Per-run cap, see TraceContext.diagnose_slots.
         async with context.diagnose_slots:
+            # The run's budget (agent.const): checked once a slot is free, after what others spent.
+            if not context.run_spent.ok(run_budget()):
+                logger.warning("diagnosis of %s skipped: the run's budget is spent", cluster_id)
+                return {"diagnosis_failures": [cluster_id], **_usage(cluster_id, spent)}
             # Fetched once: a failing fetch is a failure, not a model error to retry.
             trees = await asyncio.gather(
                 *(context.traces.get_trace_tree(t) for t in cluster["exemplar_trace_ids"])
@@ -69,6 +73,8 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
         # Type name only: the message could carry span contents.
         logger.error("diagnosis of %s failed: %s", cluster_id, type(exc).__name__)
         return {"diagnosis_failures": [cluster_id], **_usage(cluster_id, spent)}
+    finally:
+        context.run_spent += spent  # see TraceContext.run_spent
     return {"diagnoses": [diagnosis], **_usage(cluster_id, spent)}
 
 

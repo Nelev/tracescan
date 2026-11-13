@@ -54,9 +54,12 @@ TASK = ClusterTask(
 )
 
 
-async def diagnose(model, healthy=None) -> dict:
-    """One run of the node over CLUSTER, whose one exemplar is TREE."""
-    context = replace(fake_context(FakeTraces(trees={"t1": TREE}), model), healthy=healthy)
+async def diagnose(model, healthy=None, context=None) -> dict:
+    """One run of the node over CLUSTER, whose one exemplar is TREE; pass `context` to run several
+    branches of one run."""
+    context = context or replace(
+        fake_context(FakeTraces(trees={"t1": TREE}), model), healthy=healthy
+    )
     return await diagnose_cluster(TASK, Runtime(context=context))
 
 
@@ -397,3 +400,25 @@ async def test_a_transient_error_on_the_re_ask_retries_that_call_only():
     assert len(model.seen) == 3  # the first answer is kept, not asked for again
     assert len(model.seen[2]) == 4  # the retried call is the re-ask, with the correction
     assert result["diagnoses"][0]["evidence_check"] == "corrected"
+
+
+# --- the run's budget
+
+
+@pytest.mark.anyio
+async def test_a_diagnosis_adds_its_spend_to_the_runs():
+    model = fake_diagnoser(DIAGNOSIS)
+    context = fake_context(FakeTraces(trees={"t1": TREE}), model)
+    await diagnose(model, context=context)
+    assert context.run_spent.calls == 1 and context.run_spent.tokens > 0
+
+
+@pytest.mark.anyio
+async def test_a_cluster_is_not_diagnosed_once_the_run_is_past_its_budget():
+    model = fake_diagnoser(DIAGNOSIS)
+    context = fake_context(FakeTraces(trees={"t1": TREE}), model)
+    context.run_spent = model_guard.Spent(cost_usd=model_guard.MAX_RUN_COST_USD)  # all spent
+    result = await diagnose(model, context=context)
+    assert result["diagnosis_failures"] == ["c0"] and "diagnoses" not in result
+    assert result["model_usage"] == [{"cluster_id": "c0", "calls": 0, "tokens": 0, "cost_usd": 0.0}]
+    assert not model.seen
