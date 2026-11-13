@@ -85,6 +85,8 @@ For development and the eval, `scripts/seed_traces.py` writes realistic syntheti
 
 A run covers one app over one time window. `collect_traces` takes **every trace in the window, newest first, up to 200** (`MAX_JUDGED_TRACES`). Later, each cluster sends only its **3 newest traces** (`MAX_EXEMPLARS`) to the diagnoser, so the expensive model sees a sample of each cluster, not all of it.
 
+> **Note: a run judges at most the 200 newest traces in its window.** The trace judge makes one model call per trace, so `MAX_JUDGED_TRACES` (200, also the trace server's cap on one search) bounds what a run costs and how long it takes. In a busier window, the traces older than the newest 200 are **not judged at all**, so a fault that only happened earlier in the window is not found. The New run form says so, and a run that reached the limit says so on its page. To cover a busy period, run it as several shorter windows.
+
 ### 3. Scored and judged
 
 Every collected trace goes to the **trace judge** (`anthropic/claude-haiku-5.5`, one call per trace, 16 at a time). It reads the span tree as JSON, with attribute values outside an allowlist replaced by `[redacted]`, and answers:
