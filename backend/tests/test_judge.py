@@ -221,6 +221,16 @@ async def test_a_retried_call_leaves_the_re_ask_only_what_is_left_of_the_budget(
     assert spent.calls == MAX_MODEL_ATTEMPTS
 
 
+@pytest.mark.anyio
+async def test_a_failing_re_ask_keeps_the_first_verdict_with_the_fallback_blame():
+    wrong = FAILED.model_copy(update={"blamed_span_id": "made-up"})
+    model, spent = scripted(wrong, FakeApiError(503), FakeApiError(503)), Spent()
+    verdict = await judge_trace(TREE, model, spent)
+    assert verdict["failed"]  # the trace still counts as failed, not as a judge failure
+    assert (verdict["blamed_span_id"], verdict["blame_check"]) == ("tool", "fallback")
+    assert spent.calls == MAX_MODEL_ATTEMPTS
+
+
 def test_fallback_span_is_the_deepest_error_or_the_root():
     assert fallback_span(TREE) == "tool"
     healthy = span_tree("t2", span_id="only", status="ok")
