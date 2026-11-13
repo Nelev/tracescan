@@ -92,6 +92,14 @@ REQUEST_TIMEOUT_MS = 120_000
 # the judge sees one tree and runs once per trace in the window. Starting values; tune with the eval.
 MAX_TRACE_TOKENS = 20_000
 MAX_TRACE_COST_USD = 0.05
+# Model calls for a whole run, over all its judge and diagnose branches (TraceContext.run_spent).
+# Checked as each branch starts, not before each call, so a run can go over by what is already in
+# flight (up to MAX_PARALLEL_BRANCHES judge or MAX_PARALLEL_DIAGNOSES diagnose branches). An item
+# skipped for it is recorded as a judge or diagnosis failure. Each run segment starts a fresh
+# count, so a resumed run gets the budget again. Starting values.
+MAX_RUN_CALLS = 1_000
+MAX_RUN_TOKENS = 2_000_000
+MAX_RUN_COST_USD = 2.0
 # Traces one run judges at most, newest first: one judge call and one tree fetch each. The trace
 # server's own cap on a search is 200 (trace_store.const.MAX_LIMIT).
 MAX_JUDGED_TRACES = 200

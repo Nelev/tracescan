@@ -1,13 +1,15 @@
 """score_trace: one judge branch per trace, reached through Send with a TraceTask.
 
-It fetches the trace's tree once and asks the judge (agent.judge) whether the request failed; a failed verdict also gets what clustering reads of its blamed span
-(`failure_fields`), and each healthy span the judge picked gets its text (`agent.chunks.step_text`).
+It fetches the trace's tree once and asks the judge (agent.judge) whether the request failed; a
+failed verdict also gets what clustering reads of its blamed span (`failure_fields`), and each
+healthy span the judge picked gets its text (`agent.chunks.step_text`).
 The judge retries a transient model error (throttling, a timeout, a server error) call by call
 within the trace budget, which its own re-ask shares, so a burst of 429s across the run's parallel
 judge calls does not hide failures. Any error left, from the fetch or the model, records the trace
 in `judge_failures`, logged by exception type only, and the run goes on with the others.
 
-Every run appends one `judge_usage` entry, failed or not, so the spend shows.
+Every run appends one `judge_usage` entry, failed or not, so the spend shows. The run's budget:
+see MAX_RUN_COST_USD in agent.const.
 """
 
 import logging
@@ -18,7 +20,7 @@ from langgraph.runtime import Runtime
 from agent.chunks import step_key, step_text
 from agent.context import TraceContext
 from agent.judge import failure_fields, judge_trace
-from agent.model_guard import Spent
+from agent.model_guard import Spent, run_budget
 from agent.schemas import TraceTask
 
 logger = logging.getLogger(__name__)
@@ -32,20 +34,24 @@ async def score_trace(state: TraceTask, runtime: Runtime[TraceContext]) -> dict:
     trace_id = state["trace"]["trace_id"]
     context = runtime.context
     run = Spent()
-    try:
-        tree = await context.traces.get_trace_tree(trace_id)
-        verdict = await judge_trace(tree, context.judge_model or context.model, run)
-    except Exception as exc:
-        # Type name only: the message could carry span contents.
-        logger.error("judging %s failed: %s", trace_id, type(exc).__name__)
-        result: dict = {"judge_failures": [trace_id]}
+    result: dict = {"judge_failures": [trace_id]}  # unless it is judged below
+    if not context.run_spent.ok(run_budget()):
+        logger.warning("judging %s skipped: the run's budget is spent", trace_id)
     else:
-        if verdict["failed"]:
-            verdict |= failure_fields(tree, verdict["blamed_span_id"])
-        # The text each healthy pick is embedded as, built here while the tree is in hand.
-        verdict["healthy_spans"] = [
-            {"span_id": span_id, **step_key(tree, span_id), "text": step_text(tree, span_id)}
-            for span_id in verdict.pop("healthy_span_ids")
-        ]
-        result = {"verdicts": [verdict]}
+        try:
+            tree = await context.traces.get_trace_tree(trace_id)
+            verdict = await judge_trace(tree, context.judge_model or context.model, run)
+        except Exception as exc:
+            # Type name only: the message could carry span contents.
+            logger.error("judging %s failed: %s", trace_id, type(exc).__name__)
+        else:
+            if verdict["failed"]:
+                verdict |= failure_fields(tree, verdict["blamed_span_id"])
+            # The text each healthy pick is embedded as, built here while the tree is in hand.
+            verdict["healthy_spans"] = [
+                {"span_id": span_id, **step_key(tree, span_id), "text": step_text(tree, span_id)}
+                for span_id in verdict.pop("healthy_span_ids")
+            ]
+            result = {"verdicts": [verdict]}
+    context.run_spent += run
     return {**result, "judge_usage": [{"trace_id": trace_id, **asdict(run)}]}

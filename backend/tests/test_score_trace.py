@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 from langgraph.runtime import Runtime
 
+from agent import model_guard
 from agent.chunks import step_key, step_text
 from agent.const import MAX_MODEL_ATTEMPTS
 from agent.context import ClosedTraces
@@ -37,9 +38,15 @@ FAILED = TraceVerdict(
 FINE = TraceVerdict(reason="Every step worked.", score=1.0)
 
 
-async def score(model, trees=None, judge_model=None) -> dict:
+def judge_context(model, trees=None, judge_model=None):
+    """A run's context with `model` as its judge (unless `judge_model` is given)."""
     traces = FakeTraces(trees={"t1": TREE}) if trees is None else trees
-    context = replace(fake_context(traces, model), judge_model=judge_model)
+    return replace(fake_context(traces, model), judge_model=judge_model)
+
+
+async def score(model, trees=None, judge_model=None, context=None) -> dict:
+    """One judge branch for t1; pass `context` to run several branches of one run."""
+    context = context or judge_context(model, trees, judge_model)
     return await score_trace(
         TraceTask(trace=summary("t1").model_dump(mode="json")), Runtime(context=context)
     )
@@ -133,3 +140,29 @@ def test_error_type_reads_the_attribute_then_the_exception_event():
 
 def test_failure_fields_finds_a_nested_span():
     assert failure_fields(TREE, "root")["failing_span_name"] == "invoke_agent medas"
+
+
+# --- the run's budget
+
+
+@pytest.mark.anyio
+async def test_each_judged_trace_adds_its_spend_to_the_runs():
+    model = scripted(FINE)
+    context = judge_context(model)
+    await score(model, context=context)
+    await score(model, context=context)
+    assert (context.run_spent.calls, context.run_spent.tokens) == (2, 300)
+
+
+@pytest.mark.anyio
+async def test_a_trace_is_not_judged_once_the_run_is_past_its_budget(monkeypatch):
+    monkeypatch.setattr(model_guard, "MAX_RUN_TOKENS", 100)  # one judge call alone costs 150
+    model = scripted(FINE)
+    context = judge_context(model)
+    judged = await score(model, context=context)
+    skipped = await score(model, context=context)
+    assert [v["trace_id"] for v in judged["verdicts"]] == ["t1"]
+    # Skipped before the fetch and the call: recorded as not judged, with nothing spent.
+    assert skipped["judge_failures"] == ["t1"] and "verdicts" not in skipped
+    assert skipped["judge_usage"] == [{"trace_id": "t1", "calls": 0, "tokens": 0, "cost_usd": 0.0}]
+    assert len(model.seen) == 1

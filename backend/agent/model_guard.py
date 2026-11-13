@@ -22,6 +22,9 @@ from agent.const import (
     MAX_CLUSTER_COST_USD,
     MAX_CLUSTER_TOKENS,
     MAX_MODEL_ATTEMPTS,
+    MAX_RUN_CALLS,
+    MAX_RUN_COST_USD,
+    MAX_RUN_TOKENS,
     MAX_TRACE_COST_USD,
     MAX_TRACE_TOKENS,
     RETRY_DELAY_S,
@@ -46,6 +49,11 @@ def cluster_budget() -> Budget:
 
 def trace_budget() -> Budget:
     return Budget(MAX_MODEL_ATTEMPTS, MAX_TRACE_TOKENS, MAX_TRACE_COST_USD)
+
+
+def run_budget() -> Budget:
+    """What a whole run may spend, over all its branches (TraceContext.run_spent)."""
+    return Budget(MAX_RUN_CALLS, MAX_RUN_TOKENS, MAX_RUN_COST_USD)
 
 
 @dataclass
