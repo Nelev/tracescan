@@ -14,10 +14,12 @@ import {
   parseRunOverview,
   pipeline,
   type RunOverview,
+  reachedTraceLimit,
   signatureParts,
   totalUsage,
   verificationText,
 } from "./run-overview.ts";
+import { MAX_JUDGED_TRACES } from "./types.ts";
 
 const CLUSTER = {
   cluster_id: "c0",
@@ -375,4 +377,21 @@ test("a diagnosis's healthy-twin count is a count, null, or missing", () => {
   assert.notEqual(withCount(null), null);
   assert.notEqual(parseRunOverview(PAUSED), null);
   assert.equal(withCount("3"), null);
+});
+
+test("a run that collected as many traces as it may judge says older ones were not judged", () => {
+  assert.equal(reachedTraceLimit({ traces: MAX_JUDGED_TRACES }), true);
+  assert.equal(reachedTraceLimit({ traces: MAX_JUDGED_TRACES - 1 }), false);
+  const full = read({
+    ...PAUSED,
+    summary: { ...SUMMARY, traces: MAX_JUDGED_TRACES },
+  });
+  const collect = pipeline(full).find((s) => s.key === "collect");
+  assert.equal(collect?.detail, `${MAX_JUDGED_TRACES} newest traces`);
+  assert.equal(
+    pipeline(read(PAUSED))
+      .find((s) => s.key === "collect")
+      ?.detail.includes("newest"),
+    false,
+  );
 });

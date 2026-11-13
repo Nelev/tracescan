@@ -12,7 +12,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { RunRequest } from "@/lib/types";
+import { MAX_JUDGED_TRACES, type RunRequest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useRunStatus } from "./run-stream";
 import { SEGMENT_ITEM, SEGMENT_LIST } from "./styles";
@@ -185,6 +185,10 @@ export function NewRun() {
                 </label>
               ))}
             </div>
+            <p className="type-body text-muted-foreground">
+              A run judges at most the {MAX_JUDGED_TRACES} newest traces in the
+              window.
+            </p>
           </fieldset>
 
           {win === "custom" && (
