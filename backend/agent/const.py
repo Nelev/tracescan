@@ -95,6 +95,10 @@ MAX_TRACE_COST_USD = 0.05
 # Traces one run judges at most, newest first: one judge call and one tree fetch each. The trace
 # server's own cap on a search is 200 (trace_store.const.MAX_LIMIT).
 MAX_JUDGED_TRACES = 200
+# One-trace (`isolated`) clusters one run diagnoses at most, in the order clustering made them;
+# every real cluster is diagnosed. The rest still become proposals, undiagnosed (draft_proposals),
+# so a noisy window cannot turn into one diagnoser call per stray failure.
+MAX_ISOLATED_DIAGNOSES = 10
 
 # HDBSCAN fails when it gets fewer traces than either of its size settings.
 assert max(MIN_CLUSTER_SIZE, MIN_SAMPLES) <= MIN_TRACES_FOR_HDBSCAN

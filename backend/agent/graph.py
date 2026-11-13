@@ -24,7 +24,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.store.base import BaseStore
 from langgraph.types import Send, interrupt
 
-from agent.const import MAX_PARALLEL_BRANCHES
+from agent.const import MAX_ISOLATED_DIAGNOSES, MAX_PARALLEL_BRANCHES
 from agent.context import TraceContext
 from agent.judge import failed_summary
 from agent.nodes.apply_actions import apply_actions
@@ -75,8 +75,13 @@ def route_after_scores(state: TriageState) -> str:
 
 
 def route_after_cluster(state: TriageState) -> list[Send] | str:
-    """One parallel diagnose branch per cluster; no clusters (e.g. all noise): end the run."""
+    """One parallel diagnose branch per cluster, but at most MAX_ISOLATED_DIAGNOSES for one-trace
+    (`isolated`) clusters; the others get no diagnosis and still become proposals. No clusters
+    (e.g. all noise): end the run."""
     failed = {t["trace_id"]: t for t in state.get("failed_traces", [])}
+    clusters = state.get("clusters", [])
+    isolated = [c["cluster_id"] for c in clusters if c["method"] == "isolated"]
+    undiagnosed = set(isolated[MAX_ISOLATED_DIAGNOSES:])
 
     def failing_span(cluster: Cluster) -> FailingSpan | None:
         t = next((failed[i] for i in cluster["exemplar_trace_ids"] if i in failed), None)
@@ -91,7 +96,8 @@ def route_after_cluster(state: TriageState) -> list[Send] | str:
             "diagnose_cluster",
             ClusterTask(cluster=c, target_app=state["target_app"], failing_span=failing_span(c)),
         )
-        for c in state.get("clusters", [])
+        for c in clusters
+        if c["cluster_id"] not in undiagnosed
     ] or END
 
 

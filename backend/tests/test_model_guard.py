@@ -58,6 +58,17 @@ async def test_a_provider_that_reports_no_cost_costs_nothing_against_the_cost_ca
 
 
 @pytest.mark.anyio
+async def test_a_null_cost_counts_as_nothing_and_keeps_the_answer():
+    # What a provider sends when the usage has a cost key but no figure: the call was answered and
+    # paid for, so it must not fail on the count.
+    out = answer()
+    out["raw"].response_metadata = {"cost": None}
+    spent = Spent()
+    assert await guarded(returns(out), spent) == "diagnosis"
+    assert (spent.calls, spent.tokens, spent.cost_usd) == (1, 150, 0)
+
+
+@pytest.mark.anyio
 async def test_a_call_that_raises_is_still_an_attempt_and_is_not_swallowed():
     spent = Spent()
     with pytest.raises(FakeApiError):
