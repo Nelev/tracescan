@@ -70,6 +70,7 @@ type Props = {
  * through the rows; one button steps to the next finding still to decide (else simply the next),
  * wrapping to the first after the last.
  * It opens on the finding the page asked for, else the first one to decide, else the first.
+ * A run with one finding shows only its card: no list, no step bar.
  */
 export function FindingsBrowser({
   clusters,
@@ -133,6 +134,24 @@ export function FindingsBrowser({
     select(next.cluster_id, true);
   }
 
+  const card = (
+    <ClusterCard
+      key={current.cluster_id}
+      cluster={current}
+      focus={ask?.clusterId === current.cluster_id ? ask.ask : null}
+      live={live(current.cluster_id)}
+      proposal={proposals.get(current.cluster_id) ?? null}
+      decision={decisionOf(current)}
+      onDecide={onDecide ? (d) => onDecide(current.cluster_id, d) : null}
+      deciding={sending}
+    />
+  );
+
+  // One finding: a list of one row and a step bar with nowhere to go would only repeat the card.
+  if (clusters.length === 1) {
+    return <div className="min-w-0 max-w-5xl">{card}</div>;
+  }
+
   const detail = (
     <div className="flex min-w-0 flex-col gap-3">
       <nav
@@ -164,21 +183,12 @@ export function FindingsBrowser({
           </Button>
         )}
       </nav>
-      <ClusterCard
-        key={current.cluster_id}
-        cluster={current}
-        focus={ask?.clusterId === current.cluster_id ? ask.ask : null}
-        live={live(current.cluster_id)}
-        proposal={proposals.get(current.cluster_id) ?? null}
-        decision={decisionOf(current)}
-        onDecide={onDecide ? (d) => onDecide(current.cluster_id, d) : null}
-        deciding={sending}
-      />
+      {card}
     </div>
   );
 
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
+    <div className="grid items-start gap-6 xl:grid-cols-[20rem_minmax(0,1fr)]">
       <ol
         aria-label="Findings in this run"
         onKeyDown={onKeyDown}
