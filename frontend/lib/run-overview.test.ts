@@ -99,6 +99,15 @@ test("a run on contract is read whole", () => {
   assert.equal(o.clusters[1].diagnosis, null);
 });
 
+test("a run says whether it can be resumed, and an older server's answer reads as no", () => {
+  assert.equal(
+    read({ ...PAUSED, status: "failed", resumable: true }).resumable,
+    true,
+  );
+  assert.equal(read(PAUSED).resumable, false);
+  assert.equal(read({ ...PAUSED, resumable: "yes" }).resumable, false);
+});
+
 test("one cluster off contract makes the whole run unreadable", () => {
   assert.equal(
     parseRunOverview({

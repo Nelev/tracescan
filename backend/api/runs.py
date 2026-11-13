@@ -6,10 +6,12 @@
 - `GET /v1/runs/{run_id}/detail` returns its clusters: signatures, trace ids, diagnoses with the
   span ids they cite, spend and decisions.
 - `POST /v1/runs/{run_id}/review` resumes it with one decision per proposal.
+- `POST /v1/runs/{run_id}/resume/stream` goes on with a run that failed or was aborted, from its
+  last checkpoint, and streams it like a new one.
 
 Every route needs a Clerk session token (auth.session, required for this router in main.py):
 `401` without a valid one, `503` when it cannot be verified, both before a run or a trace session
-is opened. Starting a run is also limited per person (api.rate_limit, a `429`). Who starts or
+is opened. Starting or resuming a run is also limited per person (api.rate_limit, a `429`). Who starts or
 reviews a run is recorded under the name the token carries, never one the request sends.
 
 No response carries raw state: failed traces can hold clinical span data. What leaves the server
@@ -32,6 +34,7 @@ from auth import CurrentUser
 from runs import (
     Ended,
     IncompleteDecisions,
+    NotResumable,
     NotWaitingForReview,
     Progress,
     RunDetail,
@@ -81,6 +84,21 @@ async def _open_run(
         raise _run_failed() from None
 
 
+async def _open_resume(
+    run_id: UUID, runs: Annotated[Runs, Depends(_runs)]
+) -> AsyncIterator[StartedRun]:
+    """Own the resumed run for the whole response, as `_open_run` owns a new one."""
+    try:
+        async with runs.resume(str(run_id)) as run:
+            yield run
+    except RunNotFound:
+        raise _run_not_found() from None
+    except NotResumable:
+        raise HTTPException(status_code=409, detail="run cannot be resumed") from None
+    except RunFailed:
+        raise _run_failed() from None
+
+
 @router.post("/runs/stream", response_class=EventSourceResponse, dependencies=[Depends(limit_runs)])
 async def stream_run(
     run: Annotated[StartedRun, Depends(_open_run)], request: Request
@@ -97,6 +115,30 @@ async def stream_run(
     by its own call, only the next one is. A message whose call failed, was too slow or was past
     the run's call limit has none. A failed run sends no proposals.
     """
+    async for sse in _sse(run, request):
+        yield sse
+
+
+@router.post(
+    "/runs/{run_id}/resume/stream",
+    response_class=EventSourceResponse,
+    dependencies=[Depends(limit_runs)],
+)
+async def resume_run(
+    run: Annotated[StartedRun, Depends(_open_resume)], request: Request
+) -> AsyncIterator[ServerSentEvent]:
+    """Go on with a run that failed or was aborted, from its last checkpoint, and stream it with
+    the same messages as `POST /v1/runs/stream`; only what had not finished runs again.
+
+    `409` when the run did not stop (it runs, waits for review or ended), has nothing left to
+    run, or is being resumed right now; `404` for an unknown run; `502` when it cannot reopen.
+    """
+    async for sse in _sse(run, request):
+        yield sse
+
+
+async def _sse(run: StartedRun, request: Request) -> AsyncIterator[ServerSentEvent]:
+    """A run's events as server-sent events, each message followed by its UI spec."""
     ui = UiSpecs(request.app.state.ui_spec_model)
 
     async def message(event: str, data: dict) -> AsyncIterator[ServerSentEvent]:

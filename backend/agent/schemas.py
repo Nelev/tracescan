@@ -207,6 +207,9 @@ class RegressionCase(BaseModel):
     category: FailureCategory
     exemplar_trace_ids: list[str]
     failing_spans: list[SpanRef]  # the spans the diagnosis cites
+    # The run that approved it (its thread id), set when it is written: with the cluster id, the
+    # key that keeps an apply that runs again (a resumed run) from writing it twice.
+    run_id: str | None = None
 
 
 class Proposal(BaseModel):

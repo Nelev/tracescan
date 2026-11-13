@@ -1,7 +1,7 @@
 """Test doubles shared by the graph and API tests."""
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -273,16 +273,41 @@ class InMemoryRunStore:
         )
 
     async def set_status(
-        self, run_id: str, status: StoredStatus, counts: RunCounts | None = None
-    ) -> None:
+        self,
+        run_id: str,
+        status: StoredStatus,
+        counts: RunCounts | None = None,
+        only_from: Collection[str] | None = None,
+    ) -> bool:
+        # No await before the run changes, so of two writes from the same status only one does.
         if run_id not in self.runs:
-            return
-        changes: dict = {"status": status}
-        if status in ENDED:
-            changes["ended_at"] = datetime.now(UTC)
+            return False
+        if only_from is not None and self.runs[run_id].status not in only_from:
+            return False
+        changes: dict = {
+            "status": status,
+            "ended_at": datetime.now(UTC) if status in ENDED else None,
+        }
         if counts is not None:
             changes |= asdict(counts)
         self.runs[run_id] = self.runs[run_id].model_copy(update=changes)
+        return True
+
+    async def record_decisions(
+        self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
+    ) -> None:
+        kept = {r.cluster_id: r for r in self.decided.get(run_id, [])}
+        for cluster_id, decision in decisions.items():
+            kept.setdefault(
+                cluster_id,
+                ReviewRecord(
+                    cluster_id=cluster_id,
+                    decision=decision,
+                    reviewer=reviewer,
+                    decided_at=datetime.now(UTC),
+                ),
+            )
+        self.decided[run_id] = sorted(kept.values(), key=lambda r: r.cluster_id)
 
     @asynccontextmanager
     async def reviewing(self, run_id: str, decisions: Mapping[str, Decision], reviewer: str):

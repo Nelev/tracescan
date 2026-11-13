@@ -6,6 +6,7 @@ appends the same regression cases. The issue text is the diagnoser's own prose, 
 a human approved before it got here; it stays on local disk and is never logged.
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -21,19 +22,38 @@ REGRESSION_FILE = "regression_cases.jsonl"
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
-def append_regression_cases(proposals: list[Proposal], out_dir: Path) -> list[str]:
+def _written(path: Path, run_id: str) -> set[str]:
+    """The cluster ids whose case `run_id` already appended to the file."""
+    if not path.exists():
+        return set()
+    lines = (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line)
+    return {case["cluster_id"] for case in lines if case.get("run_id") == run_id}
+
+
+def append_regression_cases(
+    proposals: list[Proposal], out_dir: Path, run_id: str | None = None
+) -> list[str]:
     """Append the regression case of each proposal that has one to `regression_cases.jsonl`, in
-    one append; return the log lines. A proposal without one (never diagnosed) adds nothing."""
+    one append, stamped with `run_id`; return the log lines. A proposal without one (never
+    diagnosed) adds nothing, and neither does a case this run already appended, so an apply that
+    runs again (a resumed run) does not repeat it. Without a run id nothing is skipped."""
     cases = {p.cluster_id: p.regression_case for p in proposals if p.regression_case is not None}
+    path = out_dir / REGRESSION_FILE
+    if run_id is not None:
+        done = _written(path, run_id)
+        cases = {c: case for c, case in cases.items() if c not in done}
     if not cases:
         return []
     out_dir.mkdir(parents=True, exist_ok=True)
-    with (out_dir / REGRESSION_FILE).open("a", encoding="utf-8") as file:
-        file.writelines(case.model_dump_json() + "\n" for case in cases.values())
+    with path.open("a", encoding="utf-8") as file:
+        file.writelines(
+            case.model_copy(update={"run_id": run_id}).model_dump_json() + "\n"
+            for case in cases.values()
+        )
     return [f"appended the regression case of {c} to {REGRESSION_FILE}" for c in cases]
 
 
-def write_dry_run(proposals: list[Proposal], out_dir: Path) -> list[str]:
+def write_dry_run(proposals: list[Proposal], out_dir: Path, run_id: str | None = None) -> list[str]:
     """Write each proposal's issue and regression case under `out_dir`; return the actions log.
 
     An issue goes to `issues/<cluster_id>.md`, replacing that file if an earlier run wrote it. A
@@ -54,4 +74,5 @@ def write_dry_run(proposals: list[Proposal], out_dir: Path) -> list[str]:
         issue.write_text(f"# {proposal.title}\n\n{proposal.body}", encoding="utf-8")
         log.append(f"[dry-run] wrote {ISSUES_DIR}/{issue.name}")
     # One append for the run, after its issues.
-    return log + [f"[dry-run] {line}" for line in append_regression_cases(proposals, out_dir)]
+    appended = append_regression_cases(proposals, out_dir, run_id)
+    return log + [f"[dry-run] {line}" for line in appended]

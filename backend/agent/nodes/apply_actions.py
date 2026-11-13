@@ -22,14 +22,16 @@ async def apply_actions(state: TriageState, runtime: Runtime[TraceContext]) -> d
         for p in state.get("proposals", [])
         if decisions.get(p["cluster_id"]) == "approve"
     ]
+    # The run's id (runs.Runs uses it as the thread id), there whenever the graph has a
+    # checkpointer. The issue markers and the regression cases are keyed on it, so an apply that
+    # runs again (a resumed run) opens and appends only what is still missing.
+    info = runtime.execution_info
+    run_id = info.thread_id if info is not None and info.thread_id else None
     if context.dry_run:
-        return {"actions_log": write_dry_run(approved, context.out_dir)}
+        return {"actions_log": write_dry_run(approved, context.out_dir, run_id)}
     if context.github is None:  # main.py refuses this at startup
         raise RuntimeError("DRY_RUN is off but there is no GitHub writer")
-    # The run's id (runs.Runs uses it as the thread id). The issue markers need it, or a retry
-    # could open an issue twice; it is there whenever the graph has a checkpointer.
-    info = runtime.execution_info
-    if info is None or not info.thread_id:
+    if run_id is None:
         raise RuntimeError("a real run needs a thread id")
-    log = await context.github.open_issues(info.thread_id, approved)
-    return {"actions_log": log + append_regression_cases(approved, context.out_dir)}
+    log = await context.github.open_issues(run_id, approved)
+    return {"actions_log": log + append_regression_cases(approved, context.out_dir, run_id)}

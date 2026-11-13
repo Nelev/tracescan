@@ -45,7 +45,14 @@ export class RunError extends Error {
   }
 }
 
-export const RUN_STREAM_PATH = "/api/runs/stream";
+const RUNS_PATH = "/api/runs";
+const runPath = (runId: string) => `${RUNS_PATH}/${encodeURIComponent(runId)}`;
+
+export const RUN_STREAM_PATH = `${RUNS_PATH}/stream`;
+
+/** Where a run that failed or was aborted is resumed, streamed like a new one. */
+export const resumeStreamPath = (runId: string) =>
+  `${runPath(runId)}/resume/stream`;
 
 export type RunStream = {
   status: number;
@@ -55,21 +62,27 @@ export type RunStream = {
 };
 
 /**
- * Starts a triage run and returns once the server has accepted it. Aborting `signal` closes the
+ * Opens a run's stream at `path`: `RUN_STREAM_PATH` with a `body` starts a run, `resumeStreamPath`
+ * with none resumes one. Returns once the server has accepted it. Aborting `signal` closes the
  * connection, which stops the run on the server.
  */
 export async function openRunStream(
-  body: RunRequest,
+  path: string,
+  body: RunRequest | null,
   signal: AbortSignal,
 ): Promise<RunStream> {
   let res: Response;
   try {
     res = await fetch(
-      RUN_STREAM_PATH,
+      path,
       await withSessionToken({
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        ...(body === null
+          ? {}
+          : {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }),
         signal,
       }),
     );
@@ -84,9 +97,6 @@ export async function openRunStream(
     messages: readSse(res.body),
   };
 }
-
-const RUNS_PATH = "/api/runs";
-const runPath = (runId: string) => `${RUNS_PATH}/${encodeURIComponent(runId)}`;
 
 /**
  * A JSON answer of the backend, read by `parse`, which returns null for a body that is off

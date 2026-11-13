@@ -19,7 +19,7 @@ from agent.schemas import Proposal
 from api import ui_spec
 from api.rate_limit import RUN_LIMIT
 from main import app, dry_run_setting
-from runs import Runs
+from runs import Ended, Progress, Runs
 from tests.fakes import (
     DIAGNOSIS,
     SPEC,
@@ -480,7 +480,7 @@ async def test_the_detail_of_a_paused_run_shows_each_cluster_and_its_diagnosis(c
     response = await client.get(f"/v1/runs/{run_id}/detail")
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"status", "summary", "clusters", "cluster_map"}
+    assert set(body) == {"status", "resumable", "summary", "clusters", "cluster_map"}
     assert body["status"] == "review_required" and body["summary"]["clusters"] == 1
     assert body["cluster_map"] is None  # two failures: too few to embed, so no map
     (cluster,) = body["clusters"]
@@ -792,3 +792,170 @@ async def test_the_app_refuses_to_start_with_dry_run_off_and_no_github_repo(monk
     with pytest.raises(RuntimeError):
         async with app.router.lifespan_context(app):
             pass
+
+
+# --- POST /v1/runs/{run_id}/resume/stream
+
+
+async def resume(client, run_id: str) -> httpx.Response:
+    return await client.post(f"/v1/runs/{run_id}/resume/stream")
+
+
+async def status_of(client, run_id: str) -> dict:
+    """The run's detail: where it stands and whether it can be resumed."""
+    response = await client.get(f"/v1/runs/{run_id}/detail")
+    assert response.status_code == 200
+    return response.json()
+
+
+class FailsOnce(FakeTraces):
+    """Trace access whose first search fails, like a trace store that was down for a moment."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.failed = False
+
+    async def search_traces(self, query):
+        if not self.failed:
+            self.failed = True
+            raise RuntimeError(f"span says: {PHI}")
+        return await super().search_traces(query)
+
+
+@pytest.mark.anyio
+async def test_a_failed_run_is_resumable_and_its_resume_goes_on_to_the_review(client):
+    traces = FailsOnce(
+        [summary("tr_1"), summary("tr_2")], {t: span_tree(t) for t in ("tr_1", "tr_2")}
+    )
+    use_runs(traces, fake_diagnoser(DIAGNOSIS))
+    run_id = await start(client)
+    failed = await status_of(client, run_id)
+    assert (failed["status"], failed["resumable"]) == ("failed", True)
+
+    response = await resume(client, run_id)
+    assert response.status_code == 200
+    events = parse_sse(response.text)
+    names = [name for name, _ in events]
+    assert events[0] == ("run_started", {"run_id": run_id})  # the same run, not a new one
+    assert "proposal" in names and names[-1] == "review_required"
+    resumed = await status_of(client, run_id)
+    assert (resumed["status"], resumed["resumable"]) == ("review_required", False)
+    assert (await listed(client))[0]["status"] == "review_required"
+    assert PHI not in response.text
+
+
+@pytest.mark.anyio
+async def test_a_run_whose_client_went_away_can_be_resumed(client):
+    use_runs(two_failures(), fake_diagnoser(DIAGNOSIS))
+    await run_with_a_stalled_client()
+    (run,) = await listed(client)
+    assert (await status_of(client, run["run_id"]))["resumable"]
+
+    events = parse_sse((await resume(client, run["run_id"])).text)
+    assert events[-1][0] == "review_required"
+
+
+@pytest.mark.anyio
+async def test_a_review_whose_apply_failed_is_resumed_at_the_apply_alone(
+    client, out_dir, monkeypatch
+):
+    opened: list[bool] = []
+    use_runs(model=fake_diagnoser(DIAGNOSIS), open_traces=counting_session(opened, two_failures()))
+    run_id = await start(client)
+
+    from agent.nodes import apply_actions
+
+    written = apply_actions.write_dry_run
+
+    def full_disk(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(apply_actions, "write_dry_run", full_disk)
+    review = {"decisions": {"c0": "approve"}}
+    assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 502
+    # The graph had taken the decisions: the run stopped at the apply, it does not wait any more.
+    stopped = await status_of(client, run_id)
+    assert (stopped["status"], stopped["resumable"]) == ("failed", True)
+    (decided,) = await app.state.run_store.reviews(run_id)
+    assert (decided.cluster_id, decided.decision, decided.reviewer) == ("c0", "approve", "local")
+    assert files_under(out_dir) == []
+
+    monkeypatch.setattr(apply_actions, "write_dry_run", written)
+    events = parse_sse((await resume(client, run_id)).text)
+    assert events[-1][0] == "run_completed"
+    assert opened == [True]  # the resume opened no trace session: it only applied the review
+    assert files_under(out_dir) == ["issues/c0.md", REGRESSION_FILE]
+    done = await status_of(client, run_id)
+    assert (done["status"], done["resumable"]) == ("completed", False)
+
+
+@pytest.mark.anyio
+async def test_a_run_that_did_not_stop_is_not_resumed(client):
+    use_runs()  # nothing failed in the window: it completes
+    completed = await start(client)
+    use_diagnosed_run()
+    waiting = await start(client)
+    for run_id in (completed, waiting):
+        response = await resume(client, run_id)
+        assert response.status_code == 409
+        assert response.json() == {"detail": "run cannot be resumed"}
+
+
+@pytest.mark.anyio
+async def test_a_run_that_failed_before_its_first_checkpoint_is_not_resumed(client):
+    use_runs(open_traces=broken_session)
+    assert (await post_stream(client)).status_code == 502
+    (run,) = await listed(client)
+    assert (await status_of(client, run["run_id"]))["resumable"] is False
+    assert (await resume(client, run["run_id"])).status_code == 409
+
+
+@pytest.mark.anyio
+async def test_resuming_an_unknown_run_is_404_and_a_malformed_id_422(client):
+    assert (await resume(client, str(uuid4()))).status_code == 404
+    assert (await resume(client, "not-a-uuid")).status_code == 422
+
+
+@pytest.mark.anyio
+async def test_a_resume_counts_against_the_run_limit(client):
+    use_runs(ExplodingTraces())
+    run_id = await start(client)
+    for _ in range(RUNS_PER_WINDOW - 1):
+        await resume(client, run_id)  # each fails again, and each counts
+    assert (await resume(client, run_id)).status_code == 429
+
+
+# --- the stream's status writes, against a review
+
+
+async def until_paused(run) -> None:
+    """Read the run's events up to the moment its graph pauses at the review."""
+    async for event in run.events:
+        if isinstance(event, Progress) and event.data.get("event") == "node_paused":
+            return
+    raise AssertionError("the run never paused")
+
+
+@pytest.mark.anyio
+async def test_a_run_left_once_it_paused_still_waits_for_review(client):
+    use_diagnosed_run()
+    async with app.state.runs.start("medas", "local") as run:
+        await until_paused(run)  # then the client goes, before the stream's last messages
+    assert (await listed(client))[0]["status"] == "review_required"
+    review = {"decisions": {"c0": "reject"}}
+    assert (await client.post(f"/v1/runs/{run.run_id}/review", json=review)).status_code == 200
+
+
+@pytest.mark.anyio
+async def test_a_review_taken_while_the_stream_is_open_is_not_undone_by_it(client):
+    use_diagnosed_run()
+    runs: Runs = app.state.runs
+    async with runs.start("medas", "local") as run:
+        await until_paused(run)
+        reviewed = await runs.review(run.run_id, {"c0": "reject"}, "ana")
+        assert reviewed.status == "completed"
+        rest = [event async for event in run.events]  # the stream's last messages, after it
+    assert isinstance(rest[-1], Ended)
+    (listed_run,) = await listed(client)
+    assert listed_run["status"] == "completed"
+    assert (await status_of(client, run.run_id))["status"] == "completed"

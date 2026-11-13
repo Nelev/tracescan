@@ -63,6 +63,21 @@ def test_regression_cases_are_appended_one_line_each(tmp_path):
     assert [json.loads(line)["cluster_id"] for line in lines] == ["c0", "c1", "c2"]
 
 
+def test_an_apply_that_runs_again_does_not_repeat_its_regression_cases(tmp_path):
+    # A resumed run applies its review again: the issue is rewritten, its case is not appended twice.
+    first = write_dry_run([proposal("c0")], tmp_path, "run-1")
+    again = write_dry_run([proposal("c0"), proposal("c1")], tmp_path, "run-1")
+    other = write_dry_run([proposal("c0")], tmp_path, "run-2")  # another run's c0 is its own
+    lines = [json.loads(line) for line in (tmp_path / REGRESSION_FILE).read_text().splitlines()]
+    assert [(c["run_id"], c["cluster_id"]) for c in lines] == [
+        ("run-1", "c0"),
+        ("run-1", "c1"),
+        ("run-2", "c0"),
+    ]
+    assert len(first) == len(other) == 2 and again[-1].endswith(f"c1 to {REGRESSION_FILE}")
+    assert not any(f"c0 to {REGRESSION_FILE}" in line for line in again)
+
+
 def test_nothing_to_write_creates_nothing(tmp_path):
     assert write_dry_run([], tmp_path) == []
     assert files_under(tmp_path) == []

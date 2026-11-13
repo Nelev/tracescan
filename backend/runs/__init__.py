@@ -12,7 +12,14 @@ from runs.schemas import (
     RunSummary,
     StartedRun,
 )
-from runs.service import IncompleteDecisions, NotWaitingForReview, RunFailed, RunNotFound, Runs
+from runs.service import (
+    IncompleteDecisions,
+    NotResumable,
+    NotWaitingForReview,
+    RunFailed,
+    RunNotFound,
+    Runs,
+)
 from runs.store import PostgresRunStore
 
 __all__ = [
@@ -20,6 +27,7 @@ __all__ = [
     "Ended",
     "Failed",
     "IncompleteDecisions",
+    "NotResumable",
     "NotWaitingForReview",
     "PostgresRunStore",
     "Progress",

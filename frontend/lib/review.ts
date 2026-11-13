@@ -152,6 +152,7 @@ export function retryAfterSeconds(header: string | null): number | null {
 }
 
 const UNREACHABLE = "Could not reach the backend. Check that it is running.";
+const UNKNOWN_RUN = "The server does not know this run.";
 
 /** A 401 from the backend: the session token was missing or no longer good. */
 export const SIGNED_OUT =
@@ -164,8 +165,13 @@ export function startProblem({ status, retryAfterS }: Failure): string {
       return UNREACHABLE;
     case 401:
       return SIGNED_OUT;
+    case 404:
+      return UNKNOWN_RUN;
+    case 409:
+      return "This run cannot be resumed: it is running, waits for review, has ended, or is being resumed already.";
     case 429: {
-      const base = "You have started as many runs as allowed for now.";
+      const base =
+        "You have started or resumed as many runs as allowed for now.";
       if (retryAfterS == null) return `${base} Try again later.`;
       const minutes = Math.max(1, Math.ceil(retryAfterS / 60));
       return `${base} Try again in ${formatAge(minutes * 60_000)}.`;
@@ -180,7 +186,7 @@ export function loadProblem({ status, unreadable }: Failure): string {
   if (unreadable) return "The server's answer for this run could not be read.";
   if (status === null) return UNREACHABLE;
   if (status === 401) return SIGNED_OUT;
-  if (status === 404) return "The server does not know this run.";
+  if (status === 404) return UNKNOWN_RUN;
   return `The run could not be loaded (HTTP ${status}).`;
 }
 

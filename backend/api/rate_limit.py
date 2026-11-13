@@ -1,10 +1,11 @@
 """How often one person may start a run: slowapi, keyed on the signed-in user.
 
-Starting a run is the one expensive call (a judge call per trace, the diagnoser's calls, the UI
-spec calls, a trace server subprocess), so it is the only one limited. The limit sits on a
-dependency, `limit_runs`, not on the route: slowapi's decorator checks when the decorated function
-is called, and FastAPI calls a route only after every dependency, `_open_run` included, has run, so
-a limit on the route would refuse a run that had already started. A route decorator's dependencies
+Starting or resuming a run is the one expensive call (a judge call per trace, the diagnoser's
+calls, the UI spec calls, a trace server subprocess), so it is the only one limited, by one count
+for both. The limit sits on a dependency, `limit_runs`, not on the route: slowapi's decorator
+checks when the decorated function is called, and FastAPI calls a route only after every
+dependency, `_open_run` included, has run, so a limit on the route would refuse a run that had
+already started. A route decorator's dependencies
 run after the router's session check and before the route's own parameters, so a refused request
 opens no trace session and records no run.
 
@@ -34,7 +35,9 @@ def _user_key(request: Request) -> str:
 
 # One instance for the process: `@limiter.limit` registers its limit on this instance at import.
 # headers_enabled adds Retry-After (and X-RateLimit-*) to a 429, which the frontend reads.
-limiter = Limiter(key_func=_user_key, headers_enabled=True)
+# key_style="endpoint" counts by the limited function, not by URL: starting a run and resuming one
+# (whose URL holds the run id) share one count, `limit_runs`'s.
+limiter = Limiter(key_func=_user_key, headers_enabled=True, key_style="endpoint")
 
 
 @limiter.limit(RUN_LIMIT)

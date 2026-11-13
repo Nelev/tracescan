@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowLeft,
   ListChecks,
+  Play,
   RotateCw,
   UserCheck,
 } from "lucide-react";
@@ -219,6 +220,13 @@ export function RunView({
             </span>
           )}
           <span className="ml-auto flex gap-2">
+            {overview?.resumable && run.phase !== "running" && (
+              // It stopped with steps left: go on from its last checkpoint, in this window.
+              <Button onClick={() => run.resume(runId)}>
+                <Play aria-hidden="true" />
+                Resume run
+              </Button>
+            )}
             {streaming ? (
               <Button variant="outline" onClick={run.cancel}>
                 Cancel run

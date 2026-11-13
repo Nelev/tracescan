@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from db.engine import create_engine, sqlalchemy_url
 from runs.schemas import RunCounts
-from runs.store import NotClaimable, PostgresRunStore
+from runs.store import RESUMABLE, RUNNING, NotClaimable, PostgresRunStore
 from tests.fakes import InMemoryRunStore
 
 SINCE = datetime(2026, 11, 5, 9, 0, tzinfo=UTC)
@@ -186,3 +186,68 @@ async def test_a_row_left_in_progress_can_be_reviewed(store):
     # The caller has seen in the checkpoint that the run waits; the row only missed that write.
     run_id = await new_run(store, "in_progress")
     assert not await refused(store, run_id)
+
+
+# --- guarded writes and resumes
+
+
+@pytest.mark.anyio
+async def test_a_guarded_write_moves_only_a_run_in_one_of_its_statuses(store):
+    run_id = await new_run(store, "in_progress")
+    await store.set_status(run_id, "review_required", DONE, only_from=RUNNING)
+    assert (await store.get_run(run_id)).status == "review_required"
+
+    await store.set_status(run_id, "aborted", only_from=RUNNING)  # too late: it waits for review
+    run = await store.get_run(run_id)
+    assert (run.status, run.ended_at) == ("review_required", None)
+
+
+@pytest.mark.anyio
+async def test_a_guarded_write_that_waited_on_a_review_changes_nothing(store):
+    if isinstance(store, InMemoryRunStore):
+        pytest.skip("row locks are Postgres's")
+    run_id = await new_run(store, "in_progress")
+    async with store.reviewing(run_id, {"c0": "approve"}, "bo") as finish:
+        # The stream's late write, while the review holds the row.
+        late = asyncio.create_task(
+            store.set_status(run_id, "review_required", None, only_from=RUNNING)
+        )
+        await asyncio.sleep(0.2)
+        assert not late.done()  # it waits on the review's row lock
+        await finish("completed", DONE)
+    await late  # then sees the review's status, not the one it read before, and changes nothing
+    assert (await store.get_run(run_id)).status == "completed"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stopped", ["failed", "aborted"])
+async def test_a_stopped_run_is_taken_back_by_one_resume_only(store, stopped):
+    run_id = await new_run(store, "in_progress")
+    await store.set_status(run_id, stopped)
+    assert await store.set_status(run_id, "in_progress", only_from=RESUMABLE)
+    run = await store.get_run(run_id)
+    assert (run.status, run.ended_at) == ("in_progress", None)  # running again
+    # The second resume: it runs already, so nothing changes.
+    assert not await store.set_status(run_id, "in_progress", only_from=RESUMABLE)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", ["in_progress", "review_required", "completed"])
+async def test_a_run_that_did_not_stop_is_not_taken_by_a_resume(store, status):
+    run_id = await new_run(store, status)
+    assert not await store.set_status(run_id, "in_progress", only_from=RESUMABLE)
+    assert (await store.get_run(run_id)).status == status
+    assert not await store.set_status(str(uuid4()), "in_progress")  # an unknown run either
+
+
+@pytest.mark.anyio
+async def test_decisions_recorded_outside_a_review_keep_the_ones_already_there(store):
+    run_id = await new_run(store)
+    async with store.reviewing(run_id, {"c0": "approve"}, "bo") as finish:
+        await finish("completed", DONE)
+    await store.record_decisions(run_id, {"c0": "reject", "c1": "reject"}, "ana")
+    decided = await store.reviews(run_id)
+    assert [(d.cluster_id, d.decision, d.reviewer) for d in decided] == [
+        ("c0", "approve", "bo"),
+        ("c1", "reject", "ana"),
+    ]

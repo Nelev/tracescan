@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { openRunStream, RUN_STREAM_PATH, RunError } from "@/lib/api";
+import {
+  openRunStream,
+  RUN_STREAM_PATH,
+  RunError,
+  resumeStreamPath,
+} from "@/lib/api";
 import {
   foldEvent,
   isFailure,
@@ -181,10 +186,15 @@ export function useRunStream() {
 
   // Stable for the hook's life (they read only the dispatcher and a ref), so the provider's
   // run-status context changes only when the status does.
-  const start = useCallback(async (body: RunRequest) => {
+  const open = useCallback(async (body: RunRequest | null, path: string) => {
+    abortRef.current?.abort(); // one stream per window: a new one replaces the last
     const controller = new AbortController();
     abortRef.current = controller;
-    const batch = createBatcher(dispatch);
+    // A replaced stream still ends (its catch sees the abort) after the new one has started:
+    // from then on it must not dispatch, or it would end the new run as cancelled.
+    const batch = createBatcher((action) => {
+      if (abortRef.current === controller) dispatch(action);
+    });
     const t0 = performance.now();
     const note = (text: string) => batch.push({ type: "line", line: { text } });
     const end = (phase: Ending, error?: string) => {
@@ -201,10 +211,10 @@ export function useRunStream() {
       stop("lost", "connection lost", text, performance.now() - t0);
 
     dispatch({ type: "start", at: t0 });
-    note(`POST ${RUN_STREAM_PATH}  ${JSON.stringify(body)}`);
+    note(`POST ${path}${body === null ? "" : `  ${JSON.stringify(body)}`}`);
 
     try {
-      const stream = await openRunStream(body, controller.signal);
+      const stream = await openRunStream(path, body, controller.signal);
       note(`${stream.status} ${stream.contentType.split(";")[0]}`);
 
       let outcome: Outcome | null = null;
@@ -244,6 +254,16 @@ export function useRunStream() {
     }
   }, []);
 
+  /** Start a new run. */
+  const start = useCallback(
+    (body: RunRequest) => open(body, RUN_STREAM_PATH),
+    [open],
+  );
+  /** Go on with a run that failed or was aborted, from its last checkpoint. */
+  const resume = useCallback(
+    (runId: string) => open(null, resumeStreamPath(runId)),
+    [open],
+  );
   const cancel = useCallback(() => abortRef.current?.abort(), []);
   const markReviewed = useCallback(
     (runId: string) => dispatch({ type: "reviewed", runId }),
@@ -261,6 +281,7 @@ export function useRunStream() {
     messages: state.messages,
     live: state.live,
     start,
+    resume,
     cancel,
     markReviewed,
   };
