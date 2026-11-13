@@ -154,7 +154,7 @@ export function ConsoleDock({
             </span>
             {running && (
               <Button variant="outline" size="sm" onClick={run.cancel}>
-                Cancel run
+                Stop run
               </Button>
             )}
           </footer>

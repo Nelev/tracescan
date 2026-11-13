@@ -36,12 +36,12 @@ export const DOCK_STATUS: Record<
   lost: {
     label: "Connection lost",
     tone: "destructive",
-    line: "The connection to the run was lost.",
+    line: "The connection to the run was lost. You can resume it from its page.",
   },
   cancelled: {
-    label: "Cancelled",
+    label: "Stopped",
     tone: "stopped",
-    line: "You cancelled the run.",
+    line: "You stopped the run. You can resume it from its page.",
   },
 };
 

@@ -67,7 +67,7 @@ function statusOf(
 ): { label: string; tone: StatusTone } | null {
   if (stream?.phase === "running") return { label: "Running", tone: "info" };
   if (stream?.phase === "cancelled")
-    return { label: "Cancelled", tone: "stopped" };
+    return { label: "Stopped", tone: "stopped" };
   if (stream?.phase === "lost")
     return { label: "Connection lost", tone: "destructive" };
   return overview ? RUN_STATUS[overview.status] : null;
@@ -145,6 +145,9 @@ export function RunView({
     (signal) => getRunOverview(runId, signal),
     true,
     `${stream?.live.checkpoints ?? 0}:${stream?.phase ?? ""}:${paused}:${refreshes}:${reviews}`,
+    // A stream that was stopped or lost: the server records the run as stopped (and resumable)
+    // only once it has seen the connection close, so read it again a moment later.
+    stream?.phase === "cancelled" || stream?.phase === "lost",
   );
   // A run streaming in this window may not have a checkpoint to read yet.
   const overview =
@@ -229,7 +232,7 @@ export function RunView({
             )}
             {streaming ? (
               <Button variant="outline" onClick={run.cancel}>
-                Cancel run
+                Stop run
               </Button>
             ) : (
               <Button
