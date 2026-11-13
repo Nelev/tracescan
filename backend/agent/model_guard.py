@@ -103,7 +103,9 @@ async def guarded(ask: Callable[[], Awaitable[Any]], spent: Spent):
     out = await ask()
     raw = out["raw"]
     spent.tokens += (raw.usage_metadata or {}).get("total_tokens", 0)
-    spent.cost_usd += raw.response_metadata.get("cost", 0.0)
+    # A provider may send no cost or `"cost": null`: count it as 0 (the token cap still applies)
+    # rather than fail a call that has already been answered and paid for.
+    spent.cost_usd += float(raw.response_metadata.get("cost") or 0.0)
     if out["parsed"] is None:
         raise out["parsing_error"]
     return out["parsed"]

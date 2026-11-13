@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from langgraph.types import Send
 
+from agent.const import MAX_ISOLATED_DIAGNOSES
 from agent.graph import (
     build_graph,
     join_scores,
@@ -13,6 +14,7 @@ from agent.graph import (
     route_after_review,
     route_after_scores,
 )
+from agent.schemas import Cluster, ClusterMethod
 from agent.state import TriageState
 from tests.fakes import FakeTraces, fake_context, summary
 from trace_store.models import TraceSummary
@@ -95,8 +97,8 @@ def test_routes():
     assert route_after_scores(state(failed_traces=[{"trace_id": "t"}])) == "cluster_failures"
     assert route_after_cluster(state()) == "__end__"
     clusters = [
-        {"cluster_id": "c0", "exemplar_trace_ids": ["t1", "t2"]},
-        {"cluster_id": "c1", "exemplar_trace_ids": ["t3"]},
+        {"cluster_id": "c0", "method": "hdbscan", "exemplar_trace_ids": ["t1", "t2"]},
+        {"cluster_id": "c1", "method": "step_error", "exemplar_trace_ids": ["t3"]},
     ]
     failed = [
         {"trace_id": t, "failing_span_id": f"s{t[1]}", "failing_span_name": "lookup"}
@@ -143,3 +145,24 @@ def test_join_scores_keeps_the_failed_traces_newest_first_with_their_failure():
         "min_score": 0.1,
         "signature": "execute_tool lookup ToolReportedError",
     }
+
+
+def test_one_trace_clusters_past_the_cap_get_no_diagnose_branch():
+    def cluster(i: int, method: ClusterMethod) -> Cluster:
+        trace = f"t{i}"
+        return Cluster(
+            cluster_id=f"c{i}",
+            trace_ids=[trace],
+            signature="lookup: error",
+            exemplar_trace_ids=[trace],
+            method=method,
+        )
+
+    isolated = [cluster(i, "isolated") for i in range(1, MAX_ISOLATED_DIAGNOSES + 3)]
+    sends = route_after_cluster(
+        TriageState(target_app="medas", clusters=[cluster(0, "hdbscan"), *isolated])
+    )
+    assert isinstance(sends, list)
+    sent = [s.arg["cluster"]["cluster_id"] for s in sends]
+    # Every real cluster, then the first isolated ones up to the cap, in clustering's order.
+    assert sent == ["c0", *[c["cluster_id"] for c in isolated[:MAX_ISOLATED_DIAGNOSES]]]
