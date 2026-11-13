@@ -15,7 +15,7 @@ from dataclasses import asdict
 
 from langgraph.runtime import Runtime
 
-from agent.chunks import span_name, step_text
+from agent.chunks import step_key, step_text
 from agent.context import TraceContext
 from agent.judge import failure_fields, judge_trace
 from agent.model_guard import Spent
@@ -44,7 +44,7 @@ async def score_trace(state: TraceTask, runtime: Runtime[TraceContext]) -> dict:
             verdict |= failure_fields(tree, verdict["blamed_span_id"])
         # The text each healthy pick is embedded as, built here while the tree is in hand.
         verdict["healthy_spans"] = [
-            {"span_id": span_id, "step": span_name(tree, span_id), "text": step_text(tree, span_id)}
+            {"span_id": span_id, **step_key(tree, span_id), "text": step_text(tree, span_id)}
             for span_id in verdict.pop("healthy_span_ids")
         ]
         result = {"verdicts": [verdict]}

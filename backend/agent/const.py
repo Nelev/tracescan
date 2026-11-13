@@ -21,7 +21,13 @@ MAX_HEALTHY_PICKS = 3
 # failed trace never gives one: agent.judge.healthy_picks relies on that.
 HEALTHY_MIN_SCORE = 0.9
 # Healthy calls of a cluster's failing step the diagnoser is shown (runs.healthy similar()).
+# At most this many: fewer when not enough compatible calls are near enough.
 HEALTHY_TWINS = 3
+# The farthest (cosine distance, local embedder) a healthy call may be from the failed step's
+# text and still be shown as its twin: a safety net, just above every same-step pair of the
+# seeded day (0.044 to 0.097). bge-small bunches its distances (other steps' nearest texts sit at
+# 0.053 to 0.11), so the hard filters in runs.healthy decide relevance, not this number.
+MAX_TWIN_DISTANCE = 0.12
 
 # An OpenRouter slug ("vendor/model"); the DIAGNOSER_MODEL environment variable overrides it.
 DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"

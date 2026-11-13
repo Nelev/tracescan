@@ -2,6 +2,37 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("Other entry points"); the code is in `backend/eval/`.
 
+## Healthy twins: compatibility filters and fewer than three (2026-11-13)
+
+### Question
+
+Which healthy calls may the diagnoser compare a failed step with, and when should it see fewer than three?
+
+### What changed
+
+The collector keeps `service.version` and the telemetry `schema_url` on every span (migration 0007). A healthy pick is stored with its `StepKey` (step, operation, app version, schema), and `similar` hard-filters on all of it plus the app and the chunk template version, in the same query as the vector search. `pick_twins` then drops candidates past `MAX_TWIN_DISTANCE` and merges identical texts into one twin with a count.
+
+### Results
+
+No model calls: `step_text` of every error span of the seeded day (end 2026-01-15) against the healthy calls of the same step, embedded with bge-small.
+
+| Pair | Cosine distance |
+| --- | --- |
+| Failed step vs healthy calls of the same step | 0.044 to 0.097 |
+| Failed step vs the nearest healthy calls of other steps | 0.053 to 0.11 (one 0.25) |
+| Healthy vs healthy, same step | 0.001 to 0.067 |
+
+### Findings
+
+1. **Distance does not separate relevant from irrelevant here.** The two ranges overlap, so a threshold cannot stand in for the step filter. The hard filters decide relevance; `MAX_TWIN_DISTANCE` is set at 0.12, just above every same-step pair, as a safety net only.
+2. **Fewer than three comes from merging.** Bucketed texts repeat: `search_patient_record` has 3 healthy calls with one text, `search_pubmed` 3 calls with 2 texts. After merging they give 1 and 2 twins, each saying how many calls share it.
+3. **A deploy leaves a step without twins until its new version has healthy calls.** This is the intended cost of the hard app-version filter.
+
+### Next steps
+
+1. Measure the threshold again once Medas sends real `service.version` values and its traces vary more than the seeded day.
+2. Check in the eval whether the diagnoses change with the merged twins.
+
 ## Experiment 8: the clustering fix and one fault per cause (2026-11-12)
 
 ### Question

@@ -15,6 +15,7 @@ store; `healthy_picks` keeps the ones that hold up, from a clearly fine, clean t
 no exception does not mean a right answer.
 """
 
+import json
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
@@ -98,6 +99,26 @@ def healthy_picks(tree: SpanNode, valid: set[str], picked: list[str], score: flo
     return [span_id for span_id in dict.fromkeys(picked) if span_id in ok][:MAX_HEALTHY_PICKS]
 
 
+# The same on every span of a trace: the models read them once, on the root.
+_TRACE_WIDE = ("app_version", "schema_url")
+
+
+def prompt_json(tree: SpanNode) -> str:
+    """The tree as the judge and the diagnoser read it: compact JSON without default fields,
+    and the app version and schema URL on the root only."""
+
+    def strip(span: dict, root: bool) -> dict:
+        if not root:
+            for key in _TRACE_WIDE:
+                span.pop(key, None)
+        for child in span.get("children", []):
+            strip(child, root=False)
+        return span
+
+    dumped = strip(tree.model_dump(mode="json", exclude_defaults=True), root=True)
+    return json.dumps(dumped, ensure_ascii=False, separators=(",", ":"))
+
+
 def retry_message(blamed: str | None, valid: set[str]) -> str:
     """The correction sent back to the model: ids only, never span contents."""
     named = (
@@ -118,7 +139,7 @@ async def judge_trace(tree: SpanNode, model: BaseChatModel, run: Spent) -> dict:
     ask = structured_asker(model, TraceVerdict, run)
     messages: list[BaseMessage] = [
         SystemMessage(JUDGE_PROMPT),
-        HumanMessage(tree.model_dump_json(exclude_defaults=True)),
+        HumanMessage(prompt_json(tree)),
     ]
     verdict = await ask(messages)
     valid = span_index([tree])[tree.trace_id]

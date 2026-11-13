@@ -22,7 +22,7 @@ from agent.actions import OUT_DIR
 from agent.const import MAX_PARALLEL_DIAGNOSES
 from agent.embeddings import Embedder
 from agent.github import GitHubIssues
-from agent.schemas import HealthyMatch
+from agent.schemas import HealthyMatch, StepKey
 from trace_store.models import SpanNode, TraceQuery, TraceSummary
 
 
@@ -47,7 +47,7 @@ class ClosedTraces:
 class HealthyLookup(Protocol):
     """The slice of the healthy-span store (runs.healthy) the diagnoser reads."""
 
-    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]: ...
+    async def similar(self, text: str, app: str, key: StepKey, k: int) -> list[HealthyMatch]: ...
 
 
 @dataclass

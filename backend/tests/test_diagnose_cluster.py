@@ -8,7 +8,7 @@ import pytest
 from langgraph.runtime import Runtime
 
 from agent import model_guard
-from agent.chunks import step_text
+from agent.chunks import step_key, step_text
 from agent.const import (
     HEALTHY_TWINS,
     MAX_MODEL_ATTEMPTS,
@@ -18,7 +18,7 @@ from agent.const import (
 from agent.evidence import FALLBACK_NOTE
 from agent.graph import build_graph
 from agent.nodes.diagnose_cluster import TAXONOMY, diagnose_cluster
-from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence, HealthyMatch
+from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence, HealthyMatch, StepKey
 from tests.fakes import (
     DIAGNOSIS,
     FakeApiError,
@@ -66,13 +66,13 @@ class FakeHealthy:
     def __init__(self, matches: list[HealthyMatch]) -> None:
         self.matches, self.asked = matches, []
 
-    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]:
-        self.asked.append((text, step, app, k))
+    async def similar(self, text: str, app: str, key: StepKey, k: int) -> list[HealthyMatch]:
+        self.asked.append((text, app, key, k))
         return self.matches
 
 
 class DownHealthy:
-    async def similar(self, text: str, step: str, app: str, k: int) -> list[HealthyMatch]:
+    async def similar(self, text: str, app: str, key: StepKey, k: int) -> list[HealthyMatch]:
         raise RuntimeError("store down")
 
 
@@ -83,12 +83,24 @@ TWIN = HealthyMatch(trace_id="h1", span_id="hs", text="step: twin\noutcome: ok",
 async def test_the_model_sees_healthy_twins_of_the_failing_step_next_to_the_failure():
     healthy, model = FakeHealthy([TWIN]), fake_diagnoser(DIAGNOSIS)
     result = await diagnose(model, healthy)
-    ((text, step, app, k),) = healthy.asked
-    assert (text, step, app, k) == (step_text(TREE, "s1"), TREE.name, "medas", HEALTHY_TWINS)
+    ((text, app, key, k),) = healthy.asked
+    assert (text, app, key, k) == (
+        step_text(TREE, "s1"),
+        "medas",
+        step_key(TREE, "s1"),
+        HEALTHY_TWINS,
+    )
     prompt = str(model.seen[0][1].content)
     assert text in prompt and TWIN.text in prompt and "do not cite them" in prompt
     assert result["diagnoses"][0]["evidence_check"] == "valid"
     assert result["diagnoses"][0]["healthy_twins"] == 1  # the run can tell the twins were shown
+
+
+@pytest.mark.anyio
+async def test_a_twin_shared_by_several_calls_says_how_many():
+    model = fake_diagnoser(DIAGNOSIS)
+    await diagnose(model, FakeHealthy([replace(TWIN, calls=4)]))
+    assert f"{TWIN.text}\n(seen in 4 healthy calls)" in str(model.seen[0][1].content)
 
 
 @pytest.mark.anyio

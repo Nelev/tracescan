@@ -240,6 +240,16 @@ class ProgressEvent(TypedDict, total=False):
     counts: dict[str, int]
 
 
+class StepKey(TypedDict):
+    """What a healthy call must share with a failed step to be compared with it (runs.healthy),
+    besides the app and the chunk template version. Built by agent.chunks.step_key."""
+
+    step: str  # the span's name
+    operation: str  # its gen_ai.operation.name
+    app_version: str  # the app's service.version
+    schema: str  # the telemetry schema URL it was exported with
+
+
 @dataclass(frozen=True)
 class HealthyMatch:
     """A stored healthy call of a step (runs.healthy), near the text that was searched for."""
@@ -248,3 +258,4 @@ class HealthyMatch:
     span_id: str
     text: str  # its step_text (agent.chunks): names, error types and bucketed numbers only
     distance: float  # cosine distance: 0 is the same text, smaller is nearer
+    calls: int = 1  # how many of the stored calls found have this same text

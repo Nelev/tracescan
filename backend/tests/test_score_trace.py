@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 from langgraph.runtime import Runtime
 
-from agent.chunks import step_text
+from agent.chunks import step_key, step_text
 from agent.context import ClosedTraces
 from agent.judge import error_type, failure_fields
 from agent.nodes.score_trace import score_trace
@@ -73,7 +73,7 @@ async def test_a_healthy_pick_carries_the_text_it_is_embedded_as():
     fine = FINE.model_copy(update={"healthy_span_ids": ["tool"]})
     (verdict,) = (await score(scripted(fine), trees=FakeTraces(trees={"t1": tree})))["verdicts"]
     assert verdict["healthy_spans"] == [
-        {"span_id": "tool", "step": "execute_tool lookup", "text": step_text(tree, "tool")}
+        {"span_id": "tool", **step_key(tree, "tool"), "text": step_text(tree, "tool")}
     ]
     assert "healthy_span_ids" not in verdict
 

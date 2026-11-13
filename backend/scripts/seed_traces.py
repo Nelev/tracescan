@@ -39,6 +39,10 @@ from api.traces import decode, store_spans
 from db.engine import create_engine
 
 APP = "medas"
+# What the collector keeps as the span's app_version and schema_url (the healthy-span store
+# matches on both).
+APP_VERSION = "seed-1"
+SCHEMA_URL = "https://opentelemetry.io/schemas/1.37.0"
 MODEL = "openai/gpt-4.1-mini"
 DAY = timedelta(hours=24)
 GAP_NS = 5_000_000  # between a span and the next one under the same parent
@@ -288,7 +292,8 @@ def _day(end: datetime, counts: Counts) -> tuple[Sequence[ReadableSpan], dict[st
     """The spans of the day that ends at `end`, and the kind of each of its traces."""
     rng = Random(int(end.timestamp()))
     finished = InMemorySpanExporter()
-    provider = TracerProvider(resource=Resource({"service.name": APP}), id_generator=SeededIds(rng))
+    resource = Resource({"service.name": APP, "service.version": APP_VERSION}, SCHEMA_URL)
+    provider = TracerProvider(resource=resource, id_generator=SeededIds(rng))
     provider.add_span_processor(SimpleSpanProcessor(finished))
     tracer = provider.get_tracer("scripts.seed_traces")
 
