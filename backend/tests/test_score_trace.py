@@ -33,7 +33,7 @@ TREE = span_tree(
 FAILED = TraceVerdict(
     reason="The lookup tool failed.", score=0.1, blamed_span_id="tool", attribution="app"
 )
-FINE = TraceVerdict(reason="Every step worked.", score=0.9)
+FINE = TraceVerdict(reason="Every step worked.", score=1.0)
 
 
 async def score(model, trees=None, judge_model=None) -> dict:
@@ -63,6 +63,7 @@ async def test_a_healthy_pick_carries_the_text_it_is_embedded_as():
         "t1",
         span_id="root",
         name="invoke_agent medas",
+        status="ok",
         children=[
             span_tree(
                 "t1", span_id="tool", parent_span_id="root", name="execute_tool lookup", status="ok"

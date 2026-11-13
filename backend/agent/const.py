@@ -16,6 +16,10 @@ LATENCY_BUCKETS_S = (
 HITS_BUCKETS = ((1, "none"), (11, "some (1-10)"), (float("inf"), "many (>10)"))
 # Healthy spans the trace judge may pick in one trace that went fine (agent.judge.healthy_picks).
 MAX_HEALTHY_PICKS = 3
+# The lowest judge score whose healthy picks become references: a borderline "fine" is not an
+# example of a step working. Keep it above FAILED_MAX_SCORE (trace_store/const.py, 0.5), so a
+# failed trace never gives one: agent.judge.healthy_picks relies on that.
+HEALTHY_MIN_SCORE = 0.9
 # Healthy calls of a cluster's failing step the diagnoser is shown (runs.healthy similar()).
 HEALTHY_TWINS = 3
 
