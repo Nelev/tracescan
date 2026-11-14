@@ -2,6 +2,48 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("The evaluation"); the code is in `backend/eval/`.
 
+## Medas's own faults: the first run (2026-11-14)
+
+### Question
+
+The seeded eval scores full marks on synthetic traces. What does TraceScan find when the faults are real bugs in Medas, sent through its real agent among healthy requests?
+
+### What changed
+
+- **Medas** (Nelev/medas PR 11): six fault switches, and two safe signals on its spans, `medas.reply.format` and a failed lookup's own reason.
+- **Answer key** (`eval/medas_ground_truth.py`): each fault's category, cause, symptom, failing span, switch and input sets. `FIRED` decides from the stored tree whether the switch fired on a request; a spared request is `healthy`.
+- **Runner** (`eval/medas_run.py`): one Medas traffic process per input set, every fault and then the controls in one window, each trace matched to its process by time, then one triage run. `eval.metrics` and `eval.judge` read the answer key the file names.
+- **Run.** `out/eval/20261114T070539Z.json`: 17 sends, 56 requests.
+
+### Results
+
+| Fault | Fired | Judge caught | Cluster | Category | Cause (0-2) |
+| --- | --- | --- | --- | --- | --- |
+| tool_schema | 5 of 5 | 5 | c1, alone | tool_schema_error | 1 |
+| truncated_prompt | 5 of 5 | 5 | c0, alone | unknown (expected prompt_regression) | 0 |
+| empty_retrieval | 3 of 4 | 3 | c2, alone (step and error) | retrieval_miss | 1 |
+| upstream_timeout | 2 of 8 | 2 | c3, c4: one trace each | infra_error | 2, 2 |
+| context_tokens | 3 of 3 | 0 | none | | |
+| weak_model | 6 of 6 | 0 | none | | |
+| healthy (32) | | 0 flagged | | | |
+
+Scores: detection 4/6, purity 15/15, separation 3/6, category 4/5, cause 2/5, false alarms 0, judge recall 15/24, judge false positives 0/32, judge blame 10/15. Cost $0.12 ($0.03 judge, $0.09 diagnoser); the triage took 25 s.
+
+### Findings
+
+1. **The two silent faults are invisible to the judge.** The small context (the same search seven or more times, then an answer) and the weak model (one chat call, no tool) leave no error and a well-formed reply, and every one of their traces scored as healthy. The same as on 2026-11-13: the judge reads a trace as failed only on an error, an empty search or a malformed reply.
+2. **Caught faults are diagnosed by place, not by cause.** The broken schema is "the arguments do not match the schema" (the rename is not visible: the span keeps no exception message), the empty retrieval is "the retriever returned nothing" (the medication filter is not visible: no query text), the truncated prompt is `unknown` (the reply was malformed; no span says why). Only the timeout, whose status message says what happened, gets full marks.
+3. **Two identical timeouts became two issues.** Each was diagnosed alone (`isolated`): the clustering does not group two traces with the same step and error when HDBSCAN finds nothing. A reviewer gets two proposals for one cause.
+4. **The low-volume fault clustered.** The empty retrieval fired on three requests, enough for a step-and-error cluster, so `rare_recall` is 0/0: no fault was sent only once.
+5. **The healthy traffic is left alone.** No healthy trace was judged failed, so no false alarm, including the edge cases (blank, Italian, emoji). PubMed did not fail on its own this time.
+6. **The answer key needed one fix.** The truncated prompt's fifth reply was `no_severity`, not `malformed`, and was first labelled healthy, which cost purity and made a false alarm. `FIRED` now counts both as the fault, and `--relabel` labelled the run again from the stored trees.
+
+### Next steps
+
+- Make the judge see the two silent faults: a request that repeats one search many times, and an answer to a record question with no lookup at all. Measure with this runner, with the controls in the same window.
+- Group identical isolated failures (same step, same error) into one cluster.
+- Run it again to see the variance; the timeout share fired on only 2 of 8 requests.
+
 ## Healthy twins: compatibility filters and fewer than three (2026-11-13)
 
 ### Question

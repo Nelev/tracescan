@@ -14,13 +14,23 @@ spend is in the cost.
 import json
 import sys
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from agent import actions
-from eval.ground_truth import FAULTS, cause_of
+from eval import ground_truth, medas_ground_truth
+from eval.ground_truth import Fault, cause_of
 
 OUT_DIR = actions.OUT_DIR / "eval"  # where eval/run.py writes its results files
+
+
+def answer_key(result: dict[str, Any]) -> Mapping[str, Fault]:
+    """The faults a results file is graded against: Medas's fault switches for a file of
+    eval/medas_run.py (`answer_key` "medas"), else the seeded day's."""
+    if result.get("answer_key") == "medas":
+        return medas_ground_truth.FAULTS
+    return ground_truth.FAULTS
 
 
 def _mixes(result: dict[str, Any], given: dict[str, str] | None = None) -> dict[str, Counter[str]]:
@@ -38,20 +48,21 @@ def judge_scores(result: dict[str, Any]) -> dict[str, Any]:
     """The trace judge against the answer key: a faulty trace should be judged failed, a
     harmless one not. A trace the judge could not judge (`judge_failures`) counts as not failed."""
     kinds = result["kinds"]
+    faults = answer_key(result)
     failed = {v["trace_id"] for v in result["trace_verdicts"] if v["failed"]}
     # The step the judge blamed in each faulty trace it caught, against the answer key's.
     blamed = [
-        v.get("failing_span_name") == FAULTS[kinds[v["trace_id"]]].failing_span
+        v.get("failing_span_name") == faults[kinds[v["trace_id"]]].failing_span
         for v in result["trace_verdicts"]
-        if v["failed"] and kinds[v["trace_id"]] in FAULTS
+        if v["failed"] and kinds[v["trace_id"]] in faults
     ]
     by_kind: dict[str, list[int]] = {}
     for trace_id, kind in kinds.items():
         hits = by_kind.setdefault(kind, [0, 0])
         hits[0] += trace_id in failed
         hits[1] += 1
-    faulty = [t for t, kind in kinds.items() if kind in FAULTS]
-    harmless = [t for t, kind in kinds.items() if kind not in FAULTS]
+    faulty = [t for t, kind in kinds.items() if kind in faults]
+    harmless = [t for t, kind in kinds.items() if kind not in faults]
     return {
         "judge_recall": (sum(t in failed for t in faulty), len(faulty)),
         "judge_false_positives": (sum(t in failed for t in harmless), len(harmless)),
@@ -73,12 +84,13 @@ def _spend(usage: list[dict[str, Any]]) -> tuple[int, int, float]:
 
 def score(result: dict[str, Any]) -> dict[str, Any]:
     # Kinds that share a cause count as one fault: one cluster for both is one issue, not a merge.
-    kinds = {trace_id: cause_of(kind) for trace_id, kind in result["kinds"].items()}
+    faults = answer_key(result)
+    kinds = {trace_id: cause_of(kind, faults) for trace_id, kind in result["kinds"].items()}
     diagnoses = list(result["diagnoses"])
     mixes = _mixes(result, kinds)
     majority = {cluster_id: mix.most_common(1)[0][0] for cluster_id, mix in mixes.items()}
-    expected = {c: FAULTS[kind].category for c, kind in majority.items() if kind in FAULTS}
-    seeded = Counter(kind for kind in kinds.values() if kind in FAULTS)
+    expected = {c: faults[kind].category for c, kind in majority.items() if kind in faults}
+    seeded = Counter(kind for kind in kinds.values() if kind in faults)
 
     detected = {majority[d["cluster_id"]] for d in diagnoses} & set(seeded)
     # A diagnosis of a cluster with no fault is a false alarm, counted there and nowhere else.
@@ -102,10 +114,10 @@ def score(result: dict[str, Any]) -> dict[str, Any]:
         "rare_recall": (len(rare & detected), len(rare)),
         # Traces of a fault that reached a cluster at all; a failure with no error never does.
         "trace_recall": (
-            sum(sum(n for kind, n in mix.items() if kind in FAULTS) for mix in mixes.values()),
+            sum(sum(n for kind, n in mix.items() if kind in faults) for mix in mixes.values()),
             seeded.total(),
         ),
-        "false_alarms": sum(any(kind not in FAULTS for kind in mix) for mix in mixes.values()),
+        "false_alarms": sum(any(kind not in faults for kind in mix) for mix in mixes.values()),
         "category_accuracy": (
             sum(d["category"] == expected[d["cluster_id"]] for d in of_faults),
             len(of_faults),

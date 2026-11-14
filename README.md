@@ -348,6 +348,43 @@ uv run --env-file .env python -m eval.judge      # grade the root causes
 uv run python -m eval.metrics                    # print the scores
 ```
 
+### On Medas's own faults
+
+The seeded day is synthetic. The second eval runs on **Medas itself**: six known bugs that Medas can switch on one at a time (`FAULT_*` variables, `medas-api/faults.py` in [Nelev/medas](https://github.com/Nelev/medas)). Each is triggered by two or three sets of real questions, sent through the real agent, and mixed in one window with healthy traffic (every normal and edge question, no switch on). The answer key is `backend/eval/medas_ground_truth.py`. A trace counts as a fault only if its fault actually fired on that request: a timeout share can spare a request, and a search not about medication never hits the empty-retrieval bug.
+
+```bash
+cd backend
+uv run --env-file .env python -m eval.medas_run   # send every fault and the controls, triage the window
+uv run --env-file .env python -m eval.judge       # grade the root causes
+uv run python -m eval.metrics                     # print the scores
+```
+
+It needs the backend running (Medas sends its traces to the collector), Medas's database up, and the Medas checkout next to this one (`--medas` for another place). `--only tool_schema,weak_model` sends just those faults; `--control` sends the healthy traffic alone.
+
+First run, 2026-11-14 (`out/eval/20261114T070539Z.json`): 56 requests, 24 of them with a fault that fired.
+
+| Fault | Traces | Judge caught | Cluster | Diagnosis (category, cause graded 0-2) |
+| --- | --- | --- | --- | --- |
+| Broken tool schema | 5 | 5/5 | its own | `tool_schema_error`, 1: names the argument mismatch, not the rename |
+| Truncated prompt | 5 | 5/5 | its own | `unknown`, 0: sees the malformed replies, not why |
+| Empty retrieval | 3 | 3/3 | its own | `retrieval_miss`, 1: names the empty retriever, not the medication filter |
+| Upstream timeout | 2 | 2/2 | two of one trace each | `infra_error`, 2 and 2 |
+| Small context | 3 | 0/3 | none | missed |
+| Weak model | 6 | 0/6 | none | missed |
+| Healthy | 32 | 0/32 flagged | | |
+
+| Score | Result |
+| --- | --- |
+| Detection | 4/6 |
+| Purity | 15/15 |
+| Separation | 3/6 |
+| Category accuracy | 4/5 |
+| Cause accuracy (graded 2 of 2) | 2/5 |
+| False alarms | 0 |
+| Cost (judge and diagnoser) | $0.12 |
+
+What it shows, next to the seeded day's perfect scores: on a real app the faults that raise an error are found and kept apart, and the healthy traffic is left alone. The two faults that leave no error and a well-formed reply (a search repeated until the model gives up, a model that never calls its tools) are never judged failed. Where a fault is caught, the diagnosis mostly names *where* it broke, not *why*: the spans carry no prompt, argument or query text, so the cause behind a malformed reply or an empty search is not on the trace. One run only; details in [`docs/eval-notes.md`](docs/eval-notes.md).
+
 ### How it started, and what changed
 
 | # | Change | What it showed |
