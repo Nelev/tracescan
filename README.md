@@ -19,7 +19,8 @@ The first app it watches is **Medas**, a clinician-facing RAG assistant. Medas t
 5. [The agent](#the-agent)
 6. [The evaluation](#the-evaluation)
 7. [The json-render console](#the-json-render-console)
-8. [Running it](#running-it)
+8. [What's built and what's missing](#whats-built-and-whats-missing)
+9. [Running it](#running-it)
 
 ---
 
@@ -79,7 +80,7 @@ Look at the root's status: `ok`. As far as the status goes, the request succeede
 
 Medas is instrumented in its own repo. A LangChain callback handler builds one trace per agent run and sends it over **OTLP/HTTP** to TraceScan's collector (`POST /v1/traces`). Each export carries the app's own collector token (`Authorization: Bearer …`, from `COLLECTOR_TOKEN_MEDAS`); the collector refuses one without it, keeps only the spans of the app the token belongs to, drops spans that start in the future, cuts over-long names and status messages, strips what Postgres cannot store (NUL characters, NaN), refuses an export over 4 MiB or 2,000 spans, decodes the protobuf and writes one row per span to Postgres (`spans`). A span that is already stored is skipped, so an exporter's retry changes nothing. There is no `traces` table: a trace is just the spans that share a `trace_id`.
 
-For development and the eval, `scripts/seed_traces.py` writes realistic synthetic Medas traffic through the same decoder.
+For development and the eval, `scripts/seed_traces.py` writes realistic synthetic Medas traffic through the same decoder. Nothing is scored on the way in: which traces failed is decided by the trace judge in each run.
 
 ### 2. Sampled
 
@@ -112,7 +113,7 @@ If the judge blames a span that isn't in the tree, it is asked once more. If it 
 
 ### 4. Embedded
 
-Each failed trace is reduced to one short **failure text**: the failing step, the error message and a signature. Digits are masked, so `timed out after 10.2s` and `timed out after 10.4s` read the same. Seconds are turned into a word first (`slow (2-5 s)`, `very slow (>5 s)`), so a 1 s timeout and a 10 s timeout still read differently:
+Each failed trace is reduced to one short **failure text**: the failing step, the error message and a signature. A step that failed without an error or a message gets its symptom in fixed words instead (`no error; a search returned nothing`, `no error; the same tool asked for round after round`, `no error; the reply is not in the shape the app asks for`), so silent failures of different kinds don't fall into one cluster. Digits are masked, so `timed out after 10.2s` and `timed out after 10.4s` read the same. Seconds are turned into a word first (`slow (2-5 s)`, `very slow (>5 s)`), so a 1 s timeout and a 10 s timeout still read differently:
 
 ```text
 execute_tool search_pubmed: search_pubmed timed out after very slow (>5 s) | ...
@@ -125,13 +126,18 @@ That text is embedded **on the machine** with `BAAI/bge-small-en-v1.5` (fastembe
 Clustering is plain code, with no LLM calls. It has two stages:
 
 1. **HDBSCAN** (cosine distance, `min_cluster_size` 3, `min_samples` 4) finds the dense groups. A trace that HDBSCAN attaches with a membership under 0.1 is treated as noise, so a lone outlier isn't swallowed by its nearest group.
-2. The noise is **regrouped by failing step and error type**. A group of 2 or more becomes a `step_error` cluster: the same step failing with the same error is one issue, however few times it happened. Anything left becomes an `isolated` one-trace cluster, so a rare failure still gets diagnosed.
+2. The noise is **regrouped by failing step and error type**. A group of 2 or more becomes a `step_error` cluster: the same step failing with the same error is one issue, however few times it happened. Anything left becomes an `isolated` one-trace cluster, so a rare failure still gets diagnosed. At most 10 isolated clusters are diagnosed per run (`MAX_ISOLATED_DIAGNOSES`); the rest still get a proposal, marked undiagnosed.
 
 A run with fewer than 6 failures skips HDBSCAN and goes straight to the second stage. The embeddings are also projected to 3D for the cluster map on the run page: PCA, or t-SNE from 30 points up, whichever better keeps each point's neighbours.
 
 ### 6. Diagnosed
 
-The diagnoser (`anthropic/claude-sonnet-5-5`) makes one structured-output call per cluster, at most 4 at once. Its system prompt is the failure taxonomy. It is shown the exemplar span trees and, when there are any, up to 3 **healthy twins**: calls of the same step, on the same app version and telemetry schema, that worked. It answers:
+The diagnoser (`anthropic/claude-sonnet-5-5`) makes one structured-output call per cluster, at most 4 at once. Its system prompt is the failure taxonomy. It is shown the exemplar span trees and, when there are any:
+
+- up to 3 **healthy twins**: calls of the same step, on the same app version and telemetry schema, that worked;
+- up to 3 **known issues**: past findings a reviewer decided on whose failing step reads like this one. Approved ones are shown as confirmed causes, rejected ones as warnings (see [step 7](#7-drafted-reviewed-applied)).
+
+Neither can be cited as evidence. It answers:
 
 ```json
 {
@@ -145,14 +151,16 @@ The diagnoser (`anthropic/claude-sonnet-5-5`) makes one structured-output call p
 
 The categories are `retrieval_miss`, `tool_schema_error`, `context_overflow`, `prompt_regression`, `model_quality`, `infra_error`, the MAST groups `system_design`, `inter_agent_misalignment` and `task_verification`, and `unknown`.
 
-**The code checks the evidence.** Every cited span must be in the trees the model was shown. If one isn't, the model is asked once more, with the valid ids listed. If it still cites spans it never saw, those citations are dropped, the confidence is capped at 0.3, and the diagnosis is flagged `unsupported`. Each cluster has a budget of 3 calls, 100k tokens and $0.50, and transient errors are retried with backoff within it.
+**The code checks the evidence.** Every cited span must be in the trees the model was shown. If one isn't, the model is asked once more, with the valid ids listed. If it still cites spans it never saw, those citations are dropped, the confidence is capped at 0.3, and the diagnosis is flagged `unsupported`. Each cluster has a budget of 3 calls, 100k tokens and $0.50, and transient errors are retried with backoff within it. Each judged trace has its own (20k tokens, $0.05), and a whole run stops starting new judge or diagnose branches past 1,000 calls, 2M tokens or $2.
 
 ### 7. Drafted, reviewed, applied
 
-Each cluster becomes a **proposal**: an issue title and body, and a regression case made of ids only (the exemplar traces and the cited spans, no span text). Then the graph **pauses** for review. A reviewer approves or rejects each proposal, and only approved ones are written:
+Each cluster becomes a **proposal**: an issue title and body, and a regression case made of ids only (the exemplar traces and the cited spans, no span text). Then the graph **pauses** for review. A reviewer approves or rejects each proposal, and only approved ones are written out:
 
 - **Dry run** (the default): `out/issues/<cluster>.md` and `out/regression_cases.jsonl`.
-- **Live** (`DRY_RUN=0`): one GitHub issue per proposal in a **private** repo (the app refuses a public one), plus the regression cases.
+- **Live** (`DRY_RUN=0`): one GitHub issue per proposal in a **private** repo (the app refuses a public one), plus the regression cases. Each issue carries a hidden run and cluster marker, so a review resubmitted after a GitHub error opens only the missing ones.
+
+**The known-issues memory.** Every decided, diagnosed proposal, approved or rejected, is also remembered (pgvector, `known_issues`): its failing step's text as the embedding, with the category, root cause, suggested fix and the verdict. Later runs show the closest ones to the diagnoser. A rejected diagnosis is kept only as a warning; it never matches or suppresses an issue.
 
 ---
 
@@ -219,7 +227,7 @@ flowchart LR
     subgraph db["🐘 Postgres + pgvector"]
         SP[(spans)]
         SC[(scores)]
-        HS[(healthy spans)]
+        HS[(healthy spans<br/>known issues)]
         RN[(runs · reviews<br/>checkpoints)]
     end
 
@@ -251,7 +259,7 @@ flowchart LR
 | --- | --- | --- |
 | **Medas** | The app being watched | Sends one OpenTelemetry trace per agent run, with no prompt, answer or record text |
 | **Collector** (`api/traces.py`) | Intake | Decodes OTLP protobuf, filters by app, stores each span once |
-| **Postgres** | Memory | `spans` and `scores` for traces; `runs`, `reviews` and the LangGraph checkpoints for runs; pgvector for healthy spans. The schema is managed with Alembic |
+| **Postgres** | Memory | `spans` and `scores` for traces; `runs`, `reviews` and the LangGraph checkpoints for runs; pgvector for healthy spans and the known-issues memory. The schema is managed with Alembic |
 | **Trace server** (`trace_store/`) | The agent's only view of traces | Read-only MCP tools, sanitized output, a call budget per run, an audit log |
 | **Triage agent** (`agent/`) | The brain | The LangGraph pipeline: judge, cluster, diagnose, draft, wait, apply |
 | **Runs module** (`runs/`) | A run's lifecycle | Starts runs, streams progress, reads status from the checkpoints, and locks a run during review so two reviewers can't apply it twice |
@@ -275,11 +283,11 @@ flowchart TD
     ST --> JS[join_scores]
     JS -->|no failures| END2([end])
     JS --> CF[cluster_failures]
+    CF -->|no clusters| END3([end])
     CF -->|one Send per cluster| DC["diagnose_cluster ×N"]
     DC --> DP[draft_proposals]
     DP --> HR{{"human_review<br/>⏸ interrupt"}}
-    HR -->|nothing approved| END3([end])
-    HR -->|"approved: Command(resume=decisions)"| AA[apply_actions]
+    HR -->|"Command(resume=decisions)"| AA[apply_actions]
     AA --> END4([end])
 ```
 
@@ -291,10 +299,10 @@ flowchart TD
 | `score_trace` ×T | Haiku | One trace tree | A verdict, healthy picks, usage |
 | `join_scores` | none | All the verdicts | `failed_traces`, each labelled with its blamed step and error type |
 | `cluster_failures` | none (local embeddings) | The failed traces | `clusters` and the 3D `cluster_map` |
-| `diagnose_cluster` ×N | Sonnet | One `ClusterTask`: the cluster, its exemplar trees, its healthy twins | A diagnosis or a recorded failure, usage |
+| `diagnose_cluster` ×N | Sonnet | One `ClusterTask`: the cluster, its exemplar trees, its healthy twins and known issues | A diagnosis or a recorded failure, usage |
 | `draft_proposals` | none | Clusters and diagnoses | One `Proposal` per cluster; an undiagnosed cluster gets a stub, never dropped |
 | `human_review` | none | The proposal ids | Pauses; resumes with one decision per proposal |
-| `apply_actions` | none | The approved proposals | Issue files or GitHub issues, and regression cases. The **only** node that writes |
+| `apply_actions` | none | The decided proposals | For approved ones, issue files or GitHub issues and regression cases; for every decided one, the known-issues memory. The **only** node that writes |
 
 ### How a run flows
 
@@ -302,12 +310,15 @@ flowchart TD
 2. **Fan out, fan in.** Judge branches run 16 at a time and report progress every quarter. Diagnose branches are held to 4 at a time by a semaphore. Their outputs are merged into lists with append reducers.
 3. **Pause.** At `human_review` the state is checkpointed and the stream ends with `review_required`. From here the run survives a restart.
 4. **Review.** The reviewer approves or rejects each finding in the web app. `POST /review` locks the run's row, resumes the graph without opening a trace session, and commits the decisions and the new status in one transaction.
-5. **Apply.** The approved proposals are written, and the actions log comes back in the response.
+5. **Apply.** The approved proposals are written, every decision is remembered, and the actions log comes back in the response.
+6. **Resume.** A run that failed or was stopped can be resumed from the run page (`POST /v1/runs/{id}/resume/stream`): only the steps that had not finished run again.
+
+After a run ends or pauses, the judge's verdicts are saved to `scores` and its healthy picks to the healthy-span store. These two are the only writes made without review: they hold ids, scores, names and error types, and stay in TraceScan's own database.
 
 ### Guardrails
 
 - **Read-only traces.** The agent imports no database driver, and a test enforces it.
-- **Budgets everywhere.** Per trace, per cluster, and per run for tool calls. Only transient errors are retried.
+- **Budgets everywhere.** Per trace, per cluster, per run for model spend, and per run for tool calls. Only transient errors are retried.
 - **Evidence or nothing.** Diagnoses cite real spans, and the code checks them.
 - **People approve every write.** A rejected proposal never reaches GitHub.
 - **Dry run by default.** Only the server sets it, never a request.
@@ -507,6 +518,34 @@ For example, a `progress` message becomes a badge and a line of text. A `proposa
 
 ---
 
+## What's built and what's missing
+
+The MVP gate passed on 2026-11-14. [`PLAN.md`](PLAN.md) has every task with its "Done when" check.
+
+### Built
+
+- **Tracing:** Medas instrumented in its own repo (OpenTelemetry, `gen_ai.*` names, no clinical text on spans), with six fault switches and a traffic generator; TraceScan's OTLP collector with a per-app token; the `spans` store in Postgres; the read-only MCP trace server with a call budget and audit log.
+- **The agent:** the trace judge, two-stage clustering with the 3D map, the diagnoser with evidence checks, healthy twins and known issues, budgets and retries, drafted proposals, the review pause and `apply_actions`.
+- **Outputs:** dry-run issue files and regression cases; real GitHub issues in a private repo (`DRY_RUN=0`).
+- **Memory:** the healthy-span store and the known-issues memory (pgvector), both read by the diagnoser.
+- **The app:** Clerk sign-in, a dashboard, the runs list, a live run page (stepper, cluster map, findings with inline review, resume), the trace browser, and the json-render agent console.
+- **Durability:** Postgres checkpoints (a paused run survives a restart), run and review records, one review at a time per run, resumable runs, a rate limit of 10 runs per user per hour.
+- **The eval:** a seeded day, a control day, and Medas's own fault switches, graded by a model from another vendor.
+
+### Missing
+
+- **Reproducer.** Diagnoses are always `unverified`; nothing replays a cluster's inputs yet.
+- **Known issues, second half.** Past decisions are shown to the diagnoser, but a second run on the same fault still drafts a new issue instead of commenting on the existing one. No reject reason is recorded, and approved findings are not checked for duplicates.
+- **Detection gaps.** The weak-model fault is never judged failed, and causes are named for 2 of the 5 Medas faults caught (see the eval).
+- **Repeated eval runs.** Every number above is one run; the models' variance is not measured yet.
+- **MAST-Data agreement study.**
+- **Results page** in the app for the eval table.
+- **Ship:** a Docker Compose deployment with Medas, a scheduled daily run, and the demo video.
+- **Smaller gaps:** a dedicated read-only database role for the trace server (the session is read-only, the role isn't created); Clerk user ids stored next to names; run duration and the judge's spend in the run list; a personal-data scan of issue text before it is filed; retrying `apply_actions` after a failed resume past the review.
+- **Parked:** tracing TraceScan itself and LangGraph Studio, both cut from the MVP.
+
+---
+
 ## Running it
 
 **Requirements:** Python with [uv](https://docs.astral.sh/uv/), Node and npm, and Docker.
@@ -527,7 +566,7 @@ cd backend && uv run --env-file .env uvicorn main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
-`backend/.env` needs `DATABASE_URL`, `TRACE_DATABASE_URL`, `OPENROUTER_API_KEY` and `CLERK_SECRET_KEY`, and `frontend/.env.local` needs the Clerk keys (see the `.env.example` files). Optionally, `DRY_RUN=0` with `GITHUB_REPO` and `GITHUB_TOKEN` opens real issues, and `TRACE_JUDGE_MODEL`, `DIAGNOSER_MODEL` and `UI_SPEC_MODEL` swap the models.
+`docker compose up -d` starts Postgres with pgvector on port 5433. `backend/.env` needs `DATABASE_URL`, `TRACE_DATABASE_URL` (both pointing at that database), `OPENROUTER_API_KEY`, `CLERK_SECRET_KEY` and `COLLECTOR_TOKEN_MEDAS` (32 characters or more); the app refuses to start without any of them or before the migration has run. `frontend/.env.local` needs the Clerk keys (see the `.env.example` files). The backend runs on 8000 and the frontend on 3000 by default. Optionally, `DRY_RUN=0` with `GITHUB_REPO` and `GITHUB_TOKEN` opens real issues, and `TRACE_JUDGE_MODEL`, `DIAGNOSER_MODEL` and `UI_SPEC_MODEL` swap the models.
 
 No Medas? Seed a day of synthetic traffic:
 
