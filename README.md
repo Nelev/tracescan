@@ -8,6 +8,8 @@ TraceScan reads an app's traces and decides which requests actually failed their
 
 The first app it watches is **Medas**, a clinician-facing RAG assistant. Medas traces can touch clinical data, so TraceScan reads traces without copying their content around. Names, statuses, error types and counts travel through the pipeline; prompts, answers and patient records never do.
 
+**New here?** Read [the guide to the project](docs/guide.md): scope, tracing, fault injection, architecture, the agent and its guardrails, the eval and the console, with diagrams.
+
 ---
 
 ## Contents
@@ -541,7 +543,7 @@ From the first run with the hard cases (experiment 1) to the latest (experiment 
 
 Experiment 8 counts 8 faults, not 9: the two-error requests have the same cause as the provider outage, so grouping them is the right answer. The one miss left is a *split*: the provider outage's two faces (5xx and timeout) land in two clusters that both name the same cause.
 
-**Limits.** One run per day, on synthetic traffic, partly on days the fixes were written for. Next come a third unseen day, repeated runs to average out the models' variance, and real Medas traffic. The full log is in [`docs/eval-notes.md`](docs/eval-notes.md), and the review write-up in [`docs/eval/review.md`](docs/eval/review.md).
+**Limits.** One run per day, on synthetic traffic, partly on days the fixes were written for. Next come a third unseen day, repeated runs to average out the models' variance, and real Medas traffic. The full log is in [`docs/eval-notes.md`](docs/eval-notes.md), and the review write-up in [`docs/eval/eval-review-2026-11-12.md`](docs/eval/eval-review-2026-11-12.md).
 
 ---
 
