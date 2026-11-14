@@ -27,6 +27,7 @@ from agent.const import (
     MIN_CLUSTER_SIZE,
     MIN_MEMBERSHIP,
     MIN_SAMPLES,
+    MIN_STEP_ERROR_SIZE,
     MIN_TRACES_FOR_HDBSCAN,
     TRUST_NEIGHBORS,
     TSNE_MIN_POINTS,
@@ -148,7 +149,7 @@ def group_failures(summaries: list[TraceSummary], embedder: Embedder) -> Groupin
     small = len(summaries) < MIN_TRACES_FOR_HDBSCAN  # too few for HDBSCAN: nothing is noise
     embedded = None if small else _hdbscan(summaries, embedder)
     labels = np.full(len(summaries), -1) if embedded is None else embedded.labels
-    min_size = 1 if small else MIN_CLUSTER_SIZE
+    min_size = 1 if small else MIN_STEP_ERROR_SIZE
 
     by_label: dict[int, list[TraceSummary]] = defaultdict(list)
     for s, label in zip(summaries, labels, strict=True):
@@ -158,7 +159,7 @@ def group_failures(summaries: list[TraceSummary], embedder: Embedder) -> Groupin
         (members, "hdbscan") for members in by_label.values()
     ]
 
-    # Second stage: noise that shares a failing step and error is still a cluster if big enough.
+    # Second stage: noise that shares a failing step and error is still a cluster, from two.
     by_step_error: dict[tuple[str, str], list[TraceSummary]] = defaultdict(list)
     for s in noise:
         by_step_error[_step_and_error(s)].append(s)

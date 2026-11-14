@@ -172,6 +172,21 @@ def test_a_failure_that_barely_fits_a_group_is_left_out_of_it():
     assert grouping.unclustered == ["s0"]
 
 
+def test_two_strays_with_the_same_step_and_error_are_one_cluster():
+    # Neither is near a group, and HDBSCAN makes no group of two: the second stage does.
+    vectors = {"alpha": [1, 0, 0], "beta": [0, 1, 0], "timed out": [0, 0, 1], "once": [0, 0.7, 0.7]}
+    rows = [summary(f"a{i}", failing_span_name="x", error_message="alpha") for i in range(4)]
+    rows += [summary(f"b{i}", failing_span_name="y", error_message="beta") for i in range(4)]
+    rows += [
+        summary(f"t{i}", failing_span_name="lookup", error_message="timed out") for i in range(2)
+    ]
+    rows += [summary("o0", failing_span_name="lookup", error_message="once")]
+    grouping = group_failures(rows, VectorsByError(vectors))
+    pair = [c for c in grouping.clusters if c["method"] == "step_error"]
+    assert [c["trace_ids"] for c in pair] == [["t0", "t1"]]
+    assert grouping.unclustered == ["o0"]  # a failure seen once still stands alone
+
+
 def test_small_run_groups_by_step_and_error_without_embedding():
     rows = [
         summary("t1", failing_span_name="retrieve", error_message="timed out after 30 ms"),
