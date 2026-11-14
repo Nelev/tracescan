@@ -4,6 +4,9 @@ const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // The Docker image runs Next's standalone server (frontend/Dockerfile sets NEXT_OUTPUT); a local
+  // build stays a normal one, so `next start` keeps working.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   cacheComponents: true,
   partialPrefetching: true,
   reactCompiler: true,

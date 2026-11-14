@@ -638,6 +638,16 @@ cd frontend && npm install && npm run dev
 
 `docker compose up -d` starts Postgres with pgvector on port 5433. `backend/.env` needs `DATABASE_URL`, `TRACE_DATABASE_URL` (both pointing at that database), `OPENROUTER_API_KEY`, `CLERK_SECRET_KEY` and `COLLECTOR_TOKEN_MEDAS` (32 characters or more); the app refuses to start without any of them or before the migration has run. `frontend/.env.local` needs the Clerk keys (see the `.env.example` files). The backend runs on 8000 and the frontend on 3000 by default. Optionally, `DRY_RUN=0` with `GITHUB_REPO` and `GITHUB_TOKEN` opens real issues, and `TRACE_JUDGE_MODEL`, `DIAGNOSER_MODEL` and `UI_SPEC_MODEL` swap the models.
 
+### All of it in Docker
+
+With `backend/.env` and `frontend/.env.local` filled in as above, Compose can run the whole app instead:
+
+```bash
+docker compose --profile app up -d --build
+```
+
+That builds the backend and frontend images, runs `alembic upgrade head` once in a `migrate` container, then starts the backend on [localhost:8010](http://localhost:8010/docs) and the UI on [localhost:3010](http://localhost:3010), so Medas keeps 8000 and 3000. Medas sends its traces to `http://localhost:8010/v1/traces` as before. Inside Compose the backend reaches Postgres as `db:5432`, whatever `DATABASE_URL` says in `backend/.env`. `BACKEND_PORT`, `FRONTEND_PORT` and `DB_PORT` move the published ports. The UI's port also sets `CLERK_AUTHORIZED_PARTIES`. Dry-run output still lands in `backend/out`, and the embedding model is downloaded once into a volume. `frontend/.env.local` is given to `next build` as a build secret, so the Clerk keys never end up in an image layer. `docker compose --profile app down` stops it all. The seeder needs the backend's dev dependencies, which the image leaves out, so seed from your machine against the published Postgres port.
+
 No Medas? Seed a day of synthetic traffic:
 
 ```bash

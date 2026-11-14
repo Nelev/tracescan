@@ -1,0 +1,12 @@
+# Keep secrets, local state and test-only files out of the image.
+.env
+.env.*
+!.env.example
+.venv
+**/__pycache__
+.ruff_cache
+.pytest_cache
+out
+tests
+Dockerfile
+.dockerignore
