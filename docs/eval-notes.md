@@ -2,6 +2,42 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("The evaluation"); the code is in `backend/eval/`.
 
+## Two identical failures are one finding (2026-11-14)
+
+### Question
+
+The two Medas timeout requests failed at the same step with the same error (`execute_tool search_medlineplus`, `source timed out`), and became two one-trace findings with the same diagnosis: two proposals for one cause. HDBSCAN makes no group under three, and the second stage (noise regrouped by step and normalised error) also wanted three. Does a group of two belong together?
+
+### What changed
+
+- **`MIN_STEP_ERROR_SIZE` = 2** (`agent/const.py`): the second stage makes a `step_error` cluster from two noise traces with the same failing step and normalised error. HDBSCAN's own `MIN_CLUSTER_SIZE` stays 3. A failure seen once still stands alone (`isolated`).
+
+### Results
+
+| Score | Medas, before | **Medas, now** | Seeded day | Control day |
+| --- | --- | --- | --- | --- |
+| Detection | 5/6 | 5/6 | 8/8 | n/a |
+| Purity | 18/18 | 18/18 | 34/34 | n/a |
+| Separation | 4/6 | **5/6** | 7/8 | n/a |
+| Category / cause accuracy | 4/6, 2/6 | 3/5, 2/5 | 9/9, 8/9 | n/a |
+| False alarms | 0 | 0 | 0 | 0 (0/52 flagged) |
+
+Files: Medas `out/eval/20261114T074518Z.json` (retriaged from `20261114T070539Z.json`), seeded `20261114T074549Z.json`, control `20261114T074605Z.json`.
+
+Medas clusters: truncated prompt (5), tool schema (5), small context (3, step and error), empty retrieval (3, step and error), upstream timeout (2, step and error). Nothing unclustered.
+
+### Findings
+
+1. **Every fault the judge catches is now one finding.** Five faults, five clusters, each holding one fault and all of its caught requests. The weak model is the sixth, still not judged failed.
+2. **The seeded day's clusters are the same**, cluster for cluster; it had no pair of identical noise traces. Its one lower grade (8/9) is the look-alike timeout's diagnosis offering upstream slowness as an alternative to the 1 s timeout: the diagnoser's variance, not the clustering.
+3. **The causes stay the weak score.** Medas cause accuracy 2/5: the tool schema and the timeouts name their cause, the truncated prompt (0), small context (1) and empty retrieval (1) do not.
+
+### Next steps
+
+- The weak model.
+- Safe signals from Medas that say why: the refused tool argument, the size of what the model was sent, the category of the empty search.
+- Repeated runs, to put numbers on the variance seen here.
+
 ## The judge and one failed lookup among several (2026-11-14)
 
 ### Question

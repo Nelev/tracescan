@@ -55,8 +55,13 @@ MIN_TRACES_FOR_HDBSCAN = 6
 # min_cluster_size 3 to 5 with min_samples 4 or 5 recovers every group and leaves both outliers
 # out; min_samples <= 3 absorbs an outlier into a group (and min_cluster_size 2 splits a group).
 # min_samples stays above min_cluster_size on purpose.
-MIN_CLUSTER_SIZE = 3  # also the size a step-and-error group needs to rescue noise into a cluster
+MIN_CLUSTER_SIZE = 3
 MIN_SAMPLES = 4
+# How many noise traces with the same failing step and the same normalised error make a cluster
+# in the second stage. Two: the same step failing with the same error is one issue, however few;
+# at three, two identical failures were two one-trace findings, two proposals for one cause
+# (docs/eval-notes.md, 2026-11-14). A failure seen once still stands alone.
+MIN_STEP_ERROR_SIZE = 2
 # A trace HDBSCAN puts in a group with less membership than this is treated as noise, so it goes
 # to the step-and-error stage or stands alone instead of joining a group it barely fits. On the
 # eval's fault day the misfits sat at 0.0 and the true members at 1.0 (docs/eval-notes.md, exp 6).
