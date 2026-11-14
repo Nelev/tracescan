@@ -385,6 +385,8 @@ First run, 2026-11-14 (`out/eval/20261114T070539Z.json`): 56 requests, 24 of the
 
 What it shows, next to the seeded day's perfect scores: on a real app the faults that raise an error are found and kept apart, and the healthy traffic is left alone. The two faults that leave no error and a well-formed reply (a search repeated until the model gives up, a model that never calls its tools) are never judged failed. Where a fault is caught, the diagnosis mostly names *where* it broke, not *why*: the spans carry no prompt, argument or query text, so the cause behind a malformed reply or an empty search is not on the trace. One run only; details in [`docs/eval-notes.md`](docs/eval-notes.md).
 
+**Since then.** The judge now fails a request that asks for the same step round after round, four rounds or more (`agent/judge_prompt.md`). Retriaged on the same traces (`--retriage`), it catches all three small-context requests and still flags no healthy one, here or on the seeded and control days. Detection stays at 4/6: those requests are merged with the truncated prompt's, since both blame a model call with no error, so the clustering is the next fix. The weak model is still unseen: on the trace it looks like a healthy answer to a blank question.
+
 ### How it started, and what changed
 
 | # | Change | What it showed |

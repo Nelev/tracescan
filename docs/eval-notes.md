@@ -2,6 +2,47 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("The evaluation"); the code is in `backend/eval/`.
 
+## The judge and a request that goes round in circles (2026-11-14)
+
+### Question
+
+On Medas, the trace judge passed every request of the small-context fault: the model asks for the same record search round after round (6 to 12 model calls, 11 to 21 searches), every call succeeds, and an answer comes at the end. Can the judge be taught to see that without flagging healthy requests?
+
+### What changed
+
+- **Judge prompt** (`agent/judge_prompt.md`): a request whose rounds (`chat` spans) ask for the same tool or search again, four rounds or more, failed its user even with no error; several calls in one round, or a few rounds that each ask for something different, are normal; blame the first `chat` span that asked again. "A request with no error and no empty result went fine" now also needs no step asked for round after round.
+- **First wording dropped.** It also said "one more try after a failed or empty call is normal", and the judge then let a timed-out lookup pass (one timeout trace from 0.4 to 0.68 on average over four calls each). Without the clause the timeouts score as before.
+- **`eval.medas_run --retriage FILE`**: triage a results file's window again with its traces and answer key unchanged, so a judge change is measured on the same requests.
+
+### Results
+
+The judge alone, four calls per trace on the first run's traces, old prompt / new prompt: small context 0.8-1.0 / **0.1-0.2** (12 of 12 failed); upstream timeout 0.3-0.6 / 0.3-0.6; truncated prompt unchanged. Every healthy trace twice per prompt: 0.9-1.0 under both, none failed.
+
+| Score | Medas, first run | Medas, retriaged | Seeded day | Control day |
+| --- | --- | --- | --- | --- |
+| Judge recall | 15/24 | **16/24** (context 3/3) | 34/34 | n/a |
+| Judge false positives | 0/32 | 0/32 | 0/18 | 0/52 |
+| Detection | 4/6 | 4/6 | 8/8 | n/a |
+| Purity | 15/15 | 13/16 | 34/34 | n/a |
+| Separation | 3/6 | 1/6 | 7/8 | n/a |
+| Cause accuracy | 2/5 | 1/6 | 9/9 | n/a |
+| False alarms | 0 | 0 | 0 | 0 |
+
+Files: Medas retriaged `out/eval/20261114T071737Z.json` (from `20261114T070539Z.json`), seeded day `20261114T071811Z.json`, control day `20261114T071826Z.json`.
+
+### Findings
+
+1. **The judge sees the loop now, and nothing else moved.** The context requests fail for the right reason ("asked for search_patient_record in 11 of 12 rounds"), and no healthy request on either eval is flagged. The seeded day scores as in experiment 8.
+2. **Detection did not rise: the clustering merges silent failures.** The context requests and the truncated prompt's both blame a `chat` span with no error, so their signatures are the same (`chat openai/gpt-4.1-mini`) and they form one cluster, diagnosed `system_design`. The cluster's majority is the truncated prompt, so the context fault still has no diagnosis of its own.
+3. **The rest is the models' variance.** Separation and cause accuracy fell because this triage split the empty retrievals into two single-trace findings and graded them 0; the timeouts are on the judge's border (0.3-0.6) under either prompt. One run is not enough to compare these.
+4. **The weak model is still invisible**, and no prompt can change that: one chat call and no tool is also what a healthy answer to a blank question looks like. Only the model's name differs, and the judge does not know which model the app should run on.
+
+### Next steps
+
+- Give silent failures a signature of their own: what the judge saw (a repeated step, a malformed reply, an empty search) rather than only the blamed step.
+- Decide how the weak model can be seen: the model the app is meant to run on as app configuration, or a signal from Medas.
+- Repeated runs, to average out the variance.
+
 ## Medas's own faults: the first run (2026-11-14)
 
 ### Question

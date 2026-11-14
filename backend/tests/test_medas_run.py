@@ -266,3 +266,27 @@ def test_a_results_files_sends_read_back_as_they_were_sent():
     each = sent("upstream_timeout", ("N07", "N11"), 3)
 
     assert medas_run.sent_from([each.record(4)]) == [each]
+
+
+@pytest.mark.anyio
+async def test_a_retriage_keeps_the_files_traces_answer_key_and_sends(monkeypatch):
+    earlier = {
+        "since": T0.isoformat(),
+        "until": (T0 + timedelta(minutes=5)).isoformat(),
+        "kinds": {"a": "tool_schema", "b": HEALTHY},
+        "control": False,
+        "sent": [sent("tool_schema", ("N01", "N02"), 0).record(2)],
+        "clusters": [{"cluster_id": "old"}],
+    }
+    asked = []
+
+    async def triage(since, until, kinds, url):
+        asked.append((since, until, kinds))
+        return {"answer_key": "medas", "kinds": kinds, "clusters": []}
+
+    monkeypatch.setattr(medas_run, "triage", triage)
+
+    again = await medas_run.retriage(earlier, "postgresql://unused")
+
+    assert asked == [(T0, T0 + timedelta(minutes=5), earlier["kinds"])]
+    assert again["sent"] == earlier["sent"] and again["clusters"] == []
