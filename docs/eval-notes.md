@@ -2,6 +2,44 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("The evaluation"); the code is in `backend/eval/`.
 
+## The judge and one failed lookup among several (2026-11-14)
+
+### Question
+
+The two timeout requests of the Medas eval sat on the judge's border: MedlinePlus timed out and was not retried while the record search worked, and the judge scored 0.3 to 0.6, saying "the trace does not show whether the answer needed the MedlinePlus material, so this is undecided". Whether they were caught was a coin flip. Can the judge be told, without flagging harmless errors?
+
+### What changed
+
+- **Judge prompt** (`agent/judge_prompt.md`): the rule that a failed tool step nothing redid fails the request now says it holds when the model asked for several steps and only one failed: each was asked for because the answer needed it, the others working does not stand in for it, not knowing how much the answer missed it is no reason to call the request unsure; blame the failed step.
+
+### Results
+
+The judge alone, old prompt / new: the two timeout traces 0.3-0.7 / **0.2-0.3** (8 of 8 calls failed). Unchanged at 0.9-1.0: the seeded day's retried rate limit, expected not-found and healthy requests (three calls each) and every healthy Medas request (twice each).
+
+| Score | Medas, before | **Medas, now** | Seeded day | Control day |
+| --- | --- | --- | --- | --- |
+| Detection | 4/6 | **5/6** | 8/8 | n/a |
+| Purity | 15/15 | 18/18 | 34/34 | n/a |
+| Separation | 3/6 | 4/6 | 7/8 | n/a |
+| Judge recall, false positives | 15/24, 0/32 | **18/24**, 0/32 | 34/34, 0/18 | 0/52 |
+| Judge blame | 11/15 | 13/18 | 34/34 | n/a |
+| Category / cause accuracy | 2/4, 0/4 | 4/6, 2/6 | 9/9, 9/9 | n/a |
+| False alarms | 0 | 0 | 0 | 0 |
+
+Files: Medas `out/eval/20261114T073633Z.json` (retriaged from `20261114T070539Z.json`), seeded `20261114T073705Z.json`, control `20261114T073720Z.json`.
+
+### Findings
+
+1. **Every fault but the weak model is caught, and nothing healthy is.** The judge fails 18 of the 24 fault requests, all six weak-model requests being the rest, and none of the 32 healthy ones; the seeded and control days score as before.
+2. **The timeouts are a split, not a miss.** Both are diagnosed as the MedlinePlus source timing out (cause graded 2), but as two single-trace findings: clustering does not group two failures with the same step and error when HDBSCAN calls them noise. A reviewer gets two proposals for one cause.
+3. **The causes are the weak part.** Only the timeouts name their cause; the other four are graded 1 (the place, not why). Nothing on those traces says why.
+
+### Next steps
+
+- Group isolated failures with the same step and error into one cluster.
+- The weak model.
+- Safe signals from Medas that say why (the exception message of a refused tool call, the size of what the model was sent).
+
 ## Silent failures get a signature of their own (2026-11-14)
 
 ### Question
