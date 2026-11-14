@@ -233,6 +233,14 @@ async def test_a_run_that_did_not_stop_is_not_taken_by_a_resume(store, status):
 
 
 @pytest.mark.anyio
+async def test_the_runs_in_a_status_are_listed_by_id(store):
+    running = {await new_run(store, "in_progress") for _ in range(2)}
+    await new_run(store, "completed")
+    assert set(await store.run_ids("in_progress")) == running
+    assert await store.run_ids("failed") == []
+
+
+@pytest.mark.anyio
 async def test_decisions_recorded_outside_a_review_keep_the_ones_already_there(store):
     run_id = await new_run(store)
     async with store.reviewing(run_id, {"c0": "approve"}, "bo") as finish:

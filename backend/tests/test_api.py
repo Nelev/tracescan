@@ -824,8 +824,9 @@ async def test_a_run_whose_client_went_away_is_recorded_as_aborted_and_can_be_re
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("cut_off", [False, True])
 async def test_a_review_whose_apply_failed_is_resumed_at_the_apply_alone(
-    client, out_dir, monkeypatch
+    client, out_dir, monkeypatch, cut_off
 ):
     opened: list[bool] = []
     use_runs(model=fake_diagnoser(DIAGNOSIS), open_traces=counting_session(opened, two_failures()))
@@ -841,6 +842,12 @@ async def test_a_review_whose_apply_failed_is_resumed_at_the_apply_alone(
     monkeypatch.setattr(apply_actions, "write_dry_run", full_disk)
     review = {"decisions": {"c0": "approve"}}
     assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 502
+    if cut_off:
+        # What a process that died during the apply leaves: the review's transaction rolled back,
+        # so the row still waits for review, while the checkpoint has gone past it. The next
+        # startup's recovery finds it.
+        await app.state.run_store.set_status(run_id, "review_required")
+        await app.state.runs.recover()
     # The graph had taken the decisions: the run stopped at the apply, it does not wait any more.
     stopped = await status_of(client, run_id)
     assert (stopped["status"], stopped["resumable"]) == ("failed", True)
@@ -855,6 +862,17 @@ async def test_a_review_whose_apply_failed_is_resumed_at_the_apply_alone(
     assert files_under(out_dir) == ["issues/c0.md", REGRESSION_FILE]
     done = await status_of(client, run_id)
     assert (done["status"], done["resumable"]) == ("completed", False)
+
+
+@pytest.mark.anyio
+async def test_recovery_aborts_a_run_left_in_progress_and_leaves_a_waiting_one_alone(client):
+    use_diagnosed_run()
+    left, waiting = await start(client), await start(client)
+    await app.state.run_store.set_status(left, "in_progress")  # what a killed process leaves
+    await app.state.runs.recover()
+    assert (await status_of(client, left))["status"] == "aborted"
+    assert (await status_of(client, left))["resumable"]
+    assert (await status_of(client, waiting))["status"] == "review_required"
 
 
 @pytest.mark.anyio

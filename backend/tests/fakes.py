@@ -293,6 +293,9 @@ class InMemoryRunStore:
         self.runs[run_id] = self.runs[run_id].model_copy(update=changes)
         return True
 
+    async def run_ids(self, status: StoredStatus) -> list[str]:
+        return [run_id for run_id, run in self.runs.items() if run.status == status]
+
     async def record_decisions(
         self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
     ) -> None:

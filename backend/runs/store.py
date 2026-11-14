@@ -71,6 +71,10 @@ class RunStore(Protocol):
         """
         ...
 
+    async def run_ids(self, status: StoredStatus) -> list[str]:
+        """The ids of every run in `status`, for the repairs at startup (`Runs.recover`)."""
+        ...
+
     async def record_decisions(
         self, run_id: str, decisions: Mapping[str, Decision], reviewer: str
     ) -> None:
@@ -197,6 +201,11 @@ class PostgresRunStore:
         async with self._engine.begin() as conn:
             changed = await conn.execute(_set_status(run_id, status, counts, only_from))
             return changed.first() is not None
+
+    async def run_ids(self, status: StoredStatus) -> list[str]:
+        async with self._engine.connect() as conn:
+            rows = await conn.execute(select(Run.id).where(Run.status == status))
+            return [str(run_id) for (run_id,) in rows]
 
     async def record_decisions(
         self, run_id: str, decisions: Mapping[str, Decision], reviewer: str

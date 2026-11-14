@@ -278,6 +278,28 @@ class Runs:
         async with self._segment(run_id, state, self._open_traces) as run:
             yield run
 
+    async def recover(self) -> None:
+        """At startup, record the runs a process that died left claiming to be live, so they can
+        be resumed. One still `in_progress` lost its stream mid-run (a kill skips the write that
+        records a stopped run): `aborted`. One still `review_required` whose checkpoint has gone
+        past the review lost its review during the apply (the review's transaction rolled back,
+        the decisions stay in the checkpoint): `failed`, as `_after_failed_review` records a review
+        that failed in this process. Assumes one server process: another's live runs, or a review
+        it is applying, would be taken too."""
+        aborted = failed = 0
+        for run_id in await self._store.run_ids("in_progress"):
+            aborted += await self._store.set_status(run_id, "aborted", only_from=RUNNING)
+        for run_id in await self._store.run_ids("review_required"):
+            snapshot = await self._find_snapshot(run_id)
+            if snapshot is not None and _state_of(snapshot) == "in_progress":
+                failed += await self._store.set_status(
+                    run_id, "failed", only_from={"review_required"}
+                )
+        if aborted or failed:
+            logger.warning(
+                "recovered %d run(s) as aborted and %d cut-off review(s) as failed", aborted, failed
+            )
+
     @asynccontextmanager
     async def resume(self, run_id: str) -> AsyncGenerator[StartedRun]:
         """Go on with a run that failed or was aborted, from its last checkpoint, on its own

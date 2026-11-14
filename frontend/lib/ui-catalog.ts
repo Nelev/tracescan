@@ -3,7 +3,8 @@ import { schema } from "@json-render/react/schema";
 import { shadcnComponentDefinitions } from "@json-render/shadcn/catalog";
 
 /**
- * What a UI spec from the server may contain: the whole shadcn catalog of @json-render/shadcn. The
+ * What a UI spec from the server may contain: the shadcn catalog of @json-render/shadcn less the
+ * components that take a URL (`REMOVED`). The
  * server's small model writes the specs and the backend passes them on unchecked
  * (backend/api/ui_spec.py), so this catalog is the only check before anything is drawn: it says
  * which components exist and what props each takes. Ten of them are drawn by our own components
@@ -11,12 +12,34 @@ import { shadcnComponentDefinitions } from "@json-render/shadcn/catalog";
  *
  * This module has no React in it, so it runs under plain Node in the tests.
  */
+
+/**
+ * The components that take a URL (`Image.src`, `Avatar.src`, `Link.href`). The package draws it
+ * unchecked, and the model copies text from proposals, which come from trace content: a prompt
+ * injection could make an image load `https://elsewhere/?d=<clinical text>` with no click, or a
+ * link lead anywhere. No other component takes a URL, so without these the model cannot write one.
+ */
+export const REMOVED = ["Image", "Avatar", "Link"] as const;
+
+type Removed = (typeof REMOVED)[number];
+
+/** `components` without the `REMOVED` ones; also used for the package's drawing components. */
+export function withoutRemoved<T extends Record<string, unknown>>(
+  components: T,
+): Omit<T, Removed> {
+  const kept = { ...components };
+  for (const name of REMOVED) delete kept[name];
+  return kept;
+}
+
+export const COMPONENT_DEFINITIONS = withoutRemoved(shadcnComponentDefinitions);
+
 export const UI_COMPONENTS = Object.keys(
-  shadcnComponentDefinitions,
-) as (keyof typeof shadcnComponentDefinitions)[];
+  COMPONENT_DEFINITIONS,
+) as (keyof typeof COMPONENT_DEFINITIONS)[];
 
 export const catalog = defineCatalog(schema, {
-  components: shadcnComponentDefinitions,
+  components: COMPONENT_DEFINITIONS,
   actions: {},
 });
 
@@ -46,9 +69,7 @@ export function checkUi(spec: unknown): UiCheck {
   };
   for (const [key, element] of Object.entries(elements)) {
     const definition =
-      shadcnComponentDefinitions[
-        element.type as keyof typeof shadcnComponentDefinitions
-      ];
+      COMPONENT_DEFINITIONS[element.type as keyof typeof COMPONENT_DEFINITIONS];
     // The schemas make an optional prop nullable, not optional, and the model leaves out what it
     // does not need: a prop that is missing counts as null.
     const props: Record<string, unknown> = { ...(element.props as object) };

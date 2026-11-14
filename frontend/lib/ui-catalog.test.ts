@@ -40,9 +40,9 @@ test("a component outside the catalog is refused", () => {
   assert.equal(result.ok, false);
 });
 
-test("the whole catalog is allowed, not a subset", () => {
+test("the whole catalog is allowed but the components that take a URL", () => {
   // Pins the decision to allow all of the package's components, not a hand-picked few.
-  assert.equal(UI_COMPONENTS.length, 36);
+  assert.equal(UI_COMPONENTS.length, 33);
   const ok = spec({
     tabs: {
       type: "Tabs",
@@ -58,6 +58,19 @@ test("the whole catalog is allowed, not a subset", () => {
     button: { type: "Button", props: { label: "Go" }, children: [] },
   });
   assert.deepEqual(checkUi(ok), { ok: true });
+});
+
+test("no component that takes a URL is allowed, so the model cannot write one", () => {
+  const url = "https://elsewhere.example/p.png?d=patient";
+  for (const element of [
+    { type: "Image", props: { src: url, alt: "x" } },
+    { type: "Avatar", props: { src: url, name: "x" } },
+    { type: "Link", props: { href: url, label: "x" } },
+  ]) {
+    assert.equal(checkUi(spec({ e: { ...element, children: [] } })).ok, false);
+    assert.ok(!(UI_COMPONENTS as string[]).includes(element.type));
+  }
+  assert.ok(!describeCatalog().includes("| `Image` |"));
 });
 
 test("a prop of the wrong shape is refused, and the value is not in the issues", () => {
