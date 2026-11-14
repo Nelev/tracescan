@@ -15,6 +15,7 @@ import {
   pipeline,
   type RunOverview,
   reachedTraceLimit,
+  signatureMasks,
   signatureParts,
   totalUsage,
   verificationText,
@@ -394,4 +395,16 @@ test("a run that collected as many traces as it may judge says older ones were n
       ?.detail.includes("newest"),
     false,
   );
+});
+
+test("a signature's masked numbers and quoted values are told apart from its text", () => {
+  assert.deepEqual(signatureMasks("code # for 'x' after slow (2-5 s)"), [
+    { kind: "text", text: "code " },
+    { kind: "number" },
+    { kind: "text", text: " for " },
+    { kind: "quoted" },
+    { kind: "text", text: " after slow (2-5 s)" },
+  ]);
+  assert.deepEqual(signatureMasks("#"), [{ kind: "number" }]);
+  assert.deepEqual(signatureMasks(""), []);
 });

@@ -76,9 +76,23 @@ test("the failure rate is failed of judged, and null with nothing judged", () =>
   assert.equal(
     failureRate({
       ...o,
-      summary: { ...o.summary, traces: 8, failed_traces: 2 },
+      summary: {
+        ...o.summary,
+        traces: 9,
+        judged: 6,
+        judge_failures: 3,
+        failed_traces: 2,
+      },
     }),
-    0.25,
+    1 / 3,
+  );
+  // Collected but none judged: no rate, not 0%.
+  assert.equal(
+    failureRate({
+      ...o,
+      summary: { ...o.summary, traces: 4, judged: 0, judge_failures: 4 },
+    }),
+    null,
   );
 });
 

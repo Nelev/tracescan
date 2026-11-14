@@ -12,6 +12,7 @@ import {
   formatScore,
   type TraceRow,
   tracePath,
+  tracesPath,
   traceVerdict,
 } from "@/lib/traces";
 import { cn } from "@/lib/utils";
@@ -121,8 +122,12 @@ function Row({
  * verdict their scores give. Loaded when the page opens, when the filter or the page changes, and
  * on Refresh; no polling.
  */
-export function TracesList() {
-  const [failedOnly, setFailedOnly] = useState(false);
+export function TracesList({
+  initialFailedOnly = false,
+}: {
+  initialFailedOnly?: boolean;
+}) {
+  const [failedOnly, setFailedOnly] = useState(initialFailedOnly);
   const size = usePageSize();
   const [page, setPage] = useState(1);
   // A new page size (the window crossed a height tier) keeps the first row on screen.
@@ -167,8 +172,12 @@ export function TracesList() {
             aria-pressed={failedOnly}
             onClick={() => {
               // Another filter is another list: start it from its first page.
-              setFailedOnly((on) => !on);
+              const on = !failedOnly;
+              setFailedOnly(on);
               setPage(1);
+              // Kept in the address (Next keeps its router in step with replaceState), so a
+              // reload or a shared link opens the same list; no navigation, nothing refetched.
+              window.history.replaceState(null, "", tracesPath(on));
             }}
           >
             Failed only

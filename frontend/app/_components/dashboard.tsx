@@ -325,7 +325,7 @@ export function Dashboard() {
           value={rate === null ? "—" : formatPercent(rate)}
           hint={
             overview
-              ? `${overview.summary.failed_traces} of ${plural(overview.summary.traces, "trace")}, latest run`
+              ? `${overview.summary.failed_traces} of ${plural(overview.summary.judged, "judged trace")}, latest run`
               : "no run has judged traces yet"
           }
         />

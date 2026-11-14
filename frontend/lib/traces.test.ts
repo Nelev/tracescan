@@ -5,6 +5,7 @@ import {
   blamedBy,
   formatScore,
   formatValue,
+  isTraceId,
   parseTraceDetail,
   parseTraces,
   spanKind,
@@ -187,4 +188,12 @@ test("a trace without its app is off contract", () => {
   const { app: _, ...noApp } = ROW;
   assert.deepEqual(parseTraces([noApp, ROW]), [ROW]);
   assert.equal(parseTraceDetail({ ...DETAIL, app: null }), null);
+});
+
+test("a trace id is what the server's TraceId pattern takes", () => {
+  assert.equal(isTraceId("0af7651916cd43dd8448eb211c80319c"), true);
+  assert.equal(isTraceId("fixture_trace.1"), true);
+  assert.equal(isTraceId("<script>"), false);
+  assert.equal(isTraceId(""), false);
+  assert.equal(isTraceId("a".repeat(65)), false);
 });

@@ -1,16 +1,8 @@
 "use client";
 
-import {
-  Activity,
-  ArrowLeft,
-  ListChecks,
-  Play,
-  RotateCw,
-  UserCheck,
-} from "lucide-react";
-import Link from "next/link";
+import { Activity, ListChecks, Play, RotateCw, UserCheck } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { getRunOverview } from "@/lib/api";
 import { tally, tallyText } from "@/lib/review";
@@ -23,8 +15,9 @@ import {
   totalUsage,
 } from "@/lib/run-overview";
 import { plural, RUN_STATUS, type StatusTone, shortId } from "@/lib/runs";
-import { MAX_JUDGED_TRACES } from "@/lib/types";
+import { MAX_JUDGED_TRACES, type RunStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { BackLink } from "./back-link";
 import { Chip } from "./chip";
 import type { LiveDiagnosis } from "./cluster-card";
 import { ClusterMapPanel } from "./cluster-map-panel";
@@ -85,6 +78,12 @@ function noMap(overview: RunOverview, streaming: boolean): string {
   return "No cluster map: the run had too few failed traces to embed, or was clustered before the map existed.";
 }
 
+// How a run that was cut short stopped, and what resuming it does.
+const CUT_SHORT: Partial<Record<RunStatus, [string, string]>> = {
+  aborted: ["was stopped", "go on from where it stopped"],
+  failed: ["failed", "try the step that failed again"],
+};
+
 /** Why a run shows no clusters, in a sentence. */
 function noClusters(overview: RunOverview, streaming: boolean): string {
   if (streaming)
@@ -96,6 +95,11 @@ function noClusters(overview: RunOverview, streaming: boolean): string {
   }
   if (overview.status === "in_progress") {
     return "No clusters yet. This run is not streaming in this window: refresh to see where it stands.";
+  }
+  const cut = CUT_SHORT[overview.status];
+  if (cut) {
+    const [what, resume] = cut;
+    return `This run ${what} before it found any clusters.${overview.resumable ? ` Resume it to ${resume}.` : ""}`;
   }
   return "This run ended before it found any clusters.";
 }
@@ -198,13 +202,7 @@ export function RunView({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3">
-        <Link
-          href="/runs"
-          className={cn(buttonVariants({ variant: "ghost" }), "-ml-2.5 w-fit")}
-        >
-          <ArrowLeft aria-hidden="true" />
-          All runs
-        </Link>
+        <BackLink href="/runs">All runs</BackLink>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <h1 className="font-mono" title={runId}>
             Run {shortId(runId)}

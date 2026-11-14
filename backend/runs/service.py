@@ -14,6 +14,7 @@ the parallel branches that finished before a failure), so `resume` goes on from 
 thread, running only what is left.
 """
 
+import asyncio
 import logging
 from collections.abc import (
     AsyncGenerator,
@@ -300,6 +301,26 @@ class Runs:
                 "recovered %d run(s) as aborted and %d cut-off review(s) as failed", aborted, failed
             )
 
+    async def check_resumable(self, run_id: str) -> None:
+        """Raise `RunNotFound` or `NotResumable` as `resume` would, without claiming the run: the
+        API asks first, so a resume that cannot happen does not count against the run limit."""
+        await self._resumable_snapshot(run_id)
+
+    async def _resumable_snapshot(self, run_id: str) -> StateSnapshot:
+        try:
+            # Independent reads: the row and the checkpoint, side by side.
+            record, snapshot = await asyncio.gather(
+                self._store.get_run(run_id), self._find_snapshot(run_id)
+            )
+        except Exception as exc:
+            _log_failure(exc)
+            raise RunFailed from None
+        if record is None and snapshot is None:
+            raise RunNotFound
+        if snapshot is None or not _resumable(snapshot, record):
+            raise NotResumable
+        return snapshot
+
     @asynccontextmanager
     async def resume(self, run_id: str) -> AsyncGenerator[StartedRun]:
         """Go on with a run that failed or was aborted, from its last checkpoint, on its own
@@ -309,16 +330,7 @@ class Runs:
         (it reads no traces). Raises `RunNotFound`, `NotResumable` (also when another resume got
         it first), or `RunFailed` when the store, the trace session or the stream fails.
         """
-        try:
-            record = await self._store.get_run(run_id)
-            snapshot = await self._find_snapshot(run_id)
-        except Exception as exc:
-            _log_failure(exc)
-            raise RunFailed from None
-        if record is None and snapshot is None:
-            raise RunNotFound
-        if snapshot is None or not _resumable(snapshot, record):
-            raise NotResumable
+        snapshot = await self._resumable_snapshot(run_id)
         try:
             # Of two resumes only one moves the run from where it stopped.
             claimed = await self._store.set_status(run_id, "in_progress", only_from=RESUMABLE)

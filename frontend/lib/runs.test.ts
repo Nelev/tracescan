@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   formatWhen,
   formatWindow,
+  isRunId,
   parseRuns,
   RUN_STATUS,
   runDuration,
@@ -113,4 +114,11 @@ test("a run's duration reads short, and is null until it ends", () => {
     runDuration({ ...run, ended_at: "2026-11-10T14:35:10Z" }),
     "3 min 5 s",
   );
+});
+
+test("a run id is a UUID", () => {
+  assert.equal(isRunId("87c12385-9377-4c3c-a0c5-b49c47c3882e"), true);
+  assert.equal(isRunId("87C12385-9377-4C3C-A0C5-B49C47C3882E"), true);
+  assert.equal(isRunId("not-a-uuid"), false);
+  assert.equal(isRunId(""), false);
 });

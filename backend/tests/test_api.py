@@ -18,6 +18,7 @@ from agent.graph import build_graph
 from agent.schemas import Proposal
 from api import ui_spec
 from api.rate_limit import RUN_LIMIT
+from api.schemas import MAX_OFFSET
 from main import app, dry_run_setting
 from runs import Ended, Progress, Runs
 from tests.fakes import (
@@ -309,6 +310,35 @@ async def test_starting_a_run_past_the_limit_is_429_and_opens_no_trace_session(c
     assert int(refused.headers["Retry-After"]) > 0
     assert len(opened) == RUNS_PER_WINDOW  # the refused request opened nothing
     assert len(await app.state.run_store.list_runs(100, 0)) == RUNS_PER_WINDOW  # nor a run row
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"target_app": "someone-else"},
+        {"target_app": "medas", "since": "2026-11-05T10:00:00Z", "until": "2026-11-05T09:00:00Z"},
+        {"target_app": "medas", "since": "2026-11-05T09:00:00Z", "until": "2026-11-05T09:00:00Z"},
+        {"since": "2026-11-05T09:00:00Z"},
+    ],
+)
+async def test_a_request_that_cannot_start_a_run_is_422_and_does_not_count(client, body):
+    opened: list[bool] = []
+    use_runs(open_traces=counting_session(opened))
+    for _ in range(RUNS_PER_WINDOW + 1):
+        refused = await post_stream(client, body)
+        assert refused.status_code == 422
+        assert refused.json()["detail"][0]["loc"][0] == "body"
+    assert opened == [] and await app.state.run_store.list_runs(100, 0) == []
+    assert (await post_stream(client)).status_code == 200  # no run was used up
+
+
+@pytest.mark.anyio
+async def test_a_body_that_is_not_json_is_422_and_does_not_count(client):
+    for _ in range(RUNS_PER_WINDOW + 1):
+        refused = await client.post("/v1/runs/stream", content=b"nope")
+        assert refused.status_code == 422
+    assert (await post_stream(client)).status_code == 200
 
 
 @pytest.mark.anyio
@@ -650,6 +680,8 @@ async def test_runs_are_listed_newest_first_with_who_started_them_and_no_state(c
     }
     assert [r["run_id"] for r in (await client.get("/v1/runs?limit=1")).json()] == [second_id]
     assert (await client.get("/v1/runs?limit=0")).status_code == 422
+    assert (await client.get(f"/v1/runs?offset={MAX_OFFSET}")).status_code == 200
+    assert (await client.get(f"/v1/runs?offset={MAX_OFFSET + 1}")).status_code == 422
 
 
 @pytest.mark.anyio
@@ -894,6 +926,16 @@ async def test_a_run_that_failed_before_its_first_checkpoint_is_not_resumed(clie
     (run,) = await listed(client)
     assert (await status_of(client, run["run_id"]))["resumable"] is False
     assert (await resume(client, run["run_id"])).status_code == 409
+
+
+@pytest.mark.anyio
+async def test_a_resume_refused_with_a_409_or_404_does_not_count(client):
+    use_runs()
+    run_id = await start(client)  # waits for review: not resumable
+    for _ in range(RUNS_PER_WINDOW):
+        assert (await resume(client, run_id)).status_code == 409
+        assert (await resume(client, "00000000-0000-0000-0000-000000000000")).status_code == 404
+    assert (await post_stream(client)).status_code == 200  # only the first run counted
 
 
 @pytest.mark.anyio

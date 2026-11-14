@@ -105,6 +105,31 @@ export function signatureParts(signature: string): {
       };
 }
 
+/** A run of signature text, or a value the clustering masked because it differs between traces. */
+export type SignaturePart =
+  | { kind: "text"; text: string }
+  | { kind: "number" }
+  | { kind: "quoted" };
+
+/**
+ * A signature's error split at what the clustering masked (backend/agent/clustering.py
+ * `normalise_error`): `#` for a number and `'x'` for a quoted value, so the page can show them as
+ * placeholders a reader recognises instead of a bare `#`.
+ */
+export function signatureMasks(error: string): SignaturePart[] {
+  const parts: SignaturePart[] = [];
+  let last = 0;
+  for (const m of error.matchAll(/#|'x'/g)) {
+    if (m.index > last)
+      parts.push({ kind: "text", text: error.slice(last, m.index) });
+    parts.push({ kind: m[0] === "#" ? "number" : "quoted" });
+    last = m.index + m[0].length;
+  }
+  if (last < error.length)
+    parts.push({ kind: "text", text: error.slice(last) });
+  return parts;
+}
+
 export type ConfidenceLevel = "high" | "medium" | "low";
 
 /** The diagnoser's confidence in a word: high from 0.75, medium from 0.5, low below. */

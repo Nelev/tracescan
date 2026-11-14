@@ -27,3 +27,13 @@ export function formatCategory(category: string): string {
   const words = category.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/** A path segment as the reader typed it: `%3Cx%3E` reads `<x>`; one that is not valid percent
+ * encoding is kept as it came. */
+export function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}

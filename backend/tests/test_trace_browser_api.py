@@ -3,6 +3,7 @@
 import pytest
 from sqlalchemy import text
 
+from api.schemas import MAX_OFFSET
 from api.traces import decode
 from api.traces import store_spans as store
 from main import app
@@ -91,6 +92,7 @@ async def test_the_list_pages_with_the_total_over_its_filters(browser):
     other = await browser.get("/v1/traces", params={"app": "someone-else"})
     assert (other.json(), other.headers["X-Total-Count"]) == ([], "0")
     assert (await browser.get("/v1/traces", params={"offset": -1})).status_code == 422
+    assert (await browser.get("/v1/traces", params={"offset": MAX_OFFSET + 1})).status_code == 422
 
 
 @pytest.mark.anyio

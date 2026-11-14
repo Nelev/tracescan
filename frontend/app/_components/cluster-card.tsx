@@ -23,6 +23,7 @@ import {
   formatUsage,
   healthyTwinsText,
   METHOD_LABEL,
+  signatureMasks,
   signatureParts,
   verificationText,
 } from "@/lib/run-overview";
@@ -31,6 +32,7 @@ import { tracePath } from "@/lib/traces";
 import type { Decision } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip } from "./chip";
+import { SignatureText } from "./signature-text";
 import { SEGMENT_ITEM, SEGMENT_LIST } from "./styles";
 import { TraceTree } from "./trace-tree";
 import { useTrace } from "./use-traces";
@@ -388,6 +390,7 @@ export function ClusterCard({
   }, [focus]);
   const { diagnosis } = cluster;
   const { step, error } = signatureParts(cluster.signature);
+  const errorParts = signatureMasks(error);
   const exemplars = new Set(cluster.exemplar_trace_ids);
   const shown = cluster.trace_ids.slice(0, MAX_TRACE_CHIPS);
   const hidden = cluster.trace_ids.length - shown.length;
@@ -454,11 +457,17 @@ export function ClusterCard({
           )}
         </header>
 
-        {error && (
+        {errorParts.length > 0 && (
           <Part title="Error seen">
             <p className="rounded-lg bg-muted px-3 py-2 font-mono [overflow-wrap:anywhere]">
-              {error}
+              <SignatureText parts={errorParts} />
             </p>
+            {errorParts.some((p) => p.kind !== "text") && (
+              <p className="text-muted-foreground">
+                The error as the traces share it: <i>n</i> stands for a number
+                and <i>‘…’</i> for a quoted value that differ between them.
+              </p>
+            )}
           </Part>
         )}
 

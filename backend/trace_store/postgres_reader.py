@@ -77,6 +77,21 @@ def read_only_engine(database_url: str) -> AsyncEngine:
     )
 
 
+def _only_root(root: type[Span]) -> ColumnElement[bool]:
+    """`root` is the one root span of its trace. A trace with two roots is not whole (build_tree
+    refuses it), so it is neither listed nor searched, and never twice."""
+    other = aliased(Span, name="other_root")
+    return ~(
+        select(other.span_id)
+        .where(
+            other.trace_id == root.trace_id,
+            other.parent_span_id.is_(None),
+            other.span_id != root.span_id,
+        )
+        .exists()
+    )
+
+
 def _listed_roots(
     app: str, since: datetime | None, until: datetime | None, failed_only: bool
 ) -> tuple[type[Span], ScalarSelect[float], list[ColumnElement[bool]]]:
@@ -87,7 +102,11 @@ def _listed_roots(
     root = aliased(Span, name="root")
     # Per root, probing the scores' key: no aggregate over the whole table.
     lowest = select(func.min(Score.value)).where(Score.trace_id == root.trace_id).scalar_subquery()
-    listed: list[ColumnElement[bool]] = [root.parent_span_id.is_(None), root.app == app]
+    listed: list[ColumnElement[bool]] = [
+        root.parent_span_id.is_(None),
+        root.app == app,
+        _only_root(root),
+    ]
     if failed_only:
         listed.append(lowest <= FAILED_MAX_SCORE)
     if since is not None:
@@ -114,7 +133,7 @@ class PostgresTraceReader:
         if query.app not in self._apps:
             return []
         roots = select(Span.trace_id, Span.name, Span.start_time, Span.end_time, Span.status).where(
-            Span.parent_span_id.is_(None), Span.app == query.app
+            Span.parent_span_id.is_(None), Span.app == query.app, _only_root(Span)
         )
         if query.since is not None:
             roots = roots.where(Span.start_time >= query.since)

@@ -11,8 +11,9 @@
 
 Every route needs a Clerk session token (auth.session, required for this router in main.py):
 `401` without a valid one, `503` when it cannot be verified, both before a run or a trace session
-is opened. Starting or resuming a run is also limited per person (api.rate_limit, a `429`). Who starts or
-reviews a run is recorded under the name the token carries, never one the request sends.
+is opened. Starting or resuming a run is also limited per person (api.rate_limit, a `429`),
+counted only once the request is found admissible. Who starts or reviews a run is recorded
+under the name the token carries, never one the request sends.
 
 No response carries raw state: failed traces can hold clinical span data. What leaves the server
 is counts, the actions log and the drafted proposals, plus on the stream the UI spec the small
@@ -27,8 +28,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from api.rate_limit import limit_runs
-from api.schemas import TOTAL_COUNT, ReviewRequest, ReviewResponse, RunRequest
+from api.rate_limit import charge_run
+from api.schemas import MAX_OFFSET, TOTAL_COUNT, ReviewRequest, ReviewResponse, RunRequest
 from api.ui_spec import UiSpecs
 from auth import CurrentUser
 from runs import (
@@ -66,6 +67,8 @@ def _runs(request: Request) -> Runs:
 
 async def _open_run(
     body: RunRequest,
+    request: Request,
+    response: Response,
     runs: Annotated[Runs, Depends(_runs)],
     user: CurrentUser,
 ) -> AsyncIterator[StartedRun]:
@@ -74,8 +77,10 @@ async def _open_run(
     FastAPI unwinds a dependency when the response ends, including when the client disconnects.
     A generator suspended at a `yield` is not closed on disconnect, so the endpoint must not own
     the run itself: it would keep going, and keep the trace session open, until garbage
-    collection.
+    collection. The run is counted against the limit here, once FastAPI has validated `body`, so
+    a request it refuses uses up no run.
     """
+    await charge_run(request, response, user)
     try:
         async with runs.start(body.target_app, user.name, body.since, body.until) as run:
             yield run
@@ -85,10 +90,18 @@ async def _open_run(
 
 
 async def _open_resume(
-    run_id: UUID, runs: Annotated[Runs, Depends(_runs)]
+    run_id: UUID,
+    request: Request,
+    response: Response,
+    runs: Annotated[Runs, Depends(_runs)],
+    user: CurrentUser,
 ) -> AsyncIterator[StartedRun]:
-    """Own the resumed run for the whole response, as `_open_run` owns a new one."""
+    """Own the resumed run for the whole response, as `_open_run` owns a new one. A run that
+    cannot be resumed is refused before it is counted against the limit; the resume checks
+    again, since another may have got the run in between."""
     try:
+        await runs.check_resumable(str(run_id))
+        await charge_run(request, response, user)
         async with runs.resume(str(run_id)) as run:
             yield run
     except RunNotFound:
@@ -99,7 +112,7 @@ async def _open_resume(
         raise _run_failed() from None
 
 
-@router.post("/runs/stream", response_class=EventSourceResponse, dependencies=[Depends(limit_runs)])
+@router.post("/runs/stream", response_class=EventSourceResponse)
 async def stream_run(
     run: Annotated[StartedRun, Depends(_open_run)], request: Request
 ) -> AsyncIterator[ServerSentEvent]:
@@ -122,7 +135,6 @@ async def stream_run(
 @router.post(
     "/runs/{run_id}/resume/stream",
     response_class=EventSourceResponse,
-    dependencies=[Depends(limit_runs)],
 )
 async def resume_run(
     run: Annotated[StartedRun, Depends(_open_resume)], request: Request
@@ -174,7 +186,7 @@ async def list_runs(
     runs: Annotated[Runs, Depends(_runs)],
     response: Response,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
 ) -> list[RunRecord]:
     """The newest runs first: ids, names, statuses and counts, never state or proposals.
 
