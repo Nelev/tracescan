@@ -151,7 +151,7 @@ TraceScan uses two separate kinds of memory: a checkpointer for the state of one
 | Short-term | Checkpointer (`InMemorySaver`, then `PostgresSaver`) | One run, keyed by `thread_id` | Full graph state at every step | Lets the run pause at human review and resume hours later |
 | Long-term | Store (`InMemoryStore`, then `PostgresStore`) | All runs, namespaced by target app | Known issues: cluster signature → issue id | Turns repeat failures into issue updates, not duplicates |
 
-In the sketch, the known-issues lookup is an exact match on the cluster signature. The real version uses the store's semantic search, so a cluster described slightly differently still matches the right issue. The store is only written after an approved action, so rejected proposals never become "known".
+In the sketch, the known-issues lookup is an exact match on the cluster signature. The real version uses the store's semantic search, so a cluster described slightly differently still matches the right issue. The store is only written after an approved action, so rejected proposals never become "known". Built instead (2026-11-14): a second PGVector collection, `known_issues` (`runs/known_issues.py`), not the LangGraph store. It embeds the failing step's `step_text` of every decided diagnosis, approved as a confirmed cause and rejected as a warning, and the diagnoser reads the nearest few; a rejected one is never used for matching issues. Duplicate detection over the approved ones is still to do.
 
 ## Evaluation
 
@@ -291,7 +291,7 @@ The tasks below follow the five phases of the build plan; each one ends with a c
 Do these in order and stop where time runs out; each one is useful on its own.
 
 - [ ] **Build the reproducer.** Run Medas in Docker, replay each cluster's exemplar inputs three times, and set confirmed, flaky or unconfirmed. Failures that do not reproduce stay in the proposal as unconfirmed, which matters for intermittent timeouts. A reproduced failure confirms the symptom, not the proposed root cause, so the diagnosis keeps its own confidence. Done when an injected fault shows as confirmed and an intermittent timeout shows as flaky or unconfirmed instead of disappearing.
-- [ ] **Add known-issues memory.** Index cluster signatures in the store with embeddings and match by semantic search above a threshold. Done when a second run on the same fault updates the existing issue instead of creating a new one.
+- [ ] **Add known-issues memory.** Index cluster signatures in the store with embeddings and match by semantic search above a threshold. Done when a second run on the same fault updates the existing issue instead of creating a new one. Half built: decided diagnoses are remembered and shown to the diagnoser (`runs/known_issues.py`); updating the existing issue is not.
 - [x] **Connect GitHub.** A fine-grained token scoped to a test repo; create issues and add comments for updates. Done when an approved proposal opens a real issue in the test repo. Issues are created (`agent/github.py`, githubkit, a private repo checked at startup, a hidden marker so a retried review opens no duplicate) and were checked against a real test repo; comments for updates wait for the known-issues memory, which is what knows an issue already exists.
 - [ ] **Run the MAST-Data study.** Write an adapter from MAST-Data traces to `TraceSummary`, run the diagnoser on the 21 MAST-Data-human traces, and compute accuracy and Cohen's kappa. Done when the numbers are in the results table next to the paper's.
 

@@ -13,7 +13,7 @@ from agent.context import TraceContext
 from agent.nodes.apply_actions import apply_actions
 from agent.schemas import Proposal, RegressionCase, SpanRef
 from agent.state import TriageState
-from tests.fakes import FakeTraces, fake_context, files_under
+from tests.fakes import FakeKnownIssues, FakeTraces, fake_context, files_under
 
 
 def proposal(cluster_id: str = "c0", *, diagnosed: bool = True) -> Proposal:
@@ -123,3 +123,68 @@ async def test_the_node_refuses_dry_run_off_without_github_and_writes_nothing(tm
             state({"c0": "approve", "c1": "approve"}), runtime(tmp_path, dry_run=False)
         )
     assert files_under(tmp_path) == []
+
+
+def reviewed(decisions: dict) -> TriageState:
+    """state() plus the clusters and diagnoses the memory is built from."""
+    clusters = [
+        {
+            "cluster_id": c,
+            "trace_ids": ["tr_1"],
+            "signature": "retrieve: empty result",
+            "exemplar_trace_ids": ["tr_1"],
+            "method": "step_error",
+        }
+        for c in ("c0", "c1")
+    ]
+    diagnoses = [
+        {
+            "cluster_id": c,
+            "category": "retrieval_miss",
+            "root_cause": f"cause of {c}",
+            "suggested_fix": "fix it",
+            "failing_step": "step: retrieve",
+        }
+        for c in ("c0", "c1")
+    ]
+    return {**state(decisions), "clusters": clusters, "diagnoses": diagnoses}  # type: ignore[typeddict-item]
+
+
+@pytest.mark.anyio
+async def test_the_node_remembers_approved_and_rejected_diagnoses_under_the_run(tmp_path):
+    memory = FakeKnownIssues()
+    result = await apply_actions(
+        reviewed({"c0": "reject", "c1": "approve"}), runtime(tmp_path, known_issues=memory)
+    )
+    assert {key: m["verdict"] for key, m in memory.saved.items()} == {
+        ("medas", "run-1", "c0"): "rejected",
+        ("medas", "run-1", "c1"): "approved",
+    }
+    assert result["actions_log"][-1] == "remembered 2 decided diagnosis(es) for later runs"
+    assert files_under(tmp_path) == ["issues/c1.md", REGRESSION_FILE]  # only approved ones written
+
+
+@pytest.mark.anyio
+async def test_all_rejected_writes_no_issue_but_is_remembered(tmp_path):
+    memory = FakeKnownIssues()
+    await apply_actions(
+        reviewed({"c0": "reject", "c1": "reject"}), runtime(tmp_path, known_issues=memory)
+    )
+    assert files_under(tmp_path) == []
+    assert len(memory.saved) == 2
+
+
+@pytest.mark.anyio
+async def test_a_decided_diagnosis_reaches_the_next_runs_diagnoser(tmp_path):
+    """The memory end to end: what one run's apply_actions saves, the next run's diagnoser sees."""
+    from agent.nodes.diagnose_cluster import known_issues_section
+
+    memory = FakeKnownIssues()
+    await apply_actions(
+        reviewed({"c0": "approve", "c1": "reject"}), runtime(tmp_path, known_issues=memory)
+    )
+    task = {"cluster": {"cluster_id": "c7"}, "target_app": "medas", "failing_span": None}
+    context = replace(fake_context(FakeTraces()), known_issues=memory)
+    section, shown = await known_issues_section(task, "step: retrieve", context)  # type: ignore[arg-type]
+    assert shown == 2
+    assert "cause: cause of c0" in section and "cause: cause of c1" in section

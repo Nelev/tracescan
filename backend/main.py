@@ -24,6 +24,7 @@ from auth import AuthSettings, session_claims
 from db.engine import create_engine
 from runs import PostgresRunStore, Runs
 from runs.healthy import HealthyStore
+from runs.known_issues import KnownIssueStore
 from runs.scores import ScoreStore
 from trace_store.postgres_reader import PostgresTraceReader, read_only_engine
 
@@ -73,6 +74,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             build_diagnoser_model(),
             build_trace_judge_model(),
             healthy=healthy,
+            # Decided diagnoses, saved by apply_actions after each review, read by the diagnoser.
+            known_issues=KnownIssueStore(engine, embedder),
             dry_run=dry_run,
             github=github,
         )

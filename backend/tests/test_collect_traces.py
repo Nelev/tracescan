@@ -116,7 +116,9 @@ def test_routes():
     ]
     (unblamed,) = route_after_cluster(state(clusters=clusters[:1]))
     assert isinstance(unblamed, Send) and unblamed.arg["failing_span"] is None
-    assert route_after_review(state(decisions={"c0": "reject"})) == "__end__"
+    # A rejection is remembered too (the known-issues memory), so it goes on to apply_actions.
+    assert route_after_review(state(decisions={"c0": "reject"})) == "apply_actions"
+    assert route_after_review(state(decisions={})) == "__end__"
     assert route_after_review(state(decisions={"c0": "approve"})) == "apply_actions"
 
 

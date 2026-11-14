@@ -12,6 +12,7 @@ already in state), so it opens no session and passes `ClosedTraces()` instead.
 """
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -23,7 +24,7 @@ from agent.const import MAX_PARALLEL_DIAGNOSES
 from agent.embeddings import Embedder
 from agent.github import GitHubIssues
 from agent.model_guard import Spent
-from agent.schemas import HealthyMatch, StepKey
+from agent.schemas import HealthyMatch, IssueMemory, KnownIssue, StepKey
 from trace_store.models import SpanNode, TraceQuery, TraceSummary
 
 
@@ -51,6 +52,15 @@ class HealthyLookup(Protocol):
     async def similar(self, text: str, app: str, key: StepKey, k: int) -> list[HealthyMatch]: ...
 
 
+class KnownIssues(Protocol):
+    """The known-issues memory (runs.known_issues): the diagnoser reads it, apply_actions alone
+    writes it, after the review."""
+
+    async def similar(self, text: str, app: str, k: int) -> list[KnownIssue]: ...
+
+    async def save(self, app: str, run_id: str, memories: Sequence[IssueMemory]) -> int: ...
+
+
 @dataclass
 class TraceContext:
     traces: TraceAccess
@@ -60,6 +70,8 @@ class TraceContext:
     judge_model: BaseChatModel | None = None
     # Healthy calls of a failing step, shown to the diagnoser next to the failure; None: none.
     healthy: HealthyLookup | None = None
+    # Past decided diagnoses, shown to the diagnoser and written by apply_actions; None: none.
+    known_issues: KnownIssues | None = None
     # Read by apply_actions only. The server sets these; nothing in a request can change them.
     dry_run: bool = True  # off opens GitHub issues, and needs `github`
     out_dir: Path = OUT_DIR  # where a dry run writes its files, and every run its regression cases

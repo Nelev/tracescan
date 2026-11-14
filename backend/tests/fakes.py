@@ -18,7 +18,7 @@ from sklearn.feature_extraction.text import HashingVectorizer
 from agent.context import TraceAccess, TraceContext
 from agent.evidence import error_spans
 from agent.judge import fallback_span
-from agent.schemas import Decision, Diagnosis, Evidence, TraceVerdict
+from agent.schemas import Decision, Diagnosis, Evidence, IssueMemory, KnownIssue, TraceVerdict
 from runs.schemas import ReviewRecord, RunCounts, RunRecord, StoredStatus
 from runs.store import CLAIMABLE, ENDED, NotClaimable
 from trace_store.models import SpanNode, TraceQuery, TraceSummary
@@ -398,3 +398,37 @@ class FixtureTraceReader:
     async def get_span(self, trace_id: str, span_id: str) -> SpanNode | None:
         span = self._spans.get(trace_id, {}).get(span_id)
         return span.model_copy(update={"children": []}) if span else None
+
+
+class FakeKnownIssues:
+    """An in-memory known-issues memory: a lookup finds the saved diagnoses of the app whose
+    failing step is the same text (distance 0). Records what it was asked."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.saved: dict[tuple[str, str, str], IssueMemory] = {}
+        self.asked: list[tuple[str, str, int]] = []
+        self.fail = fail
+
+    async def save(self, app: str, run_id: str, memories) -> int:
+        for memory in memories:
+            self.saved[(app, run_id, memory["cluster_id"])] = memory
+        return len(memories)
+
+    async def similar(self, text: str, app: str, k: int) -> list[KnownIssue]:
+        self.asked.append((text, app, k))
+        if self.fail:
+            raise RuntimeError("store down")
+        return [
+            KnownIssue(
+                verdict=m["verdict"],
+                category=m["category"],
+                root_cause=m["root_cause"],
+                suggested_fix=m["suggested_fix"],
+                signature=m["signature"],
+                run_id=run_id,
+                cluster_id=cluster_id,
+                distance=0.0,
+            )
+            for (saved_app, run_id, cluster_id), m in self.saved.items()
+            if saved_app == app and m["failing_step"] == text
+        ][:k]
