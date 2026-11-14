@@ -102,8 +102,9 @@ def route_after_cluster(state: TriageState) -> list[Send] | str:
 
 
 def route_after_review(state: TriageState) -> str:
-    """Nothing approved: end the run without calling apply_actions."""
-    return "apply_actions" if "approve" in state.get("decisions", {}).values() else END
+    """Any decision goes on to apply_actions, which writes the approved proposals and remembers
+    every decided one (the known-issues memory); no decision at all ends the run."""
+    return "apply_actions" if state.get("decisions") else END
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None, store: BaseStore | None = None):

@@ -11,6 +11,7 @@ from agent import model_guard
 from agent.chunks import step_key, step_text
 from agent.const import (
     HEALTHY_TWINS,
+    KNOWN_ISSUES_K,
     MAX_MODEL_ATTEMPTS,
     MAX_PARALLEL_DIAGNOSES,
     UNSUPPORTED_CONFIDENCE_CAP,
@@ -22,6 +23,7 @@ from agent.schemas import Cluster, ClusterTask, Diagnosis, Evidence, HealthyMatc
 from tests.fakes import (
     DIAGNOSIS,
     FakeApiError,
+    FakeKnownIssues,
     FakeStructuredModel,
     FakeTraces,
     fake_context,
@@ -54,11 +56,13 @@ TASK = ClusterTask(
 )
 
 
-async def diagnose(model, healthy=None, context=None) -> dict:
+async def diagnose(model, healthy=None, context=None, known_issues=None) -> dict:
     """One run of the node over CLUSTER, whose one exemplar is TREE; pass `context` to run several
     branches of one run."""
     context = context or replace(
-        fake_context(FakeTraces(trees={"t1": TREE}), model), healthy=healthy
+        fake_context(FakeTraces(trees={"t1": TREE}), model),
+        healthy=healthy,
+        known_issues=known_issues,
     )
     return await diagnose_cluster(TASK, Runtime(context=context))
 
@@ -122,6 +126,59 @@ async def test_a_failing_store_does_not_fail_the_diagnosis(caplog):
     assert result["diagnoses"][0]["cluster_id"] == "c0"
     assert result["diagnoses"][0]["healthy_twins"] == 0
     assert "healthy twins of c0 not found: RuntimeError" in caplog.text
+
+
+def remembered(verdict: str, cause: str) -> dict:
+    """A decided diagnosis saved under TREE's failing step, as apply_actions saves it."""
+    return {
+        "cluster_id": "c0",
+        "signature": CLUSTER["signature"],
+        "verdict": verdict,
+        "category": "retrieval_miss",
+        "root_cause": cause,
+        "suggested_fix": "a fix",
+        "failing_step": step_text(TREE, "s1"),
+    }
+
+
+@pytest.mark.anyio
+async def test_the_model_sees_past_confirmed_and_rejected_causes_of_the_same_failing_step():
+    memory = FakeKnownIssues()
+    await memory.save("medas", "run-0", [remembered("approved", "the filter drops a category")])
+    await memory.save("medas", "run-9", [remembered("rejected", "the index was empty")])
+    model = fake_diagnoser(DIAGNOSIS)
+    result = await diagnose(model, known_issues=memory)
+
+    assert memory.asked == [(step_text(TREE, "s1"), "medas", KNOWN_ISSUES_K)]
+    prompt = str(model.seen[0][1].content)
+    assert "[CONFIRMED by a reviewer] category: retrieval_miss" in prompt
+    assert "cause: the filter drops a category" in prompt
+    assert "[REJECTED by a reviewer] category: retrieval_miss" in prompt
+    assert "cause: the index was empty" in prompt
+    stored = result["diagnoses"][0]
+    assert stored["memories"] == 2
+    assert stored["failing_step"] == step_text(TREE, "s1")  # what apply_actions will save it under
+
+
+@pytest.mark.anyio
+async def test_no_memory_and_a_failing_memory_leave_the_prompt_as_it_was(caplog):
+    without, failing = fake_diagnoser(DIAGNOSIS), fake_diagnoser(DIAGNOSIS)
+    no_store = await diagnose(without)
+    down = await diagnose(failing, known_issues=FakeKnownIssues(fail=True))
+    assert [r["diagnoses"][0]["memories"] for r in (no_store, down)] == [0, 0]
+    assert without.seen[0][1].content == failing.seen[0][1].content
+    assert "known issues of c0 not found: RuntimeError" in caplog.text
+    # The failing step is kept even with no memory, so a decision can still be remembered.
+    assert no_store["diagnoses"][0]["failing_step"] == step_text(TREE, "s1")
+
+
+@pytest.mark.anyio
+async def test_a_cluster_whose_judge_blamed_no_span_has_no_failing_step_to_look_up():
+    memory, model = FakeKnownIssues(), fake_diagnoser(DIAGNOSIS)
+    context = replace(fake_context(FakeTraces(trees={"t1": TREE}), model), known_issues=memory)
+    result = await diagnose_cluster({**TASK, "failing_span": None}, Runtime(context=context))
+    assert memory.asked == []
+    assert result["diagnoses"][0]["failing_step"] is None
 
 
 async def run_graph(trees: dict, model) -> dict:

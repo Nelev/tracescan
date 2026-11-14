@@ -28,6 +28,12 @@ HEALTHY_TWINS = 3
 # seeded day (0.044 to 0.097). bge-small bunches its distances (other steps' nearest texts sit at
 # 0.053 to 0.11), so the hard filters in runs.healthy decide relevance, not this number.
 MAX_TWIN_DISTANCE = 0.12
+# Past decided diagnoses the diagnoser is shown (runs.known_issues similar()): approved ones as
+# confirmed causes, rejected ones as warnings. At most this many, nearest first.
+KNOWN_ISSUES_K = 3
+# The farthest (cosine distance, local embedder) a past failing step may be from this cluster's
+# and still be shown. The same starting value as MAX_TWIN_DISTANCE: both compare step_texts.
+MAX_ISSUE_DISTANCE = 0.12
 
 # An OpenRouter slug ("vendor/model"); the DIAGNOSER_MODEL environment variable overrides it.
 DEFAULT_DIAGNOSER_MODEL = "anthropic/claude-sonnet-5-5"

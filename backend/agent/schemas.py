@@ -108,6 +108,12 @@ class StoredDiagnosis(Diagnosis):
     # How many healthy calls of the failing step the prompt showed; None for runs from before
     # the count was kept.
     healthy_twins: int | None = Field(default=None, ge=0)
+    # The step_text (agent.chunks) of the cluster's failing span, kept so apply_actions, which reads
+    # no traces, can remember the diagnosis under it (the known-issues memory); None when the trace
+    # judge blamed no span, and for runs from before it was kept.
+    failing_step: str | None = None
+    # How many past decided diagnoses the prompt showed; None for runs from before it was kept.
+    memories: int | None = Field(default=None, ge=0)
 
 
 # How the failure embeddings were flattened to 3D for the cluster map: t-SNE, or PCA for few points.
@@ -262,3 +268,34 @@ class HealthyMatch:
     text: str  # its step_text (agent.chunks): names, error types and bucketed numbers only
     distance: float  # cosine distance: 0 is the same text, smaller is nearer
     calls: int = 1  # how many of the stored calls found have this same text
+
+
+# What the reviewer made of a diagnosis, as the known-issues memory keeps it.
+IssueVerdict = Literal["approved", "rejected"]
+
+
+class IssueMemory(TypedDict):
+    """One decided, diagnosed proposal as the known-issues memory stores it (runs.known_issues).
+    Built by agent.memory.issue_memories; `failing_step` is what is embedded."""
+
+    cluster_id: str
+    signature: str
+    verdict: IssueVerdict
+    category: str
+    root_cause: str
+    suggested_fix: str
+    failing_step: str
+
+
+@dataclass(frozen=True)
+class KnownIssue:
+    """A past decided diagnosis (runs.known_issues) whose failing step is near this one's."""
+
+    verdict: IssueVerdict
+    category: str
+    root_cause: str
+    suggested_fix: str
+    signature: str
+    run_id: str
+    cluster_id: str
+    distance: float  # cosine distance between the two failing steps' texts
