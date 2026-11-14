@@ -2,6 +2,8 @@
 
 /** A cell of the app's tables (runs, traces), and a cell that holds a number. */
 export const CELL = "px-4 py-2 whitespace-nowrap";
+/** `CELL` with less room around it on a phone, for a table whose columns all must fit. */
+export const CELL_TIGHT = "px-2 py-2 whitespace-nowrap sm:px-4";
 export const NUMERIC = "text-right tabular-nums";
 
 /** A table's head row: sticky over the rows it heads. */
@@ -15,5 +17,8 @@ export const LINK =
 
 /** A segmented control: the list, and one of its options (a label around a radio). */
 export const SEGMENT_LIST = "flex gap-1 rounded-lg border bg-muted p-1";
+/** The chosen option of a segmented control, added to `SEGMENT_ITEM`. */
+export const SEGMENT_ACTIVE =
+  "bg-primary text-primary-foreground hover:text-primary-foreground";
 export const SEGMENT_ITEM =
   "type-body cursor-pointer rounded-md px-3 py-1.5 text-center text-muted-foreground transition-colors select-none hover:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring";

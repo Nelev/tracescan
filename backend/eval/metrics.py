@@ -1,6 +1,7 @@
 """The eval's scores, computed from a results file (eval/run.py) and the answer key.
 
 Run from backend/:  uv run python -m eval.metrics [out/eval/<file>.json]   (default: the newest)
+                    uv run python -m eval.metrics --export   (the results page's scores)
 
 Pure code: no model and no database. Every cluster gets a majority kind, the seeded kind most
 of its traces are of, and the scores follow from that. A ratio is (how many, out of how many).
@@ -9,6 +10,9 @@ when the file has verdicts. The trace judge, which decides which traces failed b
 is clustered, is scored on its own against the kinds: how many faulty traces it caught, how many
 harmless ones it flagged, per kind too, and whether it blamed the step the fault starts in; its
 spend is in the cost.
+
+`python -m eval.metrics --export` writes the scores of every results file to `EXPORT_PATH`, the file
+the frontend's results page imports: numbers and run metadata only, never a diagnosis or a trace kind.
 """
 
 import json
@@ -23,6 +27,8 @@ from eval import ground_truth, medas_ground_truth
 from eval.ground_truth import Fault, cause_of
 
 OUT_DIR = actions.OUT_DIR / "eval"  # where eval/run.py writes its results files
+# The frontend's copy of the scores (frontend/data/), committed so the page needs no backend.
+EXPORT_PATH = Path(__file__).resolve().parents[2] / "frontend" / "data" / "eval-results.json"
 
 
 def answer_key(result: dict[str, Any]) -> Mapping[str, Fault]:
@@ -164,7 +170,50 @@ def results_path(given: Path | None) -> Path:
     return path
 
 
+def experiment(result: dict[str, Any]) -> str:
+    """Which experiment a results file belongs to, by its answer key: its runs are only comparable
+    with each other. A control day of the seeded traces is its own; Medas's controls go with its
+    faults, since a Medas run sends both."""
+    if answer_key(result) is medas_ground_truth.FAULTS:
+        return "medas"
+    return "control" if result.get("control") else "seeded"
+
+
+def summary(run_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    """One results file as the results page reads it: metadata and the scores, a ratio as
+    `{hits, total}`. The per-kind breakdown is left out, and nothing of a diagnosis goes in."""
+    scores = {
+        name: {"hits": value[0], "total": value[1]} if isinstance(value, tuple) else value
+        for name, value in score(result).items()
+        if name != "judge_by_kind"
+    }
+    return {
+        "id": run_id,
+        "experiment": experiment(result),
+        "model": result.get("model"),
+        "judge_model": result.get("judge_model"),
+        "graded": bool(result.get("verdicts")),
+        "scores": scores,
+    }
+
+
+def export(results_dir: Path = OUT_DIR, path: Path = EXPORT_PATH) -> int:
+    """Write the summary of every results file in `results_dir`, oldest first, to `path`, and
+    return how many. A file that cannot be scored (from before a field existed) is skipped."""
+    rows = []
+    for file in sorted(results_dir.glob("*.json")):
+        try:
+            rows.append(summary(file.stem, json.loads(file.read_text())))
+        except (KeyError, TypeError, ValueError) as exc:
+            print(f"  skipped {file.name}: {type(exc).__name__}", file=sys.stderr)
+    path.write_text(json.dumps(rows, indent=2) + "\n")
+    return len(rows)
+
+
 def main() -> None:
+    if sys.argv[1:] == ["--export"]:
+        print(f"wrote {export()} runs to {EXPORT_PATH}")
+        return
     path = results_path(Path(sys.argv[1]) if len(sys.argv) > 1 else None)
     print(path)
     result = json.loads(path.read_text())

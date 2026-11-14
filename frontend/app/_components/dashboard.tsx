@@ -21,6 +21,7 @@ import { formatWhen, plural, RUN_STATUS, runPath, shortId } from "@/lib/runs";
 import type { RunRecord, RunStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { CHIP_TONE, TONE_FILL } from "./chip";
+import { Panel, Tile } from "./panel";
 import { useResource } from "./use-list";
 import { useRuns } from "./use-runs";
 
@@ -74,55 +75,6 @@ function NeedsReview({ runs }: { runs: RunRecord[] }) {
     </section>
   );
 }
-function Tile({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-}) {
-  return (
-    <div className="surface flex flex-col gap-1 rounded-xl border p-4">
-      <span className="type-h4">{label}</span>
-      <span className="type-h1 font-mono tabular-nums">{value}</span>
-      <span className="type-body text-muted-foreground">{hint}</span>
-    </div>
-  );
-}
-
-function Panel({
-  title,
-  note,
-  children,
-  className,
-}: {
-  title: string;
-  note?: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  const id = `panel-${title.toLowerCase().replace(/\W+/g, "-")}`;
-  return (
-    <section
-      aria-labelledby={id}
-      className={cn(
-        "surface flex min-w-0 flex-col gap-4 rounded-xl border p-4",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 id={id}>{title}</h2>
-        {note && (
-          <span className="type-body text-muted-foreground">{note}</span>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 /** Failed traces by category: one hue, bars from a shared baseline, values in text ink. */
 function Categories({ shares }: { shares: CategoryShare[] }) {
   const max = Math.max(1, ...shares.map((s) => s.traces));

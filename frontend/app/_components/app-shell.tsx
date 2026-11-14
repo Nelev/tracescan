@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  ChartLine,
   LayoutDashboard,
   List,
   type LucideIcon,
@@ -58,7 +59,7 @@ function NavLink({
 }
 
 /**
- * The left nav: the runs, the traces, and the run this window started, while there is one.
+ * The left nav: the runs, the traces, the eval's results, and the run this window started, while there is one.
  * `pathname` marks the open page; null while it is not known yet (the prerendered shell).
  */
 function Nav({ pathname }: { pathname: string | null }) {
@@ -95,6 +96,12 @@ function Nav({ pathname }: { pathname: string | null }) {
         label="Traces"
         Icon={Network}
         active={pathname?.startsWith("/traces") === true}
+      />
+      <NavLink
+        href="/results"
+        label="Results"
+        Icon={ChartLine}
+        active={pathname === "/results"}
       />
     </nav>
   );

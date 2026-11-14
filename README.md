@@ -357,6 +357,7 @@ cd backend
 uv run --env-file .env python -m eval.run        # seed a day and triage it: out/eval/<time>.json
 uv run --env-file .env python -m eval.judge      # grade the root causes
 uv run python -m eval.metrics                    # print the scores
+uv run python -m eval.metrics --export           # update the app's results page
 ```
 
 ### On Medas's own faults
@@ -528,7 +529,7 @@ The MVP gate passed on 2026-11-14. [`PLAN.md`](PLAN.md) has every task with its 
 - **The agent:** the trace judge, two-stage clustering with the 3D map, the diagnoser with evidence checks, healthy twins and known issues, budgets and retries, drafted proposals, the review pause and `apply_actions`.
 - **Outputs:** dry-run issue files and regression cases; real GitHub issues in a private repo (`DRY_RUN=0`).
 - **Memory:** the healthy-span store and the known-issues memory (pgvector), both read by the diagnoser.
-- **The app:** Clerk sign-in, a dashboard, the runs list, a live run page (stepper, cluster map, findings with inline review, resume), the trace browser, and the json-render agent console.
+- **The app:** Clerk sign-in, a dashboard, the runs list, a live run page (stepper, cluster map, findings with inline review, resume), the trace browser, the eval results page, and the json-render agent console.
 - **Durability:** Postgres checkpoints (a paused run survives a restart), run and review records, one review at a time per run, resumable runs, a rate limit of 10 runs per user per hour.
 - **The eval:** a seeded day, a control day, and Medas's own fault switches, graded by a model from another vendor.
 
@@ -539,7 +540,6 @@ The MVP gate passed on 2026-11-14. [`PLAN.md`](PLAN.md) has every task with its 
 - **Detection gaps.** The weak-model fault is never judged failed, and causes are named for 2 of the 5 Medas faults caught (see the eval).
 - **Repeated eval runs.** Every number above is one run; the models' variance is not measured yet.
 - **MAST-Data agreement study.**
-- **Results page** in the app for the eval table.
 - **Ship:** a Docker Compose deployment with Medas, a scheduled daily run, and the demo video.
 - **Smaller gaps:** a dedicated read-only database role for the trace server (the session is read-only, the role isn't created); Clerk user ids stored next to names; run duration and the judge's spend in the run list; a personal-data scan of issue text before it is filed; retrying `apply_actions` after a failed resume past the review.
 - **Parked:** tracing TraceScan itself and LangGraph Studio, both cut from the MVP.
