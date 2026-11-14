@@ -65,7 +65,7 @@ SUMMARY = TraceSummary(
 
 
 class StubReader:
-    """Serves SUMMARY as the only failed trace and SPAN as trace t1."""
+    """Serves SUMMARY as the only trace and SPAN as trace t1."""
 
     async def search_traces(self, query):
         return [SUMMARY]

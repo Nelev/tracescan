@@ -112,10 +112,10 @@ def test_the_public_routes_are_still_served():
 
 
 @pytest.mark.anyio
-async def test_health_is_open_and_the_collector_needs_its_own_token(anon):
+async def test_health_is_open_and_the_collector_refuses_a_session_token(anon):
     assert (await anon.get("/health")).status_code == 200
-    # The collector takes no session (Medas's exporter has none) but an app token instead.
-    assert (await anon.post("/v1/traces", content=b"{}")).status_code == 401
+    # The collector takes no session (Medas's exporter has none) but an app token instead; a
+    # request with no token at all is in test_traces_api.
     session = await anon.post("/v1/traces", content=b"{}", headers=bearer(token()))
     assert session.status_code == 401
 

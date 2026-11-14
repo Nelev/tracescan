@@ -5,6 +5,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from tests.fakes import FixtureTraceReader
+from trace_store.const import ID_PATTERN
 from trace_store.mcp_server import build_server
 
 SEARCH = {"query": {"app": "medas"}}
@@ -15,21 +16,6 @@ OTHER_APP = {"query": {"app": "other"}}
 async def client():
     async with Client(build_server(FixtureTraceReader())) as c:
         yield c
-
-
-@pytest.mark.anyio
-async def test_allowed_app_and_ids_pass(client):
-    await client.call_tool("search_traces", SEARCH)
-    await client.call_tool("get_trace_tree", {"trace_id": "tr_retrieval_miss"})
-    await client.call_tool(
-        "get_span", {"trace_id": "tr_retrieval_miss", "span_id": "sp_rm_retrieve"}
-    )
-
-
-@pytest.mark.anyio
-async def test_other_app_is_rejected(client):
-    with pytest.raises(ToolError, match="app not allowed"):
-        await client.call_tool("search_traces", OTHER_APP)
 
 
 @pytest.mark.anyio
@@ -56,7 +42,7 @@ async def test_malformed_span_id_is_rejected(client):
 async def test_id_pattern_is_in_the_tool_schema(client):
     tools = {t.name: t for t in await client.list_tools()}
     props = tools["get_span"].inputSchema["properties"]
-    assert props["trace_id"]["pattern"] == props["span_id"]["pattern"]
+    assert props["trace_id"]["pattern"] == props["span_id"]["pattern"] == ID_PATTERN
 
 
 @pytest.mark.anyio

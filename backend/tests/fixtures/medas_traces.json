@@ -8,10 +8,6 @@
         "start_time": "2026-11-05T09:00:00Z",
         "duration_ms": 2400.0,
         "status": "error",
-        "error_message": "answer not grounded in retrieved context",
-        "failing_span_id": "sp_rm_retrieve",
-        "failing_span_name": "retrieve",
-        "min_score": 0.1,
         "signature": "retrieve returned 0 relevant chunks; llm answered without sources"
       },
       "spans": [
@@ -48,10 +44,6 @@
         "start_time": "2026-11-05T10:00:00Z",
         "duration_ms": 900.0,
         "status": "error",
-        "error_message": "tool call failed validation: missing required field 'dose_unit'",
-        "failing_span_id": "sp_ts_tool",
-        "failing_span_name": "execute_tool lookup_dosage",
-        "min_score": 0.0,
         "signature": "tool lookup_dosage rejected arguments: missing dose_unit"
       },
       "spans": [
@@ -88,10 +80,6 @@
         "start_time": "2026-11-05T11:00:00Z",
         "duration_ms": 1800.0,
         "status": "ok",
-        "error_message": null,
-        "failing_span_id": null,
-        "failing_span_name": null,
-        "min_score": 0.95,
         "signature": "healthy control"
       },
       "spans": [

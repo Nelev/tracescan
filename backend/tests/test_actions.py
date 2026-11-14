@@ -110,13 +110,6 @@ def state(decisions: dict) -> TriageState:
 
 
 @pytest.mark.anyio
-async def test_the_node_writes_only_the_approved_proposals(tmp_path):
-    result = await apply_actions(state({"c0": "reject", "c1": "approve"}), runtime(tmp_path))
-    assert files_under(tmp_path) == ["issues/c1.md", REGRESSION_FILE]
-    assert result["actions_log"][0] == "[dry-run] wrote issues/c1.md"
-
-
-@pytest.mark.anyio
 async def test_the_node_refuses_dry_run_off_without_github_and_writes_nothing(tmp_path):
     with pytest.raises(RuntimeError):
         await apply_actions(
@@ -160,6 +153,7 @@ async def test_the_node_remembers_approved_and_rejected_diagnoses_under_the_run(
         ("medas", "run-1", "c0"): "rejected",
         ("medas", "run-1", "c1"): "approved",
     }
+    assert result["actions_log"][0] == "[dry-run] wrote issues/c1.md"
     assert result["actions_log"][-1] == "remembered 2 decided diagnosis(es) for later runs"
     assert files_under(tmp_path) == ["issues/c1.md", REGRESSION_FILE]  # only approved ones written
 

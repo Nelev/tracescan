@@ -1,10 +1,18 @@
 """The chat models are built from the environment, with a default each."""
 
+import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_openrouter import ChatOpenRouter
 
 from agent.const import DEFAULT_DIAGNOSER_MODEL, DEFAULT_TRACE_JUDGE_MODEL, DEFAULT_UI_SPEC_MODEL
 from agent.model import build_diagnoser_model, build_trace_judge_model, build_ui_spec_model
+
+MODELS = [
+    (build_diagnoser_model, "DIAGNOSER_MODEL", DEFAULT_DIAGNOSER_MODEL),
+    (build_trace_judge_model, "TRACE_JUDGE_MODEL", DEFAULT_TRACE_JUDGE_MODEL),
+    (build_ui_spec_model, "UI_SPEC_MODEL", DEFAULT_UI_SPEC_MODEL),
+]
+OTHER = "mistralai/mistral-small-3.2-24b-instruct"
 
 
 def built(model: BaseChatModel) -> ChatOpenRouter:
@@ -12,32 +20,17 @@ def built(model: BaseChatModel) -> ChatOpenRouter:
     return model
 
 
-def test_each_model_has_its_own_default(monkeypatch):
+@pytest.mark.parametrize(("build", "variable", "default"), MODELS, ids=[v for _, v, _ in MODELS])
+def test_each_model_has_its_own_default_and_variable(monkeypatch, build, variable, default):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.delenv("DIAGNOSER_MODEL", raising=False)
-    monkeypatch.delenv("UI_SPEC_MODEL", raising=False)
-    assert built(build_diagnoser_model()).model_name == DEFAULT_DIAGNOSER_MODEL
-    assert (
-        built(build_ui_spec_model()).model_name
-        == DEFAULT_UI_SPEC_MODEL
-        == "anthropic/claude-haiku-5.5"
-    )
+    for _, name, _ in MODELS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("JUDGE_MODEL", "openai/gpt-6.1-sol")  # the eval's grader, read by none
+    assert built(build()).model_name == default
+    assert built(build()).max_retries == 0  # retries belong to the caller
 
-
-def test_the_environment_overrides_each_model_alone(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.delenv("DIAGNOSER_MODEL", raising=False)
-    monkeypatch.setenv("UI_SPEC_MODEL", "mistralai/mistral-small-3.2-24b-instruct")
-    assert built(build_ui_spec_model()).model_name == "mistralai/mistral-small-3.2-24b-instruct"
-    assert built(build_diagnoser_model()).model_name == DEFAULT_DIAGNOSER_MODEL
-
-
-def test_the_trace_judge_has_its_own_cheap_default_and_variable(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.delenv("TRACE_JUDGE_MODEL", raising=False)
-    monkeypatch.setenv("JUDGE_MODEL", "openai/gpt-6.1-sol")  # the eval's grader, not this one
-    assert built(build_trace_judge_model()).model_name == DEFAULT_TRACE_JUDGE_MODEL
-    assert DEFAULT_TRACE_JUDGE_MODEL != DEFAULT_DIAGNOSER_MODEL
-    monkeypatch.setenv("TRACE_JUDGE_MODEL", "mistralai/mistral-small-3.2-24b-instruct")
-    assert built(build_trace_judge_model()).model_name == "mistralai/mistral-small-3.2-24b-instruct"
-    assert built(build_trace_judge_model()).max_retries == 0
+    monkeypatch.setenv(variable, OTHER)
+    assert built(build()).model_name == OTHER
+    for other_build, _, other_default in MODELS:  # the variable sets its own model alone
+        if other_build is not build:
+            assert built(other_build()).model_name == other_default

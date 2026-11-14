@@ -51,18 +51,12 @@ async def test_it_returns_the_answer_and_adds_up_calls_tokens_and_cost():
 
 
 @pytest.mark.anyio
-async def test_a_provider_that_reports_no_cost_costs_nothing_against_the_cost_cap():
-    spent = Spent()
-    await guarded(returns(answer(cost=None)), spent)
-    assert spent.cost_usd == 0
-
-
-@pytest.mark.anyio
-async def test_a_null_cost_counts_as_nothing_and_keeps_the_answer():
-    # What a provider sends when the usage has a cost key but no figure: the call was answered and
-    # paid for, so it must not fail on the count.
+@pytest.mark.parametrize("metadata", [{}, {"cost": None}], ids=["no cost key", "null cost"])
+async def test_a_call_with_no_reported_cost_costs_nothing_and_keeps_the_answer(metadata):
+    # A provider may send no cost key, or a key with no figure: the call was answered and paid
+    # for, so it must not fail on the count, nor count against the cost cap.
     out = answer()
-    out["raw"].response_metadata = {"cost": None}
+    out["raw"].response_metadata = metadata
     spent = Spent()
     assert await guarded(returns(out), spent) == "diagnosis"
     assert (spent.calls, spent.tokens, spent.cost_usd) == (1, 150, 0)
@@ -87,15 +81,22 @@ async def test_an_answer_that_does_not_fit_the_schema_raises_its_parsing_error()
     assert spent.tokens == 150  # the call was paid for, so it is counted
 
 
-def test_the_budget_runs_out_of_attempts_tokens_and_cost(monkeypatch):
-    assert Spent(calls=MAX_MODEL_ATTEMPTS - 1).ok(cluster_budget())
-    assert not Spent(calls=MAX_MODEL_ATTEMPTS).ok(cluster_budget())
-    monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 200)
-    assert not Spent(tokens=200).ok(cluster_budget()) and Spent(tokens=199).ok(cluster_budget())
-    monkeypatch.setattr(model_guard, "MAX_CLUSTER_COST_USD", 0.0015)
-    assert not Spent(cost_usd=0.0015).ok(cluster_budget()) and Spent(cost_usd=0.001).ok(
-        cluster_budget()
-    )
+@pytest.mark.parametrize(
+    ("budget", "other", "tokens", "cost"),
+    [
+        (cluster_budget, trace_budget, "MAX_CLUSTER_TOKENS", "MAX_CLUSTER_COST_USD"),
+        (trace_budget, cluster_budget, "MAX_TRACE_TOKENS", "MAX_TRACE_COST_USD"),
+    ],
+    ids=["cluster", "trace"],
+)
+def test_the_budget_runs_out_of_attempts_tokens_and_cost(monkeypatch, budget, other, tokens, cost):
+    assert Spent(calls=MAX_MODEL_ATTEMPTS - 1).ok(budget())
+    assert not Spent(calls=MAX_MODEL_ATTEMPTS).ok(budget())
+    monkeypatch.setattr(model_guard, tokens, 200)
+    assert not Spent(tokens=200).ok(budget()) and Spent(tokens=199).ok(budget())
+    assert Spent(tokens=200).ok(other())  # each budget reads its own caps
+    monkeypatch.setattr(model_guard, cost, 0.0015)
+    assert not Spent(cost_usd=0.0015).ok(budget()) and Spent(cost_usd=0.001).ok(budget())
 
 
 def test_spent_adds_up():
@@ -120,18 +121,6 @@ def test_a_trace_spent_sums_its_judge_usage_entries_by_trace_id():
         {"trace_id": "t1", "calls": 1, "tokens": 50, "cost_usd": 0.001},
     ]
     assert spent_by(usage, key="trace_id") == {"t1": Spent(2, 200, 0.002), "t2": Spent(1, 100, 0.0)}
-
-
-def test_a_trace_has_its_own_smaller_budget(monkeypatch):
-    monkeypatch.setattr(model_guard, "MAX_TRACE_TOKENS", 200)
-    monkeypatch.setattr(model_guard, "MAX_CLUSTER_TOKENS", 1_000)
-    assert not Spent(tokens=200).ok(trace_budget())
-    assert Spent(tokens=200).ok(cluster_budget())  # the cluster's is larger
-    assert not Spent(calls=MAX_MODEL_ATTEMPTS).ok(trace_budget())
-    monkeypatch.setattr(model_guard, "MAX_TRACE_COST_USD", 0.0015)
-    assert not Spent(cost_usd=0.0015).ok(trace_budget()) and Spent(cost_usd=0.001).ok(
-        trace_budget()
-    )
 
 
 def test_the_wait_before_a_re_run_doubles(monkeypatch):

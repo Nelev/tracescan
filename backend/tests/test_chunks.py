@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from agent.chunks import UNKNOWN, failure_text, step_key, step_text
-from agent.const import REPEATED_ROUNDS, REPLY_FORMAT, SYMPTOM_REPEATED, SYMPTOM_REPLY
+from agent.const import REPEATED_ROUNDS, SYMPTOM_REPEATED
 from trace_store.models import SpanNode
 
 START = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)
@@ -142,29 +142,24 @@ def test_what_a_trace_did_not_send_is_unknown_in_the_key():
         step_key(tree, "missing")
 
 
-def silent_chat(repeated: bool = False, off_format: bool = False) -> SpanNode:
-    """A request whose last model call went wrong without an error: it asked for one tool
-    round after round, or the reply came back in the wrong shape."""
+def silent_chat(repeated: bool = False) -> SpanNode:
+    """A request whose model calls all completed; with `repeated`, its last one went wrong
+    without an error: it asked for one tool round after round."""
     rounds = REPEATED_ROUNDS if repeated else 1
     children = []
     for n in range(rounds):
         children.append(span(f"chat{n}", "chat gpt-x", at=2 * n, seconds=0.5))
         children.append(span(f"tool{n}", "execute_tool search_pubmed", at=2 * n + 1, seconds=0.5))
     children.append(span("last", "chat gpt-x", at=2 * rounds, seconds=0.5))
-    attributes = {REPLY_FORMAT: "malformed"} if off_format else {}
-    return span("root", "invoke_agent medas", 0.0, 2 * rounds + 1, children, attributes=attributes)
+    return span("root", "invoke_agent medas", 0.0, 2 * rounds + 1, children)
 
 
-def test_a_silent_failure_is_remembered_with_its_symptom_so_kinds_stay_apart():
-    repeated = failure_text(silent_chat(repeated=True), "last")
-    off_format = failure_text(silent_chat(off_format=True), "last")
-    assert repeated.endswith(f"\nsymptom: {SYMPTOM_REPEATED}")
-    assert off_format.endswith(f"\nsymptom: {SYMPTOM_REPLY}")
-    # The step text alone cannot tell them apart; that is what the symptom line is for.
-    assert step_text(silent_chat(repeated=True), "last").startswith("step: chat gpt-x\noutcome: ok")
-    assert repeated.removeprefix(step_text(silent_chat(repeated=True), "last")) != (
-        off_format.removeprefix(step_text(silent_chat(off_format=True), "last"))
-    )
+def test_a_silent_failure_is_remembered_with_its_symptom():
+    # The step text alone reads "outcome: ok"; the symptom line (the judge's fixed words, whose
+    # detection test_score_trace covers) keeps silent failures of different kinds apart.
+    tree = silent_chat(repeated=True)
+    assert step_text(tree, "last").startswith("step: chat gpt-x\noutcome: ok")
+    assert failure_text(tree, "last") == f"{step_text(tree, 'last')}\nsymptom: {SYMPTOM_REPEATED}"
 
 
 def test_a_step_that_recorded_an_error_or_shows_no_symptom_is_remembered_as_its_step_text():

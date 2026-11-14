@@ -56,16 +56,13 @@ def test_pick_twins_keeps_the_nearest_k_within_the_distance():
     found = [match("c", "c", 0.3), match("b", "b", 0.2), match("a", "a", 0.1)]
     assert [m.trace_id for m in pick_twins(found, k=3, max_distance=0.25)] == ["a", "b"]
     assert [m.trace_id for m in pick_twins(found, k=1, max_distance=0.5)] == ["a"]
+    assert pick_twins(found, k=3, max_distance=0.05) == []  # none rather than far ones
 
 
 def test_pick_twins_merges_calls_with_the_same_text_and_counts_them():
     found = [match("a", "same", 0.1), match("b", "same", 0.1), match("c", "other", 0.2)]
     twins = pick_twins(found, k=3, max_distance=0.5)
     assert [(m.trace_id, m.calls) for m in twins] == [("a", 2), ("c", 1)]
-
-
-def test_pick_twins_returns_none_rather_than_far_ones():
-    assert pick_twins([match("a", "a", 0.9)], k=3, max_distance=0.12) == []
 
 
 @pytest.fixture

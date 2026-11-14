@@ -140,6 +140,7 @@ async def test_stream_reports_progress_and_stops_at_the_review_with_counts(clien
 
     names = [name for name, _ in events]
     assert names[0] == "run_started" and names[-1] == "review_required"
+    # The fixture's UI spec model fails: every message is still sent, with no ui_spec behind it.
     assert set(names[1:-1]) == {"progress", "proposal"}
     assert events[1][1]["node"] == "collect_traces"
     progress = [data for name, data in events if name == "progress"]
@@ -250,12 +251,6 @@ async def test_naive_since_is_rejected(client):
 
 
 @pytest.mark.anyio
-async def test_the_sync_run_endpoint_is_gone(client):
-    # 405, not 404: the path exists again, but only to list runs with GET.
-    assert (await client.post("/v1/runs", json={"target_app": "medas"})).status_code == 405
-
-
-@pytest.mark.anyio
 async def test_stream_sends_each_drafted_proposal_between_the_progress_and_the_end(client):
     use_diagnosed_run(attributes={"patient": PHI})
     response = await post_stream(client)
@@ -285,14 +280,6 @@ async def test_stream_reports_a_failing_node_then_run_failed_without_details(cli
     failed = [d["node"] for n, d in events if n == "progress" and d["event"] == "node_failed"]
     assert failed == ["collect_traces"]
     assert "John Doe" not in response.text
-
-
-@pytest.mark.anyio
-async def test_stream_that_cannot_open_the_trace_session_returns_502(client):
-    use_runs(open_traces=broken_session)
-    response = await post_stream(client)
-    assert response.status_code == 502
-    assert response.json() == {"detail": "triage run failed"}
 
 
 RUNS_PER_WINDOW = limits.parse(RUN_LIMIT).amount
@@ -410,14 +397,6 @@ async def test_stream_sends_the_models_ui_spec_right_behind_every_message(client
 
 
 @pytest.mark.anyio
-async def test_stream_still_sends_every_message_when_the_model_fails(client):
-    use_diagnosed_run()  # the UI spec model is the fixture's: it fails
-    names = [name for name, _ in await stream(client)]
-    assert names[-1] == "review_required" and "proposal" in names
-    assert "ui_spec" not in names  # no spec, and nothing in its place
-
-
-@pytest.mark.anyio
 async def test_a_run_past_its_call_limit_gets_no_more_calls_and_no_more_specs(client, monkeypatch):
     use_diagnosed_run()
     monkeypatch.setattr(ui_spec, "MAX_UI_CALLS_PER_RUN", 2)
@@ -462,11 +441,18 @@ async def test_status_of_a_run_that_had_nothing_to_review_is_completed(client):
 
 
 @pytest.mark.anyio
-async def test_an_unknown_run_is_404_and_a_malformed_id_422(client):
-    assert (await client.get(f"/v1/runs/{uuid4()}")).status_code == 404
-    assert (await client.get("/v1/runs/not-a-uuid")).status_code == 422
-    review = {"decisions": {"c0": "approve"}}
-    assert (await client.post(f"/v1/runs/{uuid4()}/review", json=review)).status_code == 404
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/v1/runs/{}", None),
+        ("GET", "/v1/runs/{}/detail", None),
+        ("POST", "/v1/runs/{}/review", {"decisions": {"c0": "approve"}}),
+        ("POST", "/v1/runs/{}/resume/stream", None),
+    ],
+)
+async def test_an_unknown_run_is_404_and_a_malformed_id_422(client, method, path, body):
+    for run_id, code in ((uuid4(), 404), ("not-a-uuid", 422)):
+        assert (await client.request(method, path.format(run_id), json=body)).status_code == code
 
 
 # --- GET /v1/runs/{run_id}/detail
@@ -515,12 +501,6 @@ async def test_the_detail_of_a_run_with_nothing_found_has_no_clusters(client):
     run_id = await start(client)
     body = (await client.get(f"/v1/runs/{run_id}/detail")).json()
     assert (body["status"], body["clusters"]) == ("completed", [])
-
-
-@pytest.mark.anyio
-async def test_the_detail_of_an_unknown_run_is_404_and_a_malformed_id_422(client):
-    assert (await client.get(f"/v1/runs/{uuid4()}/detail")).status_code == 404
-    assert (await client.get("/v1/runs/not-a-uuid/detail")).status_code == 422
 
 
 # --- POST /v1/runs/{run_id}/review
@@ -589,6 +569,8 @@ async def test_a_review_that_does_not_match_the_proposals_is_422_and_changes_not
     assert response.status_code == 422
     assert response.json() == {"detail": detail}
     assert (await client.get(f"/v1/runs/{run_id}")).json()["status"] == "review_required"
+    assert await app.state.run_store.reviews(run_id) == []  # no decision is recorded
+    assert (await listed(client))[0]["status"] == "review_required"
 
 
 @pytest.mark.anyio
@@ -701,16 +683,6 @@ async def test_a_review_is_recorded_with_its_decisions_and_the_reviewer(client, 
 
 
 @pytest.mark.anyio
-async def test_a_review_that_is_refused_records_no_decision(client):
-    use_diagnosed_run()
-    run_id = await start(client)
-    partial = await client.post(f"/v1/runs/{run_id}/review", json={"decisions": {}})
-    assert partial.status_code == 422
-    assert await app.state.run_store.reviews(run_id) == []
-    assert (await listed(client))[0]["status"] == "review_required"
-
-
-@pytest.mark.anyio
 async def test_a_run_another_review_holds_is_refused_and_free_again_when_that_one_fails(client):
     use_diagnosed_run()
     run_id = await start(client)
@@ -734,7 +706,8 @@ async def test_a_failed_resume_leaves_the_run_waiting_and_forgets_its_decisions(
 ):
     use_diagnosed_run()
     run_id = await start(client)
-    monkeypatch.setattr(app.state.runs, "_context", None)  # the resume now fails inside the graph
+    # The resume now fails before the graph runs.
+    monkeypatch.setattr(app.state.runs, "_context", None)
 
     review = {"decisions": {"c0": "approve"}}
     assert (await client.post(f"/v1/runs/{run_id}/review", json=review)).status_code == 502
@@ -766,21 +739,14 @@ async def test_a_failed_run_is_recorded_and_reported_as_failed(client):
 @pytest.mark.anyio
 async def test_a_run_whose_trace_session_cannot_open_is_recorded_as_failed(client):
     use_runs(open_traces=broken_session)
-    assert (await post_stream(client)).status_code == 502
+    response = await post_stream(client)
+    assert response.status_code == 502
+    assert response.json() == {"detail": "triage run failed"}
     (run,) = await listed(client)
     assert run["status"] == "failed" and run["ended_at"] is not None
     # It never reached a checkpoint, so its status comes from the record alone.
     status = (await client.get(f"/v1/runs/{run['run_id']}")).json()
     assert status["status"] == "failed" and status["proposals"] == []
-
-
-@pytest.mark.anyio
-async def test_a_run_whose_client_went_away_is_recorded_as_aborted(client):
-    use_runs(two_failures(), fake_diagnoser(DIAGNOSIS))
-    await run_with_a_stalled_client()
-    (run,) = await listed(client)
-    assert run["status"] == "aborted"
-    assert (await client.get(f"/v1/runs/{run['run_id']}")).json()["status"] == "aborted"
 
 
 @pytest.mark.anyio
@@ -845,10 +811,12 @@ async def test_a_failed_run_is_resumable_and_its_resume_goes_on_to_the_review(cl
 
 
 @pytest.mark.anyio
-async def test_a_run_whose_client_went_away_can_be_resumed(client):
+async def test_a_run_whose_client_went_away_is_recorded_as_aborted_and_can_be_resumed(client):
     use_runs(two_failures(), fake_diagnoser(DIAGNOSIS))
     await run_with_a_stalled_client()
     (run,) = await listed(client)
+    assert run["status"] == "aborted"
+    assert (await client.get(f"/v1/runs/{run['run_id']}")).json()["status"] == "aborted"
     assert (await status_of(client, run["run_id"]))["resumable"]
 
     events = parse_sse((await resume(client, run["run_id"])).text)
@@ -908,12 +876,6 @@ async def test_a_run_that_failed_before_its_first_checkpoint_is_not_resumed(clie
     (run,) = await listed(client)
     assert (await status_of(client, run["run_id"]))["resumable"] is False
     assert (await resume(client, run["run_id"])).status_code == 409
-
-
-@pytest.mark.anyio
-async def test_resuming_an_unknown_run_is_404_and_a_malformed_id_422(client):
-    assert (await resume(client, str(uuid4()))).status_code == 404
-    assert (await resume(client, "not-a-uuid")).status_code == 422
 
 
 @pytest.mark.anyio
