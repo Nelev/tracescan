@@ -8,6 +8,19 @@ TraceScan reads an app's traces and decides which requests actually failed their
 
 The first app it watches is **Medas**, a clinician-facing RAG assistant. Medas traces can touch clinical data, so TraceScan reads traces without copying their content around. Names, statuses, error types and counts travel through the pipeline; prompts, answers and patient records never do.
 
+### Where to read what
+
+| If you want to… | Read |
+| --- | --- |
+| **Understand the project end to end** (start here) | [docs/guide.md](docs/guide.md): scope, how Medas is traced, fault injection, architecture, the agent and its guardrails, the eval metrics and journey, the console, with diagrams |
+| See the app and run it | This README: the tour, the APIs, the system and how to run it |
+| Know what's planned, and what "done" means for each task | [PLAN.md](PLAN.md) |
+| Know why the project exists and how success is measured | [The PRD](.claude/prds/tracescan.prd.md) |
+| Follow each eval experiment: question, change, results, findings | [docs/eval-notes.md](docs/eval-notes.md) (newest first) |
+| See every eval run's scores, the answer key and the rubrics | [docs/eval/eval-results.xlsx](docs/eval/eval-results.xlsx) |
+| Read the eval write-up of 2026-11-12 (before Medas's own faults) | [docs/eval/eval-review-2026-11-12.md](docs/eval/eval-review-2026-11-12.md) |
+| Work on the code with an agent | [CLAUDE.md](CLAUDE.md), and [docs/agents/](docs/agents/) for the issue tracker, triage labels and domain docs |
+
 ---
 
 ## Contents
@@ -541,7 +554,7 @@ From the first run with the hard cases (experiment 1) to the latest (experiment 
 
 Experiment 8 counts 8 faults, not 9: the two-error requests have the same cause as the provider outage, so grouping them is the right answer. The one miss left is a *split*: the provider outage's two faces (5xx and timeout) land in two clusters that both name the same cause.
 
-**Limits.** One run per day, on synthetic traffic, partly on days the fixes were written for. Next come a third unseen day, repeated runs to average out the models' variance, and real Medas traffic. The full log is in [`docs/eval-notes.md`](docs/eval-notes.md), and the review write-up in [`docs/eval/review.md`](docs/eval/review.md).
+**Limits.** One run per day, on synthetic traffic, partly on days the fixes were written for. Next come a third unseen day, repeated runs to average out the models' variance, and real Medas traffic. The full log is in [`docs/eval-notes.md`](docs/eval-notes.md), and the review write-up in [`docs/eval/eval-review-2026-11-12.md`](docs/eval/eval-review-2026-11-12.md).
 
 ---
 
