@@ -1,0 +1,9 @@
+# Keep secrets, local builds and dependencies out of the image (the build installs its own).
+.env
+.env.*
+node_modules
+.next
+.clerk
+*.tsbuildinfo
+Dockerfile
+.dockerignore
