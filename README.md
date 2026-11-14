@@ -350,42 +350,95 @@ uv run python -m eval.metrics                    # print the scores
 
 ### On Medas's own faults
 
-The seeded day is synthetic. The second eval runs on **Medas itself**: six known bugs that Medas can switch on one at a time (`FAULT_*` variables, `medas-api/faults.py` in [Nelev/medas](https://github.com/Nelev/medas)). Each is triggered by two or three sets of real questions, sent through the real agent, and mixed in one window with healthy traffic (every normal and edge question, no switch on). The answer key is `backend/eval/medas_ground_truth.py`. A trace counts as a fault only if its fault actually fired on that request: a timeout share can spare a request, and a search not about medication never hits the empty-retrieval bug.
+The seeded day is synthetic: its traces were written to look like Medas's. This experiment asks the same question of **Medas itself**. When a real bug is switched on in the real agent, among healthy requests, does TraceScan find it, keep it apart from the others, and name its cause?
+
+#### Setup
+
+**The faults.** Medas has six known bugs, each switched on by one environment variable (`FAULT_*`, `medas-api/faults.py` in [Nelev/medas](https://github.com/Nelev/medas)). Medas's spans carry no question, answer or record text. For TraceScan to see faults that raise no error, Medas also sends two safe signals:
+- the reply's shape on the root span (`medas.reply.format`)
+- a failed lookup's own reason (`source timed out`, `source unavailable`)
+
+| Fault | What breaks | What the trace shows | The cause a diagnosis must name |
+| --- | --- | --- | --- |
+| Empty retrieval | The record search drops every passage for medication searches | A search with 0 hits, no error | A filter that empties one category |
+| Broken tool schema | The record search is called with a renamed argument | A validation error on every call | The argument no longer matches the schema |
+| Truncated prompt | The system prompt is cut before its Output section | A malformed reply, no error | The prompt lost its output format |
+| Small context | The model is sent too few tokens to keep a search result | The same search round after round, no error | The context budget is too small |
+| Weak model | The agent runs on another model, which skips its tools | One model call and nothing else | The model was swapped |
+| Upstream timeout | Half the health-source calls time out | A lookup with `source timed out` | The health sources time out |
+
+**The traffic.** The answer key is `backend/eval/medas_ground_truth.py`. It gives each fault two or three sets of real questions from Medas's traffic file, varied by question, spelling and language. One window holds:
+- every fault's sets, each sent with only that switch on
+- every normal and edge question with no switch on, as controls
+
+That's 56 requests in 17 sends. A trace counts as a fault only if the fault actually fired on it, as read off its stored spans by the grader, never by the agent. For example, a timeout share can spare a request, and a search not about medication never hits the empty retrieval. That left 24 faulty requests and 32 healthy ones.
+
+**The method.** The traffic was sent once, on 2026-11-14. Each change to TraceScan was then measured with `--retriage`, which triages the same stored window again. Every column below is therefore the same 56 requests, and only TraceScan changed between them. After each change, the seeded day and the control day were run again to check nothing regressed. A grader from another vendor (`openai/gpt-6.1-sol`) scores each diagnosis from 0 to 2 against the injected cause.
 
 ```bash
 cd backend
 uv run --env-file .env python -m eval.medas_run   # send every fault and the controls, triage the window
 uv run --env-file .env python -m eval.judge       # grade the root causes
 uv run python -m eval.metrics                     # print the scores
+uv run --env-file .env python -m eval.medas_run --retriage out/eval/<file>.json   # same traces, triaged again
 ```
 
 It needs the backend running (Medas sends its traces to the collector), Medas's database up, and the Medas checkout next to this one (`--medas` for another place). `--only tool_schema,weak_model` sends just those faults; `--control` sends the healthy traffic alone.
 
-First run, 2026-11-14 (`out/eval/20261114T070539Z.json`): 56 requests, 24 of them with a fault that fired.
+#### Results
 
-| Fault | Traces | Judge caught | Cluster | Diagnosis (category, cause graded 0-2) |
-| --- | --- | --- | --- | --- |
-| Broken tool schema | 5 | 5/5 | its own | `tool_schema_error`, 1: names the argument mismatch, not the rename |
-| Truncated prompt | 5 | 5/5 | its own | `unknown`, 0: sees the malformed replies, not why |
-| Empty retrieval | 3 | 3/3 | its own | `retrieval_miss`, 1: names the empty retriever, not the medication filter |
-| Upstream timeout | 2 | 2/2 | two of one trace each | `infra_error`, 2 and 2 |
-| Small context | 3 | 0/3 | none | missed |
-| Weak model | 6 | 0/6 | none | missed |
-| Healthy | 32 | 0/32 flagged | | |
+The first run found what raised an error and missed what didn't. Four changes followed, each aimed at what the run before had shown:
 
-| Score | Result |
+1. **First run:** the judge as it was.
+2. **Loop rule:** the judge fails a request that asks for the same step in four rounds or more, although every call succeeded.
+3. **Silent-failure symptoms:** a failure with no error gets fixed words for what the trace shows (a search that found nothing, a tool asked for round after round, a reply not in the asked-for shape). Clustering now tells these failures apart instead of grouping them all under the step they failed at.
+4. **One failed step:** the judge is told that one failed lookup fails the request even when the others worked.
+5. **Pairs:** two failures with the same step and error make one cluster, not two.
+
+| Score | 1. First run | 2. Loop rule | 3. Symptoms | 4. One failed step | 5. Pairs |
+| --- | --- | --- | --- | --- | --- |
+| Faulty requests the judge caught | 15/24 | 16/24 | 15/24 | 18/24 | **18/24** |
+| Healthy requests flagged | 0/32 | 0/32 | 0/32 | 0/32 | **0/32** |
+| Detection (faults with a finding) | 4/6 | 4/6 | 4/6 | 5/6 | **5/6** |
+| Purity | 15/15 | 13/16 | 15/15 | 18/18 | **18/18** |
+| Separation (one fault, one cluster) | 3/6 | 1/6 | 3/6 | 4/6 | **5/6** |
+| Category accuracy | 4/5 | 5/6 | 2/4 | 4/6 | 3/5 |
+| Cause accuracy (graded 2 of 2) | 2/5 | 1/6 | 0/4 | 2/6 | 2/5 |
+| False alarms | 0 | 0 | 0 | 0 | 0 |
+| Cost (judge and diagnoser) | $0.12 | $0.18 | $0.16 | $0.19 | $0.18 |
+
+The same changes left the seeded day and the control day unchanged:
+
+| Day | Result |
 | --- | --- |
-| Detection | 4/6 |
-| Purity | 15/15 |
-| Separation | 3/6 |
-| Category accuracy | 4/5 |
-| Cause accuracy (graded 2 of 2) | 2/5 |
-| False alarms | 0 |
-| Cost (judge and diagnoser) | $0.12 |
+| Seeded day | detection 8/8, purity 34/34, separation 7/8, judge 34/34 with no false positives |
+| Control day | 0 of 52 requests flagged |
 
-What it shows, next to the seeded day's perfect scores: on a real app the faults that raise an error are found and kept apart, and the healthy traffic is left alone. The two faults that leave no error and a well-formed reply (a search repeated until the model gives up, a model that never calls its tools) are never judged failed. Where a fault is caught, the diagnosis mostly names *where* it broke, not *why*: the spans carry no prompt, argument or query text, so the cause behind a malformed reply or an empty search is not on the trace. One run only; details in [`docs/eval-notes.md`](docs/eval-notes.md).
+Where each fault ends up after the last change (`out/eval/20261114T074518Z.json`):
 
-**Since then.** The judge now fails a request that asks for the same step round after round, four rounds or more (`agent/judge_prompt.md`). Retriaged on the same traces (`--retriage`), it catches all three small-context requests and still flags no healthy one, here or on the seeded and control days. Those requests were first merged with the truncated prompt's, since both blame a model call with no error. Now a failure whose blamed step recorded no error is described in fixed words from the trace's structure (a search that found nothing, a tool asked for round after round, a reply not in the asked-for shape), and each silent fault forms its own cluster: purity 15/15, separation 3/6, the small context detected. The timeouts sat on the judge's border (0.3 to 0.6: one source failed while the others worked); the judge is now told that one failed step is enough, and they fail every time. On the same traces: detection 5/6, purity 18/18, separation 5/6 once two identical failures make one cluster (the second stage now groups from two), judge recall 18/24 with no healthy request flagged, cause accuracy 2/6: only the timeouts' diagnoses say why, the others say where. The weak model is still unseen: on the trace it looks like a healthy answer to a blank question.
+| Fault | Judge caught | Finding | Diagnosis | Cause graded |
+| --- | --- | --- | --- | --- |
+| Broken tool schema | 5/5 | one cluster | `tool_schema_error`: the arguments don't match the schema | 2 |
+| Upstream timeout | 2/2 | one cluster | `infra_error`: MedlinePlus timed out | 2 |
+| Small context | 3/3 | one cluster | `system_design`: the agent keeps searching | 1 |
+| Empty retrieval | 3/3 | one cluster | `retrieval_miss`: the record search returned nothing | 1 |
+| Truncated prompt | 5/5 | one cluster | `unknown`: the replies are malformed, cause not shown | 0 |
+| Weak model | 0/6 | none | | |
+
+#### Findings
+
+1. **Finding faults on a real app takes more than spotting errors.** The judge first passed every request that failed without an error. Two rules got it to catch everything but the weak model: a step asked for round after round, and one failed lookup among several. Neither flagged a healthy request on Medas, the seeded day or the control day.
+2. **Silent failures need their own words to cluster.** A failure with no error used to be grouped only by the step it failed at, so two different faults blamed on a model call shared one cluster. Fixed words for what the trace shows give each its own, in code and with no model call.
+3. **Two of a kind is one issue.** Two identical failures used to become two findings, so a reviewer would get two proposals for one bug.
+4. **TraceScan finds where a fault broke more often than why.** Only the schema and timeout diagnoses name their cause, because only their spans say what happened (a validation error, `source timed out`). Medas's spans say a reply was malformed or a search found nothing, but not why. Better causes need more safe signals from Medas, such as the refused argument's name or the size of what the model was sent. Rewording TraceScan's prompts won't produce them.
+5. **The weak model is invisible on the trace.** One model call and no tool is also what a healthy answer to a blank question looks like. Only the model's name differs, and TraceScan doesn't know which model Medas is meant to use.
+
+**Limits.**
+- **One traffic sample:** every column triages the same 56 requests, so the numbers show what each change does to those requests, not how they'd vary over new traffic.
+- **The models vary:** category and cause accuracy move between runs even when nothing changes. On the seeded day the same diagnosis was graded 2 one time and 1 the next.
+- **Next:** repeated runs over fresh traffic to put numbers on that variance, Medas signals that say why, and the weak model.
+
+The full log of each step is in [`docs/eval-notes.md`](docs/eval-notes.md).
 
 ### How it started, and what changed
 
