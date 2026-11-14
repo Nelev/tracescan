@@ -263,11 +263,10 @@ def sent_from(records: Sequence[dict[str, Any]]) -> list[Sent]:
     ]
 
 
-async def run(sends: Sequence[Send], sender: Sender, trace_database_url: str) -> dict[str, Any]:
-    sent = await send_all(sends, sender)
-    since, until = sent[0].started, sent[-1].ended
-    kinds, records = await answer(sent, trace_database_url)
-    print(f"{len(kinds)} traces sent; triaging the window")
+async def triage(
+    since: datetime, until: datetime, kinds: dict[str, str], trace_database_url: str
+) -> dict[str, Any]:
+    """The triage graph over the window, on the real models, next to the answer key."""
     async with TraceClient(trace_database_url) as traces:
         model, judge = build_diagnoser_model(), build_trace_judge_model()
         found = await triage_window(since, until, kinds, traces, FastEmbedEmbedder(), model, judge)
@@ -277,9 +276,25 @@ async def run(sends: Sequence[Send], sender: Sender, trace_database_url: str) ->
         "judge_model": getattr(judge, "model_name", "unknown"),
         "since": since.isoformat(),
         "until": until.isoformat(),
-        "control": all(s.fault is None for s in sends),
-        "sent": records,
     } | found
+
+
+async def run(sends: Sequence[Send], sender: Sender, trace_database_url: str) -> dict[str, Any]:
+    sent = await send_all(sends, sender)
+    since, until = sent[0].started, sent[-1].ended
+    kinds, records = await answer(sent, trace_database_url)
+    print(f"{len(kinds)} traces sent; triaging the window")
+    found = await triage(since, until, kinds, trace_database_url)
+    return found | {"control": all(s.fault is None for s in sends), "sent": records}
+
+
+async def retriage(result: dict[str, Any], trace_database_url: str) -> dict[str, Any]:
+    """A results file's window triaged again, with its answer key and sends kept: the same
+    stored traces, so what changed since is TraceScan alone (a judge prompt, a threshold)."""
+    since = datetime.fromisoformat(result["since"])
+    until = datetime.fromisoformat(result["until"])
+    found = await triage(since, until, result["kinds"], trace_database_url)
+    return found | {"control": result["control"], "sent": result["sent"]}
 
 
 def main() -> None:
@@ -294,6 +309,12 @@ def main() -> None:
         help="label a results file's traces again from the stored trees (after FIRED changed); "
         "sends nothing, triages nothing, and drops the file's grades",
     )
+    parser.add_argument(
+        "--retriage",
+        type=Path,
+        help="triage a results file's window again, its traces and answer key unchanged, "
+        "into a new results file; sends nothing",
+    )
     args = parser.parse_args()
     only = [name.strip() for name in args.only.split(",")] if args.only else None
     if only and (unknown := set(only) - set(FAULTS)):
@@ -306,12 +327,16 @@ def main() -> None:
     if args.relabel:
         relabel(args.relabel, trace_database_url)
         return
-    medas_api = check_medas(args.medas)
-    check_backend(args.backend)
-
-    sends = plan(only, args.control)
-    print(f"{len(sends)} sends, {sum(s.questions for s in sends)} questions")
-    result = asyncio.run(run(sends, subprocess_sender(medas_api), trace_database_url))
+    if args.retriage:
+        earlier = json.loads(args.retriage.read_text())
+        result = asyncio.run(retriage(earlier, trace_database_url))
+        result["retriage_of"] = args.retriage.name
+    else:
+        medas_api = check_medas(args.medas)
+        check_backend(args.backend)
+        sends = plan(only, args.control)
+        print(f"{len(sends)} sends, {sum(s.questions for s in sends)} questions")
+        result = asyncio.run(run(sends, subprocess_sender(medas_api), trace_database_url))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
     path.write_text(json.dumps(result, indent=2))
