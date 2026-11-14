@@ -28,12 +28,13 @@
 4. [System architecture](#4-system-architecture)
 5. [Components](#5-components)
 6. [The agent](#6-the-agent)
-7. [Guardrails, retries and budgets](#7-guardrails-retries-and-budgets)
-8. [Human review](#8-human-review)
-9. [Eval metrics](#9-eval-metrics)
-10. [The eval journey](#10-the-eval-journey)
-11. [The json-render console](#11-the-json-render-console)
-12. [Limits and next steps](#12-limits-and-next-steps)
+7. [Embeddings, clustering and memory](#7-embeddings-clustering-and-memory)
+8. [Guardrails, retries and budgets](#8-guardrails-retries-and-budgets)
+9. [Human review](#9-human-review)
+10. [Eval metrics](#10-eval-metrics)
+11. [The eval journey](#11-the-eval-journey)
+12. [The json-render console](#12-the-json-render-console)
+13. [Limits and next steps](#13-limits-and-next-steps)
 
 ---
 
@@ -337,7 +338,7 @@ Parallel branches get small private inputs (a `TraceTask`, a `ClusterTask`), not
 
 ### The trace judge: the lessons in its prompt
 
-Each rule came from an eval failure (see [the journey](#10-the-eval-journey)):
+Each rule came from an eval failure (see [the journey](#11-the-eval-journey)):
 
 - A model that answers after a failed tool call **has not recovered**. Recovery means the same step redone successfully.
 - A lookup that says "not found", told to the user, is **the app working as designed**.
@@ -349,14 +350,7 @@ If the judge blames a span that isn't in the tree, it is asked once more; if it 
 
 ### Clustering: code, not LLM calls
 
-1. Each failure becomes one short text: the failing step, the error and a signature. Digits are masked, and seconds become words (`very slow (>5 s)`), so a 1 s and a 10 s timeout still read differently. A failure with no error gets its symptom in fixed words (`no error; a search returned nothing`), so different silent failures don't merge.
-2. The text is embedded **on the machine** (`bge-small-en-v1.5`, 384 dimensions). Trace content is never sent out.
-3. **HDBSCAN** finds the dense groups. A trace attached with membership under 0.1 counts as noise.
-4. The noise is regrouped by **failing step + error type**. Two or more with the same pair make one cluster. A single trace makes an `isolated` cluster, so a rare failure is still diagnosed.
-
-![The Map tab of a run over Medas's traces: 60 failed traces in 12 clusters, two of them isolated](guide/cluster-map.jpg)
-
-*A run over Medas's traces from the last week: 200 judged, 60 failed, 12 clusters. With WebGL the Map tab draws the clusters in 3D (PCA or t-SNE, whichever keeps neighbours better: here a fidelity of 0.96). This capture is its table view, which lists the same points.*
+Each failure becomes one short text, embedded **on the machine**, then grouped by HDBSCAN and a second pass by failing step and error type. No model call is involved. [Section 7](#7-embeddings-clustering-and-memory) explains it step by step.
 
 ### The diagnoser: what it sees
 
@@ -365,7 +359,7 @@ If the judge blames a span that isn't in the tree, it is asked once more; if it 
 - Up to 3 **healthy twins**: the same step, working, on the same app version and schema. They answer "what does normal look like?"
 - Up to 3 **known issues**: past decisions on a similar failing step. Approved ones read as confirmed causes, rejected ones as warnings.
 
-Twins and known issues are context only: **they cannot be cited as evidence.**
+Twins and known issues are context only: **they cannot be cited as evidence.** How both are picked and put in the prompt is in [section 7.4](#74-how-the-diagnoser-gets-them).
 
 <details>
 <summary>Details: a diagnosis</summary>
@@ -385,7 +379,219 @@ The code adds `evidence_check` (`valid`, `corrected` or `unsupported`) and how m
 
 ---
 
-## 7. Guardrails, retries and budgets
+## 7. Embeddings, clustering and memory
+
+> *How are failures grouped without an LLM, and what does the diagnoser get to compare a failure with?*
+
+TraceScan uses **one local embedding model for three jobs**. Every text it embeds is built by code from span names, statuses, error types and bucketed numbers, so no prompt, answer or record text is ever embedded, and nothing is sent out to be embedded.
+
+| Job | What is embedded | Where the vectors live | Written | Read |
+| --- | --- | --- | --- | --- |
+| **Clustering** the run's failures | one *failure text* per failed trace | in memory, for this run only | – | by `cluster_failures`, at once |
+| **Healthy spans** | one *step text* per healthy step the judge picked | pgvector, collection `healthy_spans` | after every run that ends or pauses at the review | by the diagnoser, as *healthy twins* |
+| **Known issues** (approvals and rejections) | the failing step's text of each decided finding | pgvector, collection `known_issues` | by `apply_actions`, after the review | by the diagnoser, as *known issues* |
+
+```mermaid
+flowchart TB
+    subgraph run["One run"]
+        J["⚖️ trace judge"] -->|failed traces| FT["failure texts"]
+        FT --> E1["📐 embed"] --> H["HDBSCAN<br/>+ step/error pass"] --> CL["clusters"]
+        J -->|"healthy picks<br/>(clean traces only)"| ST["step texts"]
+        CL --> DG["🔍 diagnoser"]
+    end
+    ST --> E2["📐 embed"] --> HS[("healthy_spans")]
+    DG --> RV{"👤 review"}
+    RV -->|"approved and rejected"| E3["📐 embed"] --> KI[("known_issues")]
+    HS -. "healthy twins<br/>(next runs)" .-> DG
+    KI -. "known issues<br/>(next runs)" .-> DG
+```
+
+### The embedding model
+
+| | |
+| --- | --- |
+| **Model** | `BAAI/bge-small-en-v1.5`, 384 dimensions |
+| **Runtime** | [fastembed](https://github.com/qdrant/fastembed): ONNX on the CPU, no GPU and no API |
+| **Loading** | on the first call, once per process (behind a lock, since two runs can arrive together), cached under `FASTEMBED_CACHE_PATH` |
+| **Calls** | one batch per job; it is CPU-bound, so it runs off the event loop (`asyncio.to_thread`) |
+| **For pgvector** | wrapped as LangChain `Embeddings` (`LocalEmbeddings`), so langchain-postgres's `PGVector` embeds with it too |
+| **Versioned** | every stored text carries `CHUNK_TEMPLATE_VERSION`: a vector is only compared with one built from the same template |
+
+Code: `agent/embeddings.py`, `agent/chunks.py`.
+
+### 7.1 Clustering failures with HDBSCAN
+
+**What is embedded.** Each failed trace becomes one line: the step the judge blamed, its error message, and the signature.
+
+```text
+execute_tool search_pubmed: search_pubmed timed out after very slow (>5 s) | <signature>
+```
+
+Three rules keep this text about the *cause*, not about the values of one request:
+
+- **Seconds become words first** (`fast`, `normal`, `slow`, `very slow`). A 1 s timeout and a 10 s timeout are different faults (experiment 6 found them merged).
+- **Then every digit is masked** to `#`, so ids, counts and sizes don't split one cause into many clusters.
+- **A failure with no error** gets its symptom in fixed words in place of the message (`no error; a search returned nothing`, `no error; the same tool asked for round after round`, `no error; the reply is not in the shape the app asks for`), so different silent failures don't merge.
+
+**Why HDBSCAN.** It needs no number of clusters up front, it finds groups of any shape by density, and it leaves outliers as *noise* instead of forcing them into a group. That suits failures: a run may hold one bug or ten, and a one-off failure should stay alone.
+
+```mermaid
+flowchart TD
+    A["failed traces of the run"] --> B{"6 or more?"}
+    B -- no --> S2
+    B -- yes --> C["embed all failure texts<br/>(one batch)"]
+    C --> D["HDBSCAN<br/>cosine · min_cluster_size 3 · min_samples 4"]
+    D --> E{"membership<br/>≥ 0.1?"}
+    E -- yes --> HC["hdbscan cluster"]
+    E -- no --> N["noise"]
+    D -->|label -1| N
+    N --> S2["group by failing step +<br/>normalised error"]
+    S2 --> F{"2 or more alike?<br/>(any size under 6 failures)"}
+    F -- yes --> SE["step_error cluster"]
+    F -- no --> IS["isolated: a one-trace cluster"]
+    HC --> O["order biggest first · c0, c1, …<br/>3 newest traces = exemplars"]
+    SE --> O
+    IS --> O
+```
+
+1. **Embed.** All failure texts of the run in one batch.
+2. **HDBSCAN** (scikit-learn) on the vectors, with **cosine distance**, `min_cluster_size` 3 and `min_samples` 4. Each trace gets a label (-1 for noise) and a membership strength.
+3. **Weak members become noise.** HDBSCAN can attach a lone outlier to its nearest group with a membership of 0.0. Anything under **0.1** is treated as noise, so the rare record-store outage is diagnosed alone instead of hiding in a bigger cluster.
+4. **The second pass.** Noise is regrouped by failing step and *normalised* error (lower case, quoted values read `'x'`, digits `#`). Two or more alike make a `step_error` cluster: the same step failing the same way is one issue, however few times it happened. This pass also catches what HDBSCAN cannot see: when one fault causes most of a run's failures, HDBSCAN can label the whole group noise.
+5. **The rest are `isolated`**: one-trace clusters, so a rare failure still gets a diagnosis. At most 10 are diagnosed per run; the others still get a proposal, marked undiagnosed.
+6. **Small runs** (under 6 failures) skip the embedding and HDBSCAN: every step-and-error group counts, even a group of one, since with so little data nothing can be called noise.
+7. **Naming.** Clusters are ordered biggest first (`c0`, `c1`, …). A cluster's signature is its most common step and normalised error. Its exemplars, what the diagnoser reads, are its **3 newest traces**.
+
+**The cluster map.** The same vectors are projected to 3D for the run page: identical vectors become one point, PCA is always tried and seeded t-SNE from 30 points, and the map keeps whichever keeps each point's 5 nearest neighbours better (its *trustworthiness*, shown as "fidelity").
+
+![The Map tab of a run over Medas's traces: 60 failed traces in 12 clusters, two of them isolated](guide/cluster-map.jpg)
+
+*A run over Medas's traces from the last week: 200 judged, 60 failed, 12 clusters. With WebGL the Map tab draws the clusters in 3D; here PCA won with a fidelity of 0.96. This capture is its table view, which lists the same points.*
+
+Code: `agent/clustering.py`, `agent/nodes/cluster_failures.py`.
+
+### 7.2 Healthy spans: how they are sampled and stored
+
+A failing step is easier to explain next to the same step working. So TraceScan keeps a library of **healthy calls**, collected as a side effect of judging.
+
+**Sampled by the trace judge, filtered by code.** When the judge scores a trace, it may also name up to 3 spans that worked (`healthy_span_ids`). The code keeps a pick only when all of these hold:
+
+| Check | Why |
+| --- | --- |
+| The trace scored **0.9 or more** | a borderline "fine" is not an example of a step working |
+| The trace is **clean**: no error span, no retrieval with 0 hits | a retried or reported failure, or an answer with no records behind it, is not a clean example. No exception is no proof of a right answer, so these proxies are strict |
+| The span **is in the tree** and is **not the root** | the root is the whole request, not a step |
+| **At most 3**, each once | keeps one trace from flooding the library |
+
+A bad pick is dropped, never asked about again. So the library is not a random sample: it is the steps of clearly good requests, chosen by the judge and checked by code.
+
+**What is embedded: the step text.** Six labelled lines, the same template for healthy and failing steps, so a failing step's text is the search query:
+
+```text
+step: execute_tool search_pubmed
+outcome: ok
+previous: chat openai/gpt-4.1-mini
+next: chat openai/gpt-4.1-mini
+inside: invoke_agent medas
+latency: slow (2-5 s)
+```
+
+Only names, the status, the error type and bucketed numbers go in (`hits: none`, `some (1-10)`, `many (>10)`; latency as a word). No status message and no other attribute value, since those can hold clinical text.
+
+**The step key.** Each pick is stored with what a twin must share with a failing step: the **span name**, its `gen_ai.operation.name`, the **app version** (`service.version`) and the **telemetry schema** URL. A field the trace didn't send is stored as `unknown`, and matches only calls that didn't send it either.
+
+**Stored without review.** After every run that ends or pauses at the review, the picks are embedded and saved to pgvector (collection `healthy_spans`), one document per pick, with its id `<trace>:<span>:v<template version>`, so judging the same window again replaces rows instead of adding them. This is one of only two writes made without a person's approval, which is acceptable because it holds no clinical text and never leaves TraceScan's database. A failed save is logged by type and doesn't fail the run.
+
+Code: `agent/judge.py` (`clean`, `healthy_picks`), `agent/chunks.py` (`step_text`, `step_key`), `runs/healthy.py`.
+
+### 7.3 Approvals and rejections: the known-issues memory
+
+Every finding a reviewer decides on teaches the next runs something. An approved diagnosis is a **confirmed cause**; a rejected one is a **warning** that this explanation was judged wrong.
+
+**Written once a person decides.** `apply_actions`, after the review, stores one memory per decided, diagnosed finding whose trace judge blamed a span, **approved or rejected**. That is why a review that rejects everything still goes through `apply_actions`.
+
+**What is embedded.** The failing step's *failure text*: its step text, plus a `symptom:` line in the judge's fixed words when the step failed silently. Without that line, two different silent faults at the same step would read the same and match each other. The diagnoser keeps this text on the diagnosis (`failing_step`), because `apply_actions` reads no traces.
+
+**What comes back with a match** (metadata): the verdict (`approved` or `rejected`), the category, the root cause, the suggested fix, the signature, and the run and cluster it came from. A new cluster knows its symptom but not its cause; the memory hands back the cause.
+
+**Replaced, not duplicated.** The id is `<app>:<run>:<cluster>:v<template version>`, so a review resubmitted after an error replaces its rows.
+
+**A rejected diagnosis is a warning only.** It is shown to the diagnoser as "judged wrong", and it is never used to match, merge or suppress an issue.
+
+Code: `agent/memory.py`, `runs/known_issues.py`, `agent/nodes/apply_actions.py`.
+
+### 7.4 How the diagnoser gets them
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as diagnose_cluster
+    participant T as Trace server (MCP)
+    participant HS as healthy_spans
+    participant KI as known_issues
+    participant M as Diagnoser model
+    D->>T: exemplar trees (3 newest traces)
+    D->>D: the judge's blamed span in the first exemplar<br/>gives step text, step key, failure text
+    D->>HS: similar(step text, app, step key, 3)
+    Note over HS: hard filter: app, step, operation,<br/>app version, schema, template.<br/>Fetch 12, keep ≤ 0.12, merge identical texts
+    HS-->>D: 0 to 3 healthy twins
+    D->>KI: similar(failure text, app, 3)
+    Note over KI: filter: app and template only.<br/>Fetch 6, keep ≤ 0.12
+    KI-->>D: 0 to 3 known issues
+    D->>M: taxonomy + exemplar trees + twins section + known-issues section
+    M-->>D: diagnosis (cites exemplar spans only)
+```
+
+**1. The query.** The diagnoser takes the span the trace judge blamed in the first exemplar that has one, and builds its step text (for twins), its step key, and its failure text (for known issues). No blamed span means neither lookup runs.
+
+**2. Healthy twins.** One pgvector search, with the step key as a **hard metadata filter in the same query** as the vector search: same app, step, operation, app version, schema and template version. It fetches 12 candidates for 3 twins, keeps those within cosine distance **0.12**, and merges identical texts into one twin that says how many calls share it.
+
+> **Why the filters do the real work.** bge-small bunches its distances: on the seeded day, healthy calls of the *same* step sat 0.044 to 0.097 from a failure, and the nearest texts of *other* steps 0.053 to 0.11. A distance alone can't tell them apart, so the hard filters decide relevance and 0.12 is only a safety net. The diagnoser may get fewer than 3 twins, or none.
+
+**3. Known issues.** One pgvector search filtered on the **app and template version only**, not the step key: the same cause can fail at a neighbouring step, or after an app upgrade. It fetches 6 candidates for 3, and keeps those within **0.12**, nearest first.
+
+**4. Into the prompt.** Each lookup that finds something adds one section after the exemplar trees, in the prompt's own words:
+
+```text
+The failing step of exemplar <trace>, span <span>:
+<its step text>
+Healthy calls of the same step, on the same app version, from requests that went fine,
+nearest first. Compare them with the failure to find what differs.
+They are not evidence: do not cite them.
+<twin 1>
+---
+<twin 2>
+(seen in 4 healthy calls)
+```
+
+```text
+Past diagnoses a reviewer decided on, for failures whose failing step reads like this one,
+nearest first. A confirmed cause may apply here if this cluster's failure is the same kind
+and its evidence agrees. A rejected cause was judged wrong: do not propose it again unless
+the evidence clearly supports it. They are not evidence: do not cite them.
+[CONFIRMED by a reviewer] failure: <signature>
+category: <category>
+cause: <root cause>
+fix: <suggested fix>
+---
+[REJECTED by a reviewer] failure: …
+```
+
+**5. Guarded and recorded.** Both lookups are best effort: a failure is logged by exception type and the prompt goes on without that section. The evidence check still accepts only spans of the exemplar trees, so a twin or a memory can never be cited. The stored diagnosis records how many twins (`healthy_twins`) and memories (`memories`) its prompt showed, so a run tells whether the context was there.
+
+| | Healthy twins | Known issues |
+| --- | --- | --- |
+| **Answers** | "What does this step look like when it works?" | "Has a person already confirmed or rejected a cause for a failure like this?" |
+| **Source** | the trace judge's picks from clean traces scored ≥ 0.9 | reviewers' decisions, approved and rejected |
+| **Written** | after every run, without review | by `apply_actions`, after the review |
+| **Embedded text** | step text | failure text (step text + symptom) |
+| **Filter** | app, step, operation, app version, schema, template | app, template |
+| **Kept** | ≤ 3, distance ≤ 0.12, identical texts merged | ≤ 3, distance ≤ 0.12 |
+| **In the prompt as** | comparison, not citable | confirmed causes or warnings, not citable |
+
+---
+
+## 8. Guardrails, retries and budgets
 
 > *What stops the agent from doing harm, spending too much, or making things up?*
 
@@ -444,7 +650,7 @@ The two writes made without review are the judge's scores and the healthy-span s
 
 ---
 
-## 8. Human review
+## 9. Human review
 
 > *How does a person decide, and what happens after?*
 
@@ -482,7 +688,7 @@ Each finding reads top to bottom the way a reviewer asks: what kind of failure, 
 
 ---
 
-## 9. Eval metrics
+## 10. Eval metrics
 
 > *What exactly is measured, and why each number?*
 
@@ -539,7 +745,7 @@ uv run python -m eval.metrics --export             # update the results page
 
 ---
 
-## 10. The eval journey
+## 11. The eval journey
 
 > *What did the eval teach, and how did the system change because of it?*
 
@@ -595,7 +801,7 @@ After each change, the seeded day and the control day were re-run: they did not 
 
 ---
 
-## 11. The json-render console
+## 12. The json-render console
 
 > *How does the user follow a run as it happens?*
 
@@ -635,7 +841,7 @@ For example, a `progress` event becomes a badge and a line of text. A `proposal`
 
 ---
 
-## 12. Limits and next steps
+## 13. Limits and next steps
 
 ### Limits of the evidence
 
