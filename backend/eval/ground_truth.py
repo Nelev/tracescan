@@ -14,6 +14,8 @@ A kind whose cause is another kind's names it in `same_cause_as`: grouping the t
 for one cause, so the clustering scores count them as one fault (`cause_of`).
 """
 
+from collections.abc import Mapping
+
 from pydantic import BaseModel, ConfigDict
 
 from agent.schemas import FailureCategory
@@ -129,7 +131,8 @@ NOT_FAULTS: dict[str, str] = {
 }
 
 
-def cause_of(kind: str) -> str:
-    """The kind a trace counts as in the clustering scores: its own, or the one it shares a cause with."""
-    fault = FAULTS.get(kind)
+def cause_of(kind: str, faults: Mapping[str, Fault] = FAULTS) -> str:
+    """The kind a trace counts as in the clustering scores: its own, or the one it shares a cause
+    with (in `faults`, this answer key's unless given)."""
+    fault = faults.get(kind)
     return (fault.same_cause_as or kind) if fault else kind

@@ -22,8 +22,7 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 
 from agent.model import build_model
-from eval.ground_truth import FAULTS
-from eval.metrics import majority_kinds, results_path
+from eval.metrics import answer_key, majority_kinds, results_path
 
 # Another vendor than the diagnoser's; the JUDGE_MODEL environment variable overrides it.
 DEFAULT_JUDGE_MODEL = "openai/gpt-6.1-sol"
@@ -39,10 +38,11 @@ async def judge(result: dict[str, Any], model: BaseChatModel) -> list[dict[str, 
     """One verdict per diagnosis of a fault: its cluster id, the score and the reasoning."""
     grader = model.with_structured_output(Verdict, method="json_schema")
     kinds = majority_kinds(result)
+    faults = answer_key(result)
 
     async def grade(diagnosis: dict[str, Any]) -> dict[str, Any]:
         cluster_id = diagnosis["cluster_id"]
-        fault = FAULTS[kinds[cluster_id]]
+        fault = faults[kinds[cluster_id]]
         answer = (
             f"True cause: {fault.cause}\n"
             f"Visible symptom: {fault.symptom}\n"
@@ -54,7 +54,7 @@ async def judge(result: dict[str, Any], model: BaseChatModel) -> list[dict[str, 
         return {"cluster_id": cluster_id, **verdict.model_dump()}
 
     # A diagnosis of a cluster with no fault is a false alarm (eval/metrics.py), not judged.
-    of_faults = [d for d in result["diagnoses"] if kinds[d["cluster_id"]] in FAULTS]
+    of_faults = [d for d in result["diagnoses"] if kinds[d["cluster_id"]] in faults]
     return await asyncio.gather(*(grade(diagnosis) for diagnosis in of_faults))
 
 
@@ -82,7 +82,7 @@ def main() -> None:
     for verdict in result["verdicts"]:
         cluster_id = verdict["cluster_id"]
         print(f"\n{cluster_id} ({kinds[cluster_id]}): {verdict['score']}")
-        print(f"  true:      {FAULTS[kinds[cluster_id]].cause}")
+        print(f"  true:      {answer_key(result)[kinds[cluster_id]].cause}")
         print(f"  diagnosis: {root_causes[cluster_id]}")
         print(f"  judge:     {verdict['reasoning']}")
 

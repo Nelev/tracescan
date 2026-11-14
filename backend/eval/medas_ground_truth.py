@@ -23,9 +23,12 @@ The hard cases:
   every one of their traces.
 """
 
+from collections.abc import Callable, Iterator
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from eval.ground_truth import Fault
+from trace_store.models import SpanNode
 
 # The model Medas runs on, whose chat spans a fault in its answer starts in.
 MEDAS_MODEL = "openai/gpt-4.1-mini"
@@ -179,6 +182,72 @@ LOOK_ALIKES: dict[tuple[str, str], str] = {
         "one finds nothing, the other finds passages the model is never shown."
     ),
 }
+
+# The kind of a trace sent with no switch on, or sent with one that did not fire: nothing was
+# injected into it, so a proposal for it is a false alarm.
+HEALTHY = "healthy"
+NOT_FAULTS: dict[str, str] = {
+    HEALTHY: (
+        "Nothing was injected: sent with no switch on, or with one that did not fire on this "
+        "request (a timeout share that spared it, a search that was not about medication). "
+        "PubMed failing on its own is a real failure, but not one of the faults."
+    ),
+}
+
+# Record searches in one request from which the small context counts as having fired: a healthy
+# request makes up to three, the context fault's loop seven or more.
+CONTEXT_LOOP_SEARCHES = 5
+
+
+def spans(tree: SpanNode) -> Iterator[SpanNode]:
+    """Every span of the tree, the root first."""
+    yield tree
+    for child in tree.children:
+        yield from spans(child)
+
+
+def _named(tree: SpanNode, name: str) -> list[SpanNode]:
+    return [span for span in spans(tree) if span.name == name]
+
+
+# Whether a fault fired on a request, read off its trace by the grader. A switch can be on and
+# still spare a request (the timeout's share, a search not about medication), and a trace it
+# spared is graded as healthy, not as a fault the agent missed. Never shown to the agent.
+FIRED: dict[str, Callable[[SpanNode], bool]] = {
+    "empty_retrieval": lambda tree: any(
+        span.attributes.get("retrieval.hits") == 0
+        for span in _named(tree, "retrieval record_chunks")
+    ),
+    "tool_schema": lambda tree: any(
+        str(span.attributes.get("error.type", "")).endswith("ValidationError")
+        for span in _named(tree, "execute_tool search_patient_record")
+    ),
+    # Any reply but the asked-for one: without its Output section the model may still send a
+    # message, only without the triage code (no_severity), or no such object at all (malformed).
+    "truncated_prompt": lambda tree: (
+        tree.attributes.get("medas.reply.format")
+        in (
+            "malformed",
+            "no_severity",
+        )
+    ),
+    "context_tokens": lambda tree: (
+        len(_named(tree, "retrieval record_chunks")) >= CONTEXT_LOOP_SEARCHES
+    ),
+    "weak_model": lambda tree: bool(_named(tree, f"chat {WEAK_MODEL}")),
+    "upstream_timeout": lambda tree: any(
+        span.status_message == "source timed out"
+        for span in spans(tree)
+        if span.name in ("execute_tool search_medlineplus", "execute_tool search_pubmed")
+    ),
+}
+
+
+def kind_of(switched: str | None, tree: SpanNode) -> str:
+    """A trace's kind in the answer key: the fault that was switched on when it was sent, if
+    it fired on this request; else healthy."""
+    return switched if switched is not None and FIRED[switched](tree) else HEALTHY
+
 
 # The traffic of the control runs, with no switch on: every normal and edge question once.
 # Proposals made there are false alarms. PubMed sometimes fails on its own ('source

@@ -42,31 +42,28 @@ DEFAULT_END = datetime(2026, 2, 13, 12, tzinfo=UTC)
 CONTROL_END = datetime(2026, 2, 20, 12, tzinfo=UTC)
 
 
-async def triage(
-    end: datetime,
+async def triage_window(
+    since: datetime,
+    until: datetime,
+    kinds: dict[str, str],
     traces: TraceAccess,
     embedder: Embedder,
     model: BaseChatModel,
     judge_model: BaseChatModel | None = None,
-    counts: Counts = COUNTS,
 ) -> dict[str, Any]:
-    """Run the graph on the day that ends at `end`; what it found, next to the answer key.
+    """Run the graph on the window; what it found, next to the answer key `kinds` (trace id to
+    kind). Shared by the seeded eval and the eval on Medas (eval/medas_run.py).
 
-    `judge_model` judges the traces; None uses the diagnoser's `model`. `counts` is the mix the
-    day was seeded with, which the answer key is worked out from again.
+    `judge_model` judges the traces; None uses the diagnoser's `model`.
     """
-    state = TriageState(target_app=APP, since=(end - DAY).isoformat(), until=end.isoformat())
+    state = TriageState(target_app=APP, since=since.isoformat(), until=until.isoformat())
     started = time.perf_counter()
     found = await build_graph().ainvoke(
         state, context=TraceContext(traces, embedder, model, judge_model)
     )
     return {
-        "end": end.isoformat(),
-        "control": counts is CONTROL_COUNTS,
         "seconds": round(time.perf_counter() - started, 1),
-        "kinds": kinds(
-            end, counts
-        ),  # the answer key: trace id to seeded kind (eval/ground_truth.py)
+        "kinds": kinds,
         # The failed traces the graph collected, and the span each failed in (ids only).
         "failing_spans": {
             trace["trace_id"]: trace["failing_span_id"] for trace in found.get("failed_traces", [])
@@ -82,6 +79,25 @@ async def triage(
         "judge_failures": found.get("judge_failures", []),
         "judge_usage": found.get("judge_usage", []),
     }
+
+
+async def triage(
+    end: datetime,
+    traces: TraceAccess,
+    embedder: Embedder,
+    model: BaseChatModel,
+    judge_model: BaseChatModel | None = None,
+    counts: Counts = COUNTS,
+) -> dict[str, Any]:
+    """Run the graph on the seeded day that ends at `end`; what it found, next to the answer key.
+
+    `counts` is the mix the day was seeded with, which the answer key (trace id to seeded kind,
+    eval/ground_truth.py) is worked out from again.
+    """
+    found = await triage_window(
+        end - DAY, end, kinds(end, counts), traces, embedder, model, judge_model
+    )
+    return {"end": end.isoformat(), "control": counts is CONTROL_COUNTS} | found
 
 
 async def run(
