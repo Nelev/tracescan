@@ -1,4 +1,7 @@
-"""collect_traces against a fake client. The graph against the real trace server is in test_eval_run.py."""
+"""collect_traces, the graph's routes and join_scores, against a fake client and fake models.
+
+The graph against the real trace server is in test_eval_run.py.
+"""
 
 from datetime import UTC, datetime
 

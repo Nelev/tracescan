@@ -10,8 +10,9 @@ from scripts.seed_traces import COUNTS, DAY, export
 from trace_store.models import TraceQuery
 
 END = datetime(2026, 11, 10, 12, tzinfo=UTC)
-# Traces with an error span: all but the healthy ones and the failure that raises no error.
-FAILED = sum(COUNTS.values()) - COUNTS[seed.healthy] - COUNTS[seed.silent_no_hits]
+# Traces with an error span: all but the healthy ones and the failure that raises no error
+# (harmless kinds such as retried_ok and not_found have one too).
+WITH_ERROR_SPANS = sum(COUNTS.values()) - COUNTS[seed.healthy] - COUNTS[seed.silent_no_hits]
 
 
 def by_trace(rows):
@@ -34,12 +35,12 @@ def test_the_export_decodes_into_whole_traces_within_the_day():
         assert all(END - DAY <= span["start_time"] <= span["end_time"] < END for span in spans)
 
 
-def test_a_failed_span_carries_its_exception_type_and_a_healthy_trace_has_none():
+def test_every_error_span_carries_its_exception_type_and_message():
     traces = by_trace(decode(export(END)))
-    failed = [s for s in traces.values() if any(span["status"] == "error" for span in s)]
+    with_errors = [s for s in traces.values() if any(span["status"] == "error" for span in s)]
 
-    assert len(failed) == FAILED
-    for spans in failed:
+    assert len(with_errors) == WITH_ERROR_SPANS
+    for spans in with_errors:
         for span in (span for span in spans if span["status"] == "error"):
             (event,) = span["events"]
             assert event["name"] == "exception"

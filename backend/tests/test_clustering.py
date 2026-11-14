@@ -15,6 +15,10 @@ import numpy as np
 import pytest
 
 from agent.clustering import (
+    _pca,
+    _trust,
+    _tsne,
+    _unit,
     cluster_map,
     cluster_summaries,
     failure_text,
@@ -231,12 +235,16 @@ def test_clusters_are_numbered_by_size_and_exemplars_belong_to_them():
 
 
 def test_a_cluster_is_described_the_same_way_whichever_stage_found_it():
+    # Among the other groups HDBSCAN finds the tool failures; alone, the step-and-error pass does.
     clusters, _ = clustered()
-    tool = next(c for c in clusters if group_of(c["trace_ids"][0]) == "tool")
-    assert tool["method"] == "hdbscan"
-    assert tool["signature"] == (
+    by_hdbscan = next(c for c in clusters if group_of(c["trace_ids"][0]) == "tool")
+    [by_step_error], _ = clustered("tool")
+    assert (by_hdbscan["method"], by_step_error["method"]) == ("hdbscan", "step_error")
+    assert by_hdbscan["signature"] == (
         "execute_tool lookup_dosage: tool call failed validation: missing required field 'x'"
     )
+    for key in ("trace_ids", "signature", "exemplar_trace_ids"):
+        assert by_hdbscan[key] == by_step_error[key]
 
 
 def test_exemplars_are_the_newest_traces_of_the_cluster():
@@ -381,5 +389,9 @@ def test_project_tries_tsne_on_many_points_and_keeps_the_more_trustworthy():
     centres = rng.normal(size=(4, 32)) * 5
     vectors = np.vstack([c + rng.normal(size=(TSNE_MIN_POINTS, 32)) for c in centres])
     coords, method, trust = project(vectors)
-    assert method in {"pca", "tsne"} and trust is not None and 0 <= trust <= 1
     assert coords.shape == (len(vectors), 3)
+    unit = _unit(vectors)
+    pca, tsne = _trust(unit, _pca(unit)), _trust(unit, _tsne(unit))
+    assert pca is not None and tsne is not None
+    assert trust is not None and 0 <= trust <= 1 and trust == max(pca, tsne)
+    assert method == ("tsne" if tsne > pca else "pca")

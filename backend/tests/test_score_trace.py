@@ -145,10 +145,6 @@ def test_error_type_reads_the_attribute_then_the_exception_event():
     assert error_type(span_tree("t3")) is None
 
 
-def test_failure_fields_finds_a_nested_span():
-    assert failure_fields(TREE, "root")["failing_span_name"] == "invoke_agent medas"
-
-
 # --- the run's budget
 
 

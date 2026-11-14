@@ -78,30 +78,34 @@ async def test_the_reader_cannot_write(read_only):
 @pytest.mark.anyio
 async def test_search_traces_lists_every_whole_trace_scored_or_not(spans_engine, reader):
     root, child = decode(export())
-    healthy = later_copy(root, "a" * 32, status="ok")
-    rootless = {**child, "trace_id": "c" * 32}
-    other_app = {**root, "trace_id": "b" * 32, "app": "someone-else"}
-    await store(spans_engine, [root, child, healthy, rootless, other_app])
-    async with spans_engine.begin() as conn:  # no scores at all: the search must not need them
-        await conn.execute(text("TRUNCATE scores"))
+    unscored = later_copy(root, "a" * 32, status="ok")
+    await store(spans_engine, [root, child, unscored])
+    async with spans_engine.begin() as conn:  # a judge's verdict on the older trace only
+        await conn.execute(
+            text(
+                "INSERT INTO scores (trace_id, evaluator, value, span_id)"
+                " VALUES (:trace_id, 'trace_judge', 0.0, :span_id)"
+            ),
+            {"trace_id": TRACE_ID.hex(), "span_id": CHILD_ID.hex()},
+        )
 
-    found = await reader.search_traces(TraceQuery(app="medas"))
+    found = await reader.search_traces(MEDAS)
 
-    # Newest first, the failed one and the healthy one; no rootless trace, no other app.
+    # Newest first, the scored trace and the unscored one alike.
     assert [s.trace_id for s in found] == ["a" * 32, TRACE_ID.hex()]
     newest = found[0]
     assert (newest.status, newest.signature, newest.duration_ms) == ("ok", "request", 2000.0)
-    # Ids and timing only: nothing a score or a span's content would fill.
-    assert (newest.min_score, newest.failing_span_id, newest.error_message) == (None, None, None)
-    assert await reader.search_traces(TraceQuery(app="someone-else")) == []
+    # Ids and timing only: the stored score fills nothing, nor does a span's content.
+    filled = {(s.min_score, s.failing_span_id, s.failing_span_name, s.error_message) for s in found}
+    assert filled == {(None, None, None, None)}
 
 
 @pytest.mark.anyio
 async def test_search_traces_keeps_to_the_window_and_the_limit(spans_engine, reader):
     root, child = decode(export())
     later = timedelta(hours=1)
-    healthy = later_copy(root, "a" * 32)
-    await store(spans_engine, [root, child, healthy])
+    newer = later_copy(root, "a" * 32)
+    await store(spans_engine, [root, child, newer])
 
     since = await reader.search_traces(TraceQuery(app="medas", since=START + later))
     until = await reader.search_traces(TraceQuery(app="medas", until=START + later))

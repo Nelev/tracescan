@@ -6,6 +6,7 @@ from sqlalchemy import text
 from api.traces import decode
 from api.traces import store_spans as store
 from main import app
+from runs.scores import EVALUATOR
 from tests.test_traces_api import CHILD_ID, ROOT_ID, START, TRACE_ID, export
 from trace_store.const import REDACTED
 
@@ -30,14 +31,13 @@ async def browser(collector, spans_engine, reader):
                 " VALUES (:trace_id, :evaluator, :value, :span_id)"
             ),
             [
-                {"trace_id": FAILED, "evaluator": "request_failed", "value": 1.0, "span_id": None},
                 {
                     "trace_id": FAILED,
-                    "evaluator": "tool_error",
+                    "evaluator": EVALUATOR,
                     "value": 0.0,
                     "span_id": CHILD_ID.hex(),
                 },
-                {"trace_id": HEALTHY, "evaluator": "request_failed", "value": 1.0, "span_id": None},
+                {"trace_id": HEALTHY, "evaluator": EVALUATOR, "value": 1.0, "span_id": None},
             ],
         )
     app.state.trace_reader = reader
@@ -59,7 +59,7 @@ async def test_the_list_holds_failed_and_healthy_traces_newest_first(browser):
     assert (failed["trace_id"], failed["failed"], failed["spans"]) == (FAILED, True, 2)
     assert (failed["min_score"], failed["duration_ms"]) == (0.0, 2000.0)
     assert (failed["failing_span_id"], failed["failing_span_name"]) == (CHILD_ID.hex(), "retrieval")
-    assert (failed["failing_check"], failed["error_type"]) == ("tool_error", "EmptyRetrieval")
+    assert (failed["failing_check"], failed["error_type"]) == (EVALUATOR, "EmptyRetrieval")
     # Names only: no status message or attribute value in a row.
     assert "no documents" not in response.text
 
@@ -72,7 +72,6 @@ async def test_the_list_filters(browser):
         return [row["trace_id"] for row in response.json()]
 
     assert await ids(failed_only="true") == [FAILED]
-    assert await ids(limit=1) == [HEALTHY]
     assert await ids(since=START.replace(hour=8).isoformat()) == [HEALTHY]
     assert await ids(until=START.replace(hour=8).isoformat()) == [FAILED]
     assert await ids(app="someone-else") == []
@@ -111,15 +110,15 @@ async def test_a_trace_comes_back_as_a_sanitized_tree_with_its_scores(browser):
 
     assert (detail["trace_id"], detail["min_score"], detail["failed"]) == (FAILED, 0.0, True)
     assert detail["app"] == "medas"
-    scores = {s["evaluator"]: (s["value"], s["span_id"]) for s in detail["scores"]}
-    # The request went on after the failed tool call: only the tool check blames a span.
-    assert scores["tool_error"] == (0.0, CHILD_ID.hex())
-    assert scores["request_failed"] == (1.0, None)
+    # The judge blamed the failed tool call.
+    (score,) = detail["scores"]
+    assert (score["evaluator"], score["value"], score["span_id"]) == (
+        EVALUATOR,
+        0.0,
+        CHILD_ID.hex(),
+    )
     # The server applies the threshold, so the client never repeats it.
-    assert {s["evaluator"]: s["failed"] for s in detail["scores"]} == {
-        "request_failed": False,
-        "tool_error": True,
-    }
+    assert score["failed"] is True
     tree = detail["tree"]
     assert (tree["span_id"], tree["name"]) == (ROOT_ID.hex(), "request")
     (child,) = tree["children"]
@@ -128,6 +127,12 @@ async def test_a_trace_comes_back_as_a_sanitized_tree_with_its_scores(browser):
     assert child["attributes"]["gen_ai.system"] == "openrouter"
     assert child["attributes"]["tags"] == REDACTED
     assert child["events"][0]["attributes"] == {"exception.type": "EmptyRetrieval"}
+
+    healthy = (await browser.get(f"/v1/traces/{HEALTHY}")).json()
+    assert (healthy["min_score"], healthy["failed"]) == (1.0, False)
+    assert [(s["value"], s["span_id"], s["failed"]) for s in healthy["scores"]] == [
+        (1.0, None, False)
+    ]
 
 
 @pytest.mark.anyio

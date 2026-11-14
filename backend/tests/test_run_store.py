@@ -63,23 +63,15 @@ async def test_recording_a_run_again_leaves_it_as_it_is(store):
 
 
 @pytest.mark.anyio
-async def test_runs_are_listed_newest_first_with_who_started_each(store):
+async def test_runs_are_listed_newest_first_page_by_page_and_counted(store):
     first = await new_run(store)
     second = await new_run(store)
     third = await new_run(store, user="bo")
     runs = await store.list_runs(10)
     assert [r.run_id for r in runs] == [third, second, first]
     assert [r.started_by for r in runs] == ["bo", "ana", "ana"]
-    assert [r.run_id for r in await store.list_runs(2)] == [third, second]
-
-
-@pytest.mark.anyio
-async def test_the_list_reads_page_by_page_and_counts_every_run(store):
-    first = await new_run(store)
-    second = await new_run(store)
-    third = await new_run(store)
     assert await store.count_runs() == 3
-    assert [r.run_id for r in await store.list_runs(2, offset=0)] == [third, second]
+    assert [r.run_id for r in await store.list_runs(2)] == [third, second]  # offset 0 by default
     assert [r.run_id for r in await store.list_runs(2, offset=2)] == [first]
     assert await store.list_runs(2, offset=3) == []
 

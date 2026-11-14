@@ -1,5 +1,7 @@
 """What a diagnosis may cite: only spans of the traces the diagnoser was shown."""
 
+import pytest
+
 from agent.evidence import (
     FALLBACK_NOTE,
     fallback_evidence,
@@ -42,15 +44,13 @@ def test_an_unknown_trace_is_caught():
     assert (bad.trace_id, bad.span_id) == ("t9", "s1")
 
 
-def test_an_unknown_span_in_a_known_trace_is_caught():
-    index = span_index([span_tree("t1", span_id="s1")])
-    (bad,) = invalid_citations(citing(("t1", "s2")), index)
-    assert bad.span_id == "s2"
-
-
-def test_a_span_counts_only_under_its_own_trace():
-    index = span_index([span_tree("t1"), span_tree("t2")])
-    assert len(invalid_citations(citing(("t1", "t2_root")), index)) == 1
+@pytest.mark.parametrize(
+    "span_id", ["s2", "t2_root"], ids=["unknown span", "span of another trace"]
+)
+def test_a_span_counts_only_under_its_own_trace(span_id):
+    index = span_index([span_tree("t1", span_id="s1"), span_tree("t2")])
+    (bad,) = invalid_citations(citing(("t1", span_id)), index)
+    assert (bad.trace_id, bad.span_id) == ("t1", span_id)
 
 
 def test_keep_valid_drops_only_the_fake_citations():

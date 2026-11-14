@@ -204,13 +204,15 @@ async def run_graph(trees: dict, model) -> dict:
 
 @pytest.mark.anyio
 async def test_returns_the_diagnosis_as_a_plain_dict_with_the_clusters_own_id():
-    result = await diagnose(fake_diagnoser(DIAGNOSIS))
+    model = fake_diagnoser(DIAGNOSIS)
+    result = await diagnose(model)
     (diagnosis,) = result["diagnoses"]
     json.dumps(diagnosis)  # plain JSON: nothing for the checkpoint serializer to warn on
     assert diagnosis["cluster_id"] == "c0"
     assert diagnosis["category"] == "retrieval_miss"
     assert Diagnosis.model_validate(diagnosis).evidence[0].span_id == "s1"
     assert diagnosis["evidence_check"] == "valid"
+    assert len(model.seen) == 1  # a valid citation costs one model call
 
 
 @pytest.mark.anyio
@@ -229,6 +231,7 @@ async def test_the_graph_diagnoses_every_cluster():
     assert sorted(d["cluster_id"] for d in result["diagnoses"]) == ["c0", "c1"]
     assert {d["evidence_check"] for d in result["diagnoses"]} == {"valid"}
     assert result.get("diagnosis_failures", []) == []
+    assert sorted(u["cluster_id"] for u in result["model_usage"]) == ["c0", "c1"]
 
 
 @pytest.mark.anyio
@@ -283,14 +286,6 @@ GOOD = citing(("t1", "s1"))  # TREE is trace t1 with the failing span s1
 
 
 @pytest.mark.anyio
-async def test_a_valid_citation_costs_one_model_call():
-    model = scripted_model(GOOD)
-    (diagnosis,) = (await diagnose(model))["diagnoses"]
-    assert len(model.seen) == 1
-    assert diagnosis["evidence_check"] == "valid"
-
-
-@pytest.mark.anyio
 @pytest.mark.parametrize(
     "fake",
     [("t9", "s9"), ("t1", "nope"), ("t2", "t2_root")],
@@ -340,12 +335,6 @@ async def test_a_cluster_puts_what_its_model_calls_cost_in_state():
     (usage,) = result["model_usage"]
     json.dumps(usage)  # plain numbers and strings: nothing for the checkpoint serializer to warn on
     assert usage == {"cluster_id": "c0", "calls": 1, "tokens": 150, "cost_usd": 0.001}
-
-
-@pytest.mark.anyio
-async def test_the_graph_collects_one_usage_entry_per_cluster():
-    result = await run_graph({t: span_tree(t) for t in ("t1", "t2")}, fake_diagnoser(DIAGNOSIS))
-    assert sorted(u["cluster_id"] for u in result["model_usage"]) == ["c0", "c1"]
 
 
 @pytest.mark.anyio

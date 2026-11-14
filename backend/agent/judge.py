@@ -11,7 +11,7 @@ more with the valid ids, and if it still names an unknown span, or none, or the 
 code blames the deepest error span (the root when no span failed). A trace that did not fail
 blames nothing.
 
-A trace that went fine may name healthy spans, steps that worked, for the planned healthy-span
+A trace that went fine may name healthy spans, steps that worked, for the healthy-span
 store; `healthy_picks` keeps the ones that hold up, from a clearly fine, clean trace only (`clean`):
 no exception does not mean a right answer.
 """

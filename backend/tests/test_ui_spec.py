@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
@@ -67,9 +68,13 @@ async def test_a_failing_call_gives_none_and_logs_no_text(caplog):
 
 
 @pytest.mark.anyio
-async def test_a_slow_call_gives_none_without_waiting(monkeypatch):
+async def test_a_slow_call_gives_none_without_waiting(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
     monkeypatch.setattr(ui_spec, "UI_CALL_TIMEOUT_S", 0.05)
+    started = time.monotonic()
     assert await compose_ui(SlowModel(responses=["x"]), EVENT, DATA) is None
+    assert time.monotonic() - started < 1  # SlowModel would take 5 s
+    assert "TimeoutError" in caplog.text
 
 
 def test_the_prompt_carries_the_catalog_the_frontend_wrote():

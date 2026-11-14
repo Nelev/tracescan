@@ -17,8 +17,8 @@ def build_model(variable: str, default: str, max_retries: int = 0) -> BaseChatMo
     """The OpenRouter model named by the environment variable `variable`, else `default`.
 
     The SDK's own retry (max_retries, up to minutes of backoff) is off unless asked for: retries
-    belong to the caller, which counts them against one budget per cluster in state
-    (diagnose_cluster runs again after a transient error) or gives up for a fallback. A caller
+    belong to the caller, which retries one call at a time within its budget (`retrying` in
+    model_guard.py, per cluster or per trace) or gives up for a fallback. A caller
     with no retry of its own (the eval's judge) asks for the SDK's.
     """
     return ChatOpenRouter(
