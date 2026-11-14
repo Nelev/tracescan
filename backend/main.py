@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.runs = Runs(
             app.state.graph, context, open_traces, store, healthy, ScoreStore(engine)
         )
+        await app.state.runs.recover()  # the runs a process that died left claiming to be live
         # The small model that writes the UI spec of each streamed message (api.ui_spec).
         app.state.ui_spec_model = build_ui_spec_model()
         try:

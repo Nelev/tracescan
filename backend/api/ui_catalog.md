@@ -13,8 +13,6 @@
 | `Table` | Data table. columns: header labels. rows: 2D array of cell strings, e.g. [["Alice","admin"],["Bob","user"]]. | `columns`: array of string, required; `rows`: array of array of string, required; `caption`: string | no |
 | `Heading` | Heading text (h1-h4) | `text`: string, required; `level`: "h1", "h2", "h3" or "h4" | no |
 | `Text` | Paragraph text | `text`: string, required; `variant`: "body", "caption", "muted", "lead" or "code" | no |
-| `Image` | Image component. Renders an img tag when src is provided, otherwise a placeholder. | `src`: string; `alt`: string, required; `width`: number; `height`: number | no |
-| `Avatar` | User avatar with fallback initials | `src`: string; `name`: string, required; `size`: "sm", "md" or "lg" | no |
 | `Badge` | Status badge | `text`: string, required; `variant`: "default", "secondary", "destructive" or "outline" | no |
 | `Alert` | Alert banner | `title`: string, required; `message`: string; `type`: "info", "success", "warning" or "error" | no |
 | `Progress` | Progress bar (value 0-100) | `value`: number, required; `max`: number; `label`: string | no |
@@ -30,7 +28,6 @@
 | `Switch` | Toggle switch. Use { $bindState } on checked for binding. Use checks for validation. validateOn controls timing (default: change). | `label`: string, required; `name`: string, required; `checked`: boolean; `checks`: array of {type: string, message: string, args?: object}; `validateOn`: "change", "blur" or "submit" | no |
 | `Slider` | Range slider input. Use { $bindState } on value for binding. | `label`: string; `min`: number; `max`: number; `step`: number; `value`: number | no |
 | `Button` | Clickable button. Bind on.press for handler. | `label`: string, required; `variant`: "primary", "secondary" or "danger"; `disabled`: boolean | no |
-| `Link` | Anchor link. Bind on.press for click handler. | `label`: string, required; `href`: string, required | no |
 | `DropdownMenu` | Dropdown menu with trigger button and selectable items. Use { $bindState } on value for selected item binding. | `label`: string, required; `items`: array of {label: string, value: string}, required; `value`: string | no |
 | `Toggle` | Toggle button. Use { $bindState } on pressed for state binding. | `label`: string, required; `pressed`: boolean; `variant`: "default" or "outline" | no |
 | `ToggleGroup` | Group of toggle buttons. Type 'single' (default) or 'multiple'. Use { $bindState } on value. | `items`: array of {label: string, value: string}, required; `type`: "single" or "multiple"; `value`: string | no |

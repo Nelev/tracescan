@@ -1,5 +1,5 @@
-import { shadcnComponentDefinitions } from "@json-render/shadcn/catalog";
 import { z } from "zod";
+import { COMPONENT_DEFINITIONS } from "./ui-catalog.ts";
 
 /**
  * The catalog in words, for the server's model. It is used only by `npm run export:ui-prompt`
@@ -71,7 +71,7 @@ const cellOf = (text: string) =>
  */
 export function describeCatalog(): string {
   const rows = ["| Type | Use | Props | Children |", "|---|---|---|---|"];
-  for (const [name, definition] of Object.entries(shadcnComponentDefinitions)) {
+  for (const [name, definition] of Object.entries(COMPONENT_DEFINITIONS)) {
     const { description, slots, props } = definition as {
       description?: string;
       slots?: string[];

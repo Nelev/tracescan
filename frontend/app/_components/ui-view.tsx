@@ -5,7 +5,7 @@ import { defineRegistry, JSONUIProvider, Renderer } from "@json-render/react";
 import { shadcnComponents } from "@json-render/shadcn";
 import { memo, useEffect, useMemo } from "react";
 import type { UiMessage } from "@/lib/events";
-import { catalog, checkUi } from "@/lib/ui-catalog";
+import { catalog, checkUi, withoutRemoved } from "@/lib/ui-catalog";
 import {
   UiAlert,
   UiBadge,
@@ -20,11 +20,12 @@ import {
 } from "./ui-parts";
 
 // The whole catalog is drawable: the package's own components for every type, except the ten we
-// draw ourselves (ui-parts.tsx), which follow the design system. The package's are imported as a
+// draw ourselves (ui-parts.tsx), which follow the design system. The ones that take a URL are not
+// registered at all (`REMOVED` in lib/ui-catalog.ts says why). The package's are imported as a
 // set, so all of them load with this chunk, which is itself loaded only when the console is shown.
 const { registry } = defineRegistry(catalog, {
   components: {
-    ...shadcnComponents,
+    ...withoutRemoved(shadcnComponents),
     Stack: UiStack,
     Grid: UiGrid,
     Card: UiCard,
