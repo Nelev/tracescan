@@ -110,3 +110,18 @@ MAX_ISOLATED_DIAGNOSES = 10
 
 # HDBSCAN fails when it gets fewer traces than either of its size settings.
 assert max(MIN_CLUSTER_SIZE, MIN_SAMPLES) <= MIN_TRACES_FOR_HDBSCAN
+
+# What a failed trace shows when its blamed step recorded no error (agent.judge.symptom): the
+# words clustering reads in place of an error, so silent failures of different kinds do not
+# share one signature. Words only, no digits, so counts never split a cause.
+SYMPTOM_EMPTY = "no error; a search returned nothing"
+SYMPTOM_REPEATED = "no error; the same tool asked for round after round"
+SYMPTOM_REPLY = "no error; the reply is not in the shape the app asks for"
+# Rounds (model calls) asking for the same tool from which a request counts as going round in
+# circles: the number the trace judge's prompt names (agent/judge_prompt.md).
+REPEATED_ROUNDS = 4
+# The root span attribute that says whether the reply had the asked-for shape, and the values
+# that say it did not. Medas's own (Nelev/medas tracing/handler.py), allowlisted by the trace
+# server (trace_store/const.py).
+REPLY_FORMAT = "medas.reply.format"
+OFF_FORMAT_REPLIES = frozenset({"malformed", "no_severity"})

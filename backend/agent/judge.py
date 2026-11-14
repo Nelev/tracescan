@@ -23,7 +23,16 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from agent.const import HEALTHY_MIN_SCORE, MAX_HEALTHY_PICKS
+from agent.const import (
+    HEALTHY_MIN_SCORE,
+    MAX_HEALTHY_PICKS,
+    OFF_FORMAT_REPLIES,
+    REPEATED_ROUNDS,
+    REPLY_FORMAT,
+    SYMPTOM_EMPTY,
+    SYMPTOM_REPEATED,
+    SYMPTOM_REPLY,
+)
 from agent.evidence import error_spans, span_index, walk
 from agent.model_guard import Spent, retrying, structured_asker, trace_budget
 from agent.schemas import BlameCheck, TraceVerdict
@@ -55,15 +64,52 @@ def error_type(span: SpanNode) -> str | None:
     return next((str(found) for found in recorded if found), None)
 
 
+def rounds_per_tool(tree: SpanNode) -> dict[str, int]:
+    """For each tool, how many rounds asked for it: a round is what happens after one model
+    call (`chat` span), in time order, so several calls made together count once."""
+    rounds: dict[str, set[int]] = {}
+    round_number = 0
+    for span in sorted((span for _, span in walk(tree)), key=lambda s: s.start_time):
+        operation = span.attributes.get("gen_ai.operation.name")
+        if operation == "chat" or span.name.startswith("chat "):
+            round_number += 1
+        elif operation == "execute_tool" or span.name.startswith("execute_tool "):
+            rounds.setdefault(span.name, set()).add(round_number)
+    return {tool: len(numbers) for tool, numbers in rounds.items()}
+
+
+def symptom(tree: SpanNode, blamed: SpanNode) -> str | None:
+    """What the trace shows of a failure whose blamed step recorded no error, in fixed words:
+    a search that found nothing, a tool asked for round after round (REPEATED_ROUNDS), a reply
+    not in the asked-for shape, else None. Read from the structure only, never a value."""
+
+    def empty(span: SpanNode) -> bool:
+        return span.attributes.get("retrieval.hits") == 0
+
+    if any(empty(span) for _, span in walk(blamed)):
+        return SYMPTOM_EMPTY
+    if max(rounds_per_tool(tree).values(), default=0) >= REPEATED_ROUNDS:
+        return SYMPTOM_REPEATED
+    if tree.attributes.get(REPLY_FORMAT) in OFF_FORMAT_REPLIES:
+        return SYMPTOM_REPLY
+    if any(empty(span) for _, span in walk(tree)):
+        return SYMPTOM_EMPTY
+    return None
+
+
 def failure_fields(tree: SpanNode, blamed_span_id: str) -> dict:
     """What clustering reads of a failed trace, from its blamed span: the step's name, its error
-    type and its status message (already truncated by the trace server). Names, no attributes."""
+    type and its status message (already truncated by the trace server). Names, no attributes.
+
+    A blamed step that recorded neither an error type nor a message gets its `symptom` as the
+    message, so silent failures of different kinds are told apart, not all read as the step.
+    """
     span = next(span for _, span in walk(tree) if span.span_id == blamed_span_id)
-    return {
-        "failing_span_name": span.name,
-        "error_type": error_type(span),
-        "error_message": span.status_message,
-    }
+    kind = error_type(span)
+    message = span.status_message
+    if kind is None and not message:
+        message = symptom(tree, span)
+    return {"failing_span_name": span.name, "error_type": kind, "error_message": message}
 
 
 def failed_summary(trace: dict, verdict: dict) -> dict:

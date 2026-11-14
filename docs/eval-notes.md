@@ -2,6 +2,46 @@
 
 A log of eval experiments on TraceScan: what was run, what came out, and what it changes. Newest first. The commands and the meaning of each score are in the README ("The evaluation"); the code is in `backend/eval/`.
 
+## Silent failures get a signature of their own (2026-11-14)
+
+### Question
+
+After the judge learned to see a request going round in circles, the small-context requests were judged failed but merged with the truncated prompt's: both blame a `chat` span with no error, so clustering read the same `chat openai/gpt-4.1-mini: no error message` for both. Can code, with no model, tell silent failures apart?
+
+### What changed
+
+- **`agent.judge.symptom`**: for a blamed step that recorded neither an error type nor a message, the fixed words of what the trace shows, read from structure only: a search under the blamed step that found nothing, a tool asked for in `REPEATED_ROUNDS` (4) rounds or more (`rounds_per_tool`: a round is what follows one `chat` span, so calls made together count once), a reply whose `medas.reply.format` is off, else a search anywhere that found nothing. `failure_fields` puts it in the message, which clustering embeds and groups by. A step that recorded its own error keeps it.
+- Nothing else: the judge, the thresholds and the embedding are as in the entry below.
+
+### Results
+
+| Score | Medas, judge change only | **Medas, with symptoms** | Seeded day | Control day |
+| --- | --- | --- | --- | --- |
+| Detection | 4/6 | **4/6** (context in, timeouts out) | 8/8 | n/a |
+| Purity | 13/16 | **15/15** | 34/34 | n/a |
+| Separation | 1/6 | **3/6** | 7/8 | n/a |
+| Category accuracy | 5/6 | 2/4 | 9/9 | n/a |
+| Cause accuracy | 1/6 | 0/4 (all graded 1) | 9/9 | n/a |
+| Judge recall, false positives | 16/24, 0/32 | 15/24, 0/32 | 34/34, 0/18 | 0/52 |
+| False alarms | 0 | 0 | 0 | 0 |
+
+Files: Medas `out/eval/20261114T072846Z.json` (retriaged from `20261114T070539Z.json`), seeded `20261114T072917Z.json`, control `20261114T072933Z.json`.
+
+Medas clusters: tool schema (5), truncated prompt (4, "the reply is not in the shape the app asks for"), small context (3, "the same tool asked for round after round"), empty retrieval (3, "a search returned nothing", step and error). Each holds one fault.
+
+### Findings
+
+1. **Each silent fault is its own cluster.** The small context has a diagnosis of its own for the first time, and no cluster mixes faults.
+2. **Detection is still 4/6, for another reason.** The two timeout requests were not judged failed this time. Their scores sit between 0.3 and 0.6 under the old prompt and the new one (four calls each): one source timed out while the record search worked, and the judge is split on whether that failed the user. Detection of the timeouts is a coin flip until the judge is told.
+3. **The diagnoses name the place, not the cause.** Every diagnosis was graded 1. The small context is `system_design` ("the agent keeps searching"), not `context_overflow`: nothing on the trace says the model is sent too little. The same as before for the others.
+4. **The seeded day did not move.** Its one silent fault (`silent_no_hits`) now reads "a search returned nothing" and still gets its own cluster; scores as in experiment 8.
+
+### Next steps
+
+- Tell the judge whether one failed lookup, while the others worked, failed the user, so the timeouts stop being a coin flip.
+- The weak model (still invisible).
+- Causes: the diagnoses need something on the trace that says why (an exception message from the tool, the context size the model was sent); that is Medas's to add, as safe signals.
+
 ## The judge and a request that goes round in circles (2026-11-14)
 
 ### Question
