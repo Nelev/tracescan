@@ -12,15 +12,72 @@ The first app it watches is **Medas**, a clinician-facing RAG assistant. Medas t
 
 ## Contents
 
-1. [Traces and spans](#traces-and-spans)
-2. [From traces to diagnoses](#from-traces-to-diagnoses)
-3. [The APIs](#the-apis)
-4. [The system](#the-system)
-5. [The agent](#the-agent)
-6. [The evaluation](#the-evaluation)
-7. [The json-render console](#the-json-render-console)
-8. [What's built and what's missing](#whats-built-and-whats-missing)
-9. [Running it](#running-it)
+1. [A tour of the app](#a-tour-of-the-app)
+2. [Traces and spans](#traces-and-spans)
+3. [From traces to diagnoses](#from-traces-to-diagnoses)
+4. [The APIs](#the-apis)
+5. [The system](#the-system)
+6. [The agent](#the-agent)
+7. [The evaluation](#the-evaluation)
+8. [The json-render console](#the-json-render-console)
+9. [What's built and what's missing](#whats-built-and-whats-missing)
+10. [Running it](#running-it)
+
+---
+
+## A tour of the app
+
+The app follows one loop: see what is failing, start a run, review what the agent found, and check the evidence before anything is filed. Every page needs a sign-in. The screenshots show real runs over Medas's traces.
+
+### 1. See what is failing
+
+The **dashboard** opens on what needs you: the runs waiting for review, the newest run's failure rate, and the week's failures. Below that are the newest run's failures by category, its largest clusters, the failed traces of each recent run, and how recent runs ended.
+
+![The dashboard: runs to review, failure rate, failures by category and the largest clusters](docs/screenshots/01-dashboard.jpg)
+
+### 2. Start a run
+
+**New run** asks for the app and a time window. A run judges at most the 200 newest traces in the window. The run page opens as soon as the server names the run. While it streams, the agent console in the corner tells the story of each step.
+
+![The New run form: target app and time window](docs/screenshots/02-new-run.jpg)
+
+The **runs list** shows every run with its status and its funnel: failed traces, then clusters, then proposals.
+
+![The runs list with status, window and the failed, clusters and proposals funnel](docs/screenshots/03-runs.jpg)
+
+### 3. Follow the pipeline
+
+A **run page** shows the pipeline as stages: collect, judge, cluster, diagnose, draft, review, apply. Each stage has its progress and what it produced. A run that stopped for review reads "Waiting for you". The Map tab draws the failed traces in 3D by cluster (it needs WebGL); the Findings tab lists what the agent found.
+
+![A run page: the pipeline stepper, the Findings tab and the review bar](docs/screenshots/04-run.jpg)
+
+### 4. Review each finding
+
+Each **finding** is one cluster of failures with its diagnosis: the category, where the traces fail, what went wrong, how to fix it, and how sure the agent is. The code checks every cited span against the traces the agent was shown. You approve or reject each finding, then submit them all at once. Only approved findings become GitHub issues and regression cases.
+
+![A finding: category, failing step, root cause, suggested fix, confidence and the approve or reject picker](docs/screenshots/05-finding.jpg)
+
+### 5. Check the evidence
+
+**See the evidence** opens the cited spans, numbered, each with the agent's note. Below them is the trace they come from: cited spans are starred, and the span the trace judge blamed is marked. The drafted issue text is in the same panel.
+
+![The evidence: numbered citations and the trace tree with the cited spans starred](docs/screenshots/06-evidence.jpg)
+
+### 6. Browse the traces
+
+The **traces list** shows every trace the collector stored, with the trace judge's verdict, its lowest score, the span it blamed, and the cluster it landed in. **Failed only** narrows it to the failures.
+
+![The traces list filtered to failed traces, with verdict, cluster and failing span](docs/screenshots/07-traces.jpg)
+
+A **trace page** shows the span tree on the root's timeline. Pick a span to see its status, timing and attributes: names and error types only, since anything outside the allowlist reads `[redacted]`. Every cluster the trace landed in links back to its finding.
+
+![A trace page: the clusters it landed in, the span tree and the blamed span's details](docs/screenshots/08-trace.jpg)
+
+### 7. Measure it
+
+The **results page** shows the eval: one experiment at a time (the seeded day, Medas's own faults, or the control day). It has the newest run's headline numbers and every metric with its trend over the runs. `python -m eval.metrics --export` updates it (see [The evaluation](#the-evaluation)).
+
+![The results page: headline tiles and every metric with its trend](docs/screenshots/09-results.jpg)
 
 ---
 
