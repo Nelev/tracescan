@@ -5,8 +5,9 @@ langchain-postgres's PGVector on the application's engine, in the application's 
 the healthy spans: one collection, `known_issues`, in the same two tables (migration 0006 brought
 the `vector` extension; PGVector creates the tables on first use).
 
-What is embedded is what a later run searches with: the failing span's step_text (agent.chunks:
-names, error types and bucketed numbers, no span content). A new cluster knows its symptom but not
+What is embedded is what a later run searches with: the failing span's failure_text (agent.chunks:
+its step_text, names, error types and bucketed numbers, no span content, plus the symptom in
+fixed words for a step that failed silently, so silent failures of different kinds stay apart). A new cluster knows its symptom but not
 its cause, so the cause, the fix and the verdict go into metadata and come back with the match.
 The id is the app, the run, the cluster and the chunk template version, so an apply that runs
 again (a resubmitted review) replaces its rows instead of adding to them.

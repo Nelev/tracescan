@@ -20,12 +20,13 @@ evidence check would refuse a citation of them. The stored diagnosis keeps how m
 With a known-issues memory in the context, the prompt also gets past diagnoses a reviewer decided
 on whose failing step reads like this cluster's (`known_issues_section`): approved ones as
 confirmed causes, rejected ones as warnings, neither citable. The stored diagnosis keeps how many
-it showed (`memories`) and the failing step's text (`failing_step`), under which apply_actions
-remembers it once it is decided.
+it showed (`memories`) and the failing step's text with its symptom (`failing_step`, from
+agent.chunks.failure_text), under which apply_actions remembers it once it is decided.
 """
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
@@ -33,7 +34,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
-from agent.chunks import step_key, step_text
+from agent.chunks import failure_text, step_key, step_text
 from agent.const import HEALTHY_TWINS, KNOWN_ISSUES_K, UNSUPPORTED_CONFIDENCE_CAP
 from agent.context import TraceContext
 from agent.evidence import (
@@ -82,11 +83,13 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
             )
             failed = failing_step(state, trees)
             twins, shown = await healthy_twins(state, trees, failed, context)
-            past, remembered = await known_issues_section(state, failed, context)
+            # The memory reads the step with its symptom, so silent failures stay apart.
+            remembered_as = failing_step(state, trees, failure_text)
+            past, remembered = await known_issues_section(state, remembered_as, context)
             diagnosis = await _diagnose(cluster, trees, context.model, spent, twins + past)
             diagnosis["healthy_twins"] = shown
             diagnosis["memories"] = remembered
-            diagnosis["failing_step"] = failed
+            diagnosis["failing_step"] = remembered_as
     except Exception as exc:
         # Type name only: the message could carry span contents.
         logger.error("diagnosis of %s failed: %s", cluster_id, type(exc).__name__)
@@ -96,15 +99,18 @@ async def diagnose_cluster(state: ClusterTask, runtime: Runtime[TraceContext]) -
     return {"diagnoses": [diagnosis], **_usage(cluster_id, spent)}
 
 
-def failing_step(task: ClusterTask, trees: list[SpanNode]) -> str | None:
-    """The step_text of the span the trace judge blamed in the first exemplar that has one, or
-    None when it blamed none or the span is not in the exemplar trees."""
+def failing_step(
+    task: ClusterTask, trees: list[SpanNode], text: Callable[[SpanNode, str], str] = step_text
+) -> str | None:
+    """The `text` (step_text, or failure_text for the known-issues memory) of the span the trace
+    judge blamed in the first exemplar that has one, or None when it blamed none or the span is
+    not in the exemplar trees."""
     blamed = task["failing_span"]
     if blamed is None:
         return None
     try:
         tree = next(tree for tree in trees if tree.trace_id == blamed["trace_id"])
-        return step_text(tree, blamed["span_id"])
+        return text(tree, blamed["span_id"])
     except Exception as exc:  # best effort: the diagnosis goes on without it
         logger.warning(
             "failing step of %s not found: %s", task["cluster"]["cluster_id"], type(exc).__name__
@@ -161,7 +167,8 @@ async def known_issues_section(
         return "", 0
     section = (
         "\nPast diagnoses a reviewer decided on, for failures whose failing step reads like this "
-        "one, nearest first. A confirmed cause may apply here if this cluster's evidence agrees. "
+        "one, nearest first. A confirmed cause may apply here if this cluster's failure is the same "
+        "kind and its evidence agrees. "
         "A rejected cause was judged wrong: do not propose it again unless the evidence clearly "
         "supports it. They are not evidence: do not cite them.\n"
         + "\n---\n".join(_known(issue) for issue in past)
@@ -173,7 +180,7 @@ async def known_issues_section(
 def _known(issue: KnownIssue) -> str:
     label = "CONFIRMED" if issue.verdict == "approved" else "REJECTED"
     return (
-        f"[{label} by a reviewer] category: {issue.category}\n"
+        f"[{label} by a reviewer] failure: {issue.signature}\ncategory: {issue.category}\n"
         f"cause: {issue.root_cause}\nfix: {issue.suggested_fix}"
     )
 

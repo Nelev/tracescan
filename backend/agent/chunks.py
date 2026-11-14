@@ -7,7 +7,7 @@ attribute value, which can hold clinical text. Bump CHUNK_TEMPLATE_VERSION on an
 """
 
 from agent.const import HITS_BUCKETS, LATENCY_BUCKETS_S
-from agent.judge import error_type
+from agent.judge import error_type, symptom
 from agent.schemas import StepKey
 from trace_store.models import SpanNode
 
@@ -54,6 +54,20 @@ def step_text(tree: SpanNode, span_id: str) -> str:
             f"latency: {bucket_word(seconds, LATENCY_BUCKETS_S)}",
         ]
     )
+
+
+def failure_text(tree: SpanNode, span_id: str) -> str:
+    """A failed step's text as the known-issues memory embeds it: its step_text, plus a
+    `symptom:` line (agent.judge.symptom, fixed words) when the step recorded neither an error
+    type nor a status message. Without it, silent failures of different kinds on the same step
+    read the same and match each other. Not used for healthy twins, which have no symptom.
+    Raises KeyError for a span id that is not in the tree."""
+    text = step_text(tree, span_id)
+    span = _find(tree, span_id)[0]  # step_text raised already if it is missing
+    if error_type(span) is None and not span.status_message:
+        if found := symptom(tree, span):
+            text += f"\nsymptom: {found}"
+    return text
 
 
 def step_key(tree: SpanNode, span_id: str) -> StepKey:

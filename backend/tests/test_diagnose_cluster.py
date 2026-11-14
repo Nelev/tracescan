@@ -8,12 +8,13 @@ import pytest
 from langgraph.runtime import Runtime
 
 from agent import model_guard
-from agent.chunks import step_key, step_text
+from agent.chunks import failure_text, step_key, step_text
 from agent.const import (
     HEALTHY_TWINS,
     KNOWN_ISSUES_K,
     MAX_MODEL_ATTEMPTS,
     MAX_PARALLEL_DIAGNOSES,
+    SYMPTOM_EMPTY,
     UNSUPPORTED_CONFIDENCE_CAP,
 )
 from agent.evidence import FALLBACK_NOTE
@@ -151,9 +152,10 @@ async def test_the_model_sees_past_confirmed_and_rejected_causes_of_the_same_fai
 
     assert memory.asked == [(step_text(TREE, "s1"), "medas", KNOWN_ISSUES_K)]
     prompt = str(model.seen[0][1].content)
-    assert "[CONFIRMED by a reviewer] category: retrieval_miss" in prompt
+    assert f"[CONFIRMED by a reviewer] failure: {CLUSTER['signature']}\n" in prompt
+    assert "category: retrieval_miss" in prompt
     assert "cause: the filter drops a category" in prompt
-    assert "[REJECTED by a reviewer] category: retrieval_miss" in prompt
+    assert f"[REJECTED by a reviewer] failure: {CLUSTER['signature']}\n" in prompt
     assert "cause: the index was empty" in prompt
     stored = result["diagnoses"][0]
     assert stored["memories"] == 2
@@ -170,6 +172,20 @@ async def test_no_memory_and_a_failing_memory_leave_the_prompt_as_it_was(caplog)
     assert "known issues of c0 not found: RuntimeError" in caplog.text
     # The failing step is kept even with no memory, so a decision can still be remembered.
     assert no_store["diagnoses"][0]["failing_step"] == step_text(TREE, "s1")
+
+
+@pytest.mark.anyio
+async def test_a_silent_failure_is_looked_up_and_kept_with_its_symptom():
+    silent = span_tree(
+        "t1", span_id="s1", status="ok", status_message=None, attributes={"retrieval.hits": 0}
+    )
+    memory, model = FakeKnownIssues(), fake_diagnoser(DIAGNOSIS)
+    context = replace(fake_context(FakeTraces(trees={"t1": silent}), model), known_issues=memory)
+    result = await diagnose_cluster(TASK, Runtime(context=context))
+    expected = failure_text(silent, "s1")
+    assert expected == step_text(silent, "s1") + f"\nsymptom: {SYMPTOM_EMPTY}"
+    assert memory.asked == [(expected, "medas", KNOWN_ISSUES_K)]
+    assert result["diagnoses"][0]["failing_step"] == expected
 
 
 @pytest.mark.anyio
