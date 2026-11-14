@@ -39,9 +39,12 @@ export function latestAnalyzed(runs: RunRecord[]): RunRecord | null {
   return runs.find((r) => isAnalyzed(r) && r.clusters > 0) ?? null;
 }
 
-/** Failed traces as a share of the traces the run judged; null when it judged none. */
+/**
+ * Failed traces as a share of the traces the judge gave a verdict on; null when it judged none.
+ * A trace whose judging failed has no verdict either way, so it is in neither count.
+ */
 export function failureRate({ summary }: RunOverview): number | null {
-  return summary.traces > 0 ? summary.failed_traces / summary.traces : null;
+  return summary.judged > 0 ? summary.failed_traces / summary.judged : null;
 }
 
 export type CategoryShare = {

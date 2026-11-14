@@ -52,6 +52,9 @@ SCHEMA_URL_MAX = 256
 # OTel SDK's BatchSpanProcessor sends at most 512 spans per export by default.
 MAX_EXPORT_BYTES = 4 * 1024 * 1024
 MAX_EXPORT_SPANS = 2000
+# OpenTelemetry's id widths: the collector leaves out a span whose ids are not these, or all zeros.
+TRACE_ID_BYTES = 16
+SPAN_ID_BYTES = 8
 # Free text on a span is cut to these widths on the way in (span and event names, status message).
 SPAN_NAME_MAX = 256
 STATUS_MESSAGE_MAX = 1000

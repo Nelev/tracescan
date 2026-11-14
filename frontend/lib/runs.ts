@@ -65,6 +65,12 @@ export function parseRuns(body: unknown): RunRecord[] {
 export const runPath = (runId: string, clusterId: string | null = null) =>
   `/runs/${encodeURIComponent(runId)}${clusterId ? `?cluster=${encodeURIComponent(clusterId)}` : ""}`;
 
+const RUN_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Whether `id` can be a run id: a UUID, the graph thread id the server names a run by. */
+export const isRunId = (id: string) => RUN_ID.test(id);
+
 /** Enough of a run id to tell runs apart in a list. */
 export function shortId(runId: string): string {
   return runId.slice(0, 8);

@@ -10,7 +10,7 @@ token cannot write another's traces. Medas's exporter sends it through
 An export is at most MAX_EXPORT_BYTES and MAX_EXPORT_SPANS (413 past either). On the way in, NUL
 characters are stripped and non-finite numbers become null (Postgres refuses both, and with them
 the whole batch), names and status messages are cut, and spans that start in the future are
-dropped. Nothing here logs a span.
+dropped, as are spans with an id OpenTelemetry does not allow or that end before they start. Nothing here logs a span.
 """
 
 import hmac
@@ -45,8 +45,10 @@ from trace_store.const import (
     MAX_EXPORT_BYTES,
     MAX_EXPORT_SPANS,
     SCHEMA_URL_MAX,
+    SPAN_ID_BYTES,
     SPAN_NAME_MAX,
     STATUS_MESSAGE_MAX,
+    TRACE_ID_BYTES,
 )
 
 logger = logging.getLogger(__name__)
@@ -148,6 +150,21 @@ def _cut(value: Any, width: int) -> str | None:
     return clean or None
 
 
+def _valid(span: OtlpSpan) -> bool:
+    """Whether a span is one OpenTelemetry allows: a 16-byte trace id and an 8-byte span id, neither
+    all zeros, a parent id that is absent or a valid span id, and an end no earlier than its start.
+    Anything else is left out: an id the readers cannot serve, or a negative duration."""
+    parent = span.parent_span_id
+    return (
+        len(span.trace_id) == TRACE_ID_BYTES
+        and any(span.trace_id)
+        and len(span.span_id) == SPAN_ID_BYTES
+        and any(span.span_id)
+        and (not parent or (len(parent) == SPAN_ID_BYTES and any(parent)))
+        and span.end_time_unix_nano >= span.start_time_unix_nano
+    )
+
+
 def _row(app: str, version: dict[str, str | None], span: OtlpSpan) -> dict[str, Any]:
     return {
         "trace_id": span.trace_id.hex(),
@@ -175,6 +192,7 @@ def _row(app: str, version: dict[str, str | None], span: OtlpSpan) -> dict[str, 
 
 def decode(body: bytes, app: str | None = None) -> list[dict[str, Any]]:
     """The `spans` rows of an OTLP trace export, for `app` only, or every allowed app when None.
+    Invalid spans (`_valid`) are left out silently, like the spans of another app.
 
     Raises DecodeError for a body that is not an export and ExportTooLarge for one of more than
     MAX_EXPORT_SPANS spans (counted over every app, kept or not)."""
@@ -196,7 +214,7 @@ def decode(body: bytes, app: str | None = None) -> list[dict[str, Any]]:
                 "app_version": app_version,
                 "schema_url": _cut(resource_spans.schema_url or scope.schema_url, SCHEMA_URL_MAX),
             }
-            rows.extend(_row(name, version, span) for span in scope.spans)
+            rows.extend(_row(name, version, span) for span in scope.spans if _valid(span))
     return rows
 
 

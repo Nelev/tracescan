@@ -167,6 +167,8 @@ export function startProblem({ status, retryAfterS }: Failure): string {
       return SIGNED_OUT;
     case 404:
       return UNKNOWN_RUN;
+    case 422:
+      return "The server refused this run: the target app must be one it reads, and the window must end after it starts.";
     case 409:
       return "This run cannot be resumed: it is running, waits for review, has ended, or is being resumed already.";
     case 429: {

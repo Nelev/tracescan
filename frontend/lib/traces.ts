@@ -156,6 +156,16 @@ export function parseTraceDetail(body: unknown): TraceDetail | null {
   };
 }
 
+// The server's TraceId pattern (backend/trace_store/const.py ID_PATTERN): an id outside it is a 422.
+const TRACE_ID = /^[A-Za-z0-9_.-]{1,64}$/;
+
+/** Whether `id` can be a trace id at all; the server answers any other with a 422. */
+export const isTraceId = (id: string) => TRACE_ID.test(id);
+
+/** The trace list, filtered to failed traces when `failedOnly`. */
+export const tracesPath = (failedOnly: boolean) =>
+  failedOnly ? "/traces?failed=1" : "/traces";
+
 /** A trace's page, opened on `spanId` when one is given. */
 export const tracePath = (traceId: string, spanId: string | null = null) =>
   `/traces/${encodeURIComponent(traceId)}${spanId ? `?span=${encodeURIComponent(spanId)}` : ""}`;

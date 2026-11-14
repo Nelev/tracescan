@@ -131,6 +131,37 @@ def test_only_the_named_app_is_kept():
     assert len(decode(export(), "medas")) == 2
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"trace_id": b""},
+        {"trace_id": bytes(16)},
+        {"trace_id": b"\x01\x02"},
+        {"span_id": b""},
+        {"span_id": bytes(8)},
+        {"span_id": b"\x03"},
+        {"parent_span_id": bytes(8)},
+        {"parent_span_id": b"\x04"},
+        {"end_time_unix_nano": START_NS - 1},
+    ],
+    ids=lambda fields: next(iter(fields)),
+)
+def test_a_span_opentelemetry_does_not_allow_is_left_out(fields):
+    request, _, spans = empty_export()
+    valid = {
+        "trace_id": TRACE_ID,
+        "span_id": CHILD_ID,
+        "parent_span_id": ROOT_ID,
+        "name": "chat",
+        "start_time_unix_nano": START_NS,
+        "end_time_unix_nano": START_NS,
+    }
+    spans.add(**valid)  # a span that ends as it starts is fine
+    spans.add(**(valid | {"span_id": ROOT_ID, "parent_span_id": b""} | fields))
+    (kept,) = decode(request.SerializeToString())
+    assert kept["span_id"] == CHILD_ID.hex()
+
+
 def test_an_export_of_too_many_spans_is_refused():
     request, _, spans = empty_export()
     for i in range(MAX_EXPORT_SPANS + 1):

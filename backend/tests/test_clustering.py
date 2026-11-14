@@ -117,6 +117,16 @@ def test_failure_text_keeps_how_long_a_timeout_took_as_a_word():
     assert normalise_error("timed out after 1.0s") != normalise_error("timed out after 10.1s")
 
 
+def test_the_signature_keeps_the_latency_word_readable():
+    # Read by a reviewer as "Error seen": the word's own digits are not masked.
+    assert normalise_error("search_pubmed timed out after 10.1s") == (
+        "search_pubmed timed out after very slow (>5 s)"
+    )
+    assert (
+        normalise_error("Code 504 after 1.0s for 'x7'") == "code # after normal (0.5-2 s) for 'x'"
+    )
+
+
 def test_failure_text_names_the_failing_step_and_error():
     text = failure_text(load("tool")[0])
     assert "execute_tool lookup_dosage" in text and "dose_unit" in text

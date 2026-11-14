@@ -9,6 +9,7 @@ import { pageCount, pageForRow, pageOffset } from "@/lib/pages";
 import {
   formatWhen,
   formatWindow,
+  plural,
   RUN_STATUS,
   runDuration,
   runPath,
@@ -25,14 +26,14 @@ import { useRunsPage } from "./use-runs";
 /** The run's funnel: failed traces, then clusters, then proposals. */
 function Funnel({ run }: { run: RunRecord }) {
   const steps = [
-    { n: run.failed_traces, label: "failed traces" },
-    { n: run.clusters, label: "clusters" },
-    { n: run.proposals, label: "proposals" },
+    { n: run.failed_traces, label: "failed trace" },
+    { n: run.clusters, label: "cluster" },
+    { n: run.proposals, label: "proposal" },
   ];
   return (
     <span className="flex items-center gap-1.5 tabular-nums">
       <span className="sr-only">
-        {steps.map((s) => `${s.n} ${s.label}`).join(", ")}
+        {steps.map((s) => plural(s.n, s.label)).join(", ")}
       </span>
       {steps.map((s, i) => (
         <span

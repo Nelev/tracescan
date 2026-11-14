@@ -182,6 +182,12 @@ test("a run past its limit names the wait in whole minutes, rounded up", () => {
   assert.match(startProblem({ status: 500, unreadable: false }), /HTTP 500/);
 });
 
+test("a run the server refuses for its request says what to change", () => {
+  const refused = startProblem({ status: 422, unreadable: false });
+  assert.match(refused, /target app/);
+  assert.doesNotMatch(refused, /backend is running/);
+});
+
 test("a resume the server refuses says why", () => {
   assert.match(
     startProblem({ status: 409, unreadable: false }),

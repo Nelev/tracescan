@@ -47,6 +47,7 @@ UNKNOWN_STEP = "unknown step"
 _QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 _DIGITS = re.compile(r"\d+")
 _SECONDS = re.compile(r"(\d+(?:\.\d+)?)\s?s\b")
+_SECONDS_OR_DIGITS = re.compile(rf"{_SECONDS.pattern}|\d+")
 
 
 def seconds_as_words(message: str) -> str:
@@ -69,8 +70,16 @@ def failure_text(summary: TraceSummary) -> str:
 
 
 def normalise_error(message: str | None) -> str:
-    """Mask quoted values and numbers so 'missing x' and 'missing y' count as one error type."""
-    text = _DIGITS.sub("#", _QUOTED.sub("'x'", seconds_as_words(message or "").lower()))
+    """Mask quoted values and numbers so 'missing x' and 'missing y' count as one error type.
+
+    Seconds become a latency word, as in `seconds_as_words`, in the same pass that masks the other
+    numbers, so the word keeps its own digits ('very slow (>5 s)', not 'very slow (># s)'): this
+    is the signature a reviewer reads.
+    """
+    text = _QUOTED.sub("'x'", (message or "").lower())
+    text = _SECONDS_OR_DIGITS.sub(
+        lambda m: bucket_word(float(m[1]), LATENCY_BUCKETS_S) if m[1] else "#", text
+    )
     return " ".join(text.split())
 
 

@@ -69,6 +69,18 @@ async def test_a_trace_whose_root_has_not_arrived_is_not_served(spans_engine, re
 
 
 @pytest.mark.anyio
+async def test_a_trace_with_two_roots_is_not_whole_and_never_listed(spans_engine, reader):
+    root, child = decode(export())
+    second_root = {**child, "span_id": "1" * 16, "parent_span_id": None}
+    await store(spans_engine, [root, child, second_root])
+
+    assert await reader.search_traces(MEDAS) == []
+    assert await reader.list_traces("medas") == []
+    assert await reader.count_traces("medas") == 0
+    assert await reader.get_trace_detail(TRACE_ID.hex()) is None
+
+
+@pytest.mark.anyio
 async def test_the_reader_cannot_write(read_only):
     with pytest.raises(Exception, match="read-only"):
         async with read_only.begin() as conn:

@@ -1,13 +1,11 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
-import { buttonVariants } from "@/components/ui/button";
 import { INDEXED_RUNS } from "@/lib/clusters";
 import { formatDuration } from "@/lib/format";
 import { formatWhen, shortId } from "@/lib/runs";
-import { formatScore, traceVerdict, waterfall } from "@/lib/traces";
+import { formatScore, tracesPath, traceVerdict, waterfall } from "@/lib/traces";
 import { cn } from "@/lib/utils";
+import { BackLink } from "./back-link";
 import { Chip } from "./chip";
 import { TraceTree, TreeLegend } from "./trace-tree";
 import { ClusterLink } from "./traces-list";
@@ -68,13 +66,7 @@ export function TracePage({
   return (
     <div className="flex min-h-[32rem] flex-1 flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <Link
-          href="/traces"
-          className={cn(buttonVariants({ variant: "ghost" }), "-ml-2.5 w-fit")}
-        >
-          <ArrowLeft aria-hidden="true" />
-          All traces
-        </Link>
+        <BackLink href={tracesPath(false)}>All traces</BackLink>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <h1 className="font-mono [overflow-wrap:anywhere]">{traceId}</h1>
           {verdict && (

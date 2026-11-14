@@ -15,12 +15,14 @@ import {
   type ConfidenceLevel,
   clusterTitle,
   confidenceLevel,
+  signatureMasks,
   signatureParts,
 } from "@/lib/run-overview";
 import { plural } from "@/lib/runs";
 import type { Decision } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ClusterCard, type LiveDiagnosis } from "./cluster-card";
+import { SignatureText } from "./signature-text";
 
 /** Wide enough for the list and the detail side by side (Tailwind's `xl`). */
 const WIDE = "(min-width: 80rem)";
@@ -307,7 +309,7 @@ function Row({
         className="col-span-2 truncate font-mono text-muted-foreground"
         title={cluster.signature}
       >
-        {error || step}
+        {error ? <SignatureText parts={signatureMasks(error)} /> : step}
       </span>
       <span className="col-span-2 flex items-center gap-2 text-muted-foreground">
         <span
