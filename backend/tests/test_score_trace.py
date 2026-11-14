@@ -8,13 +8,20 @@ from langgraph.runtime import Runtime
 
 from agent import model_guard
 from agent.chunks import step_key, step_text
-from agent.const import MAX_MODEL_ATTEMPTS
+from agent.const import (
+    MAX_MODEL_ATTEMPTS,
+    REPEATED_ROUNDS,
+    SYMPTOM_EMPTY,
+    SYMPTOM_REPEATED,
+    SYMPTOM_REPLY,
+)
 from agent.context import ClosedTraces
-from agent.judge import error_type, failure_fields
+from agent.judge import error_type, failure_fields, rounds_per_tool
 from agent.nodes.score_trace import score_trace
 from agent.schemas import TraceTask, TraceVerdict
 from tests.fakes import FakeApiError, FakeTraces, fake_context, span_tree, summary
 from tests.fakes import scripted_model as scripted
+from trace_store.models import SpanNode
 
 # A request whose tool reported a failure without raising: only `error.type` says so.
 TREE = span_tree(
@@ -166,3 +173,69 @@ async def test_a_trace_is_not_judged_once_the_run_is_past_its_budget(monkeypatch
     assert skipped["judge_failures"] == ["t1"] and "verdicts" not in skipped
     assert skipped["judge_usage"] == [{"trace_id": "t1", "calls": 0, "tokens": 0, "cost_usd": 0.0}]
     assert len(model.seen) == 1
+
+
+def silent(trace_id: str, steps: list[tuple[str, dict]], **root) -> SpanNode:
+    """A request whose spans all completed: `steps` in time order, one second apart, each a name
+    and its attributes, under a root with `root`'s fields."""
+    children = [
+        span_tree(
+            trace_id,
+            span_id=f"s{i}",
+            parent_span_id="root",
+            name=name,
+            status="ok",
+            status_message=None,
+            attributes=attributes,
+            start_time=f"2026-11-05T10:00:{i:02}Z",
+            end_time=f"2026-11-05T10:00:{i:02}.5Z",
+        )
+        for i, (name, attributes) in enumerate(steps, start=1)
+    ]
+    fields = {"status": "ok", "status_message": None, "name": "invoke_agent medas"} | root
+    return span_tree(trace_id, span_id="root", children=children, **fields)
+
+
+CHAT = ("chat m", {"gen_ai.operation.name": "chat"})
+SEARCH = ("execute_tool search", {"gen_ai.operation.name": "execute_tool"})
+
+
+def test_calls_made_together_count_as_one_round():
+    tree = silent("t", [CHAT, SEARCH, SEARCH, SEARCH, CHAT, SEARCH, CHAT])
+
+    assert rounds_per_tool(tree) == {"execute_tool search": 2}
+
+
+def test_a_tool_asked_for_round_after_round_is_a_repeated_step():
+    tree = silent("t", [CHAT, SEARCH] * REPEATED_ROUNDS + [CHAT])
+
+    assert failure_fields(tree, "s1")["error_message"] == SYMPTOM_REPEATED
+
+
+def test_a_reply_not_in_the_asked_for_shape_is_said_so():
+    tree = silent("t", [CHAT, SEARCH, CHAT], attributes={"medas.reply.format": "no_severity"})
+
+    assert failure_fields(tree, "s3")["error_message"] == SYMPTOM_REPLY
+
+
+def test_a_search_that_found_nothing_is_said_so():
+    empty = ("retrieval record_chunks", {"retrieval.hits": 0})
+    tree = silent("t", [CHAT, SEARCH, empty, CHAT])
+
+    assert failure_fields(tree, "s3")["error_message"] == SYMPTOM_EMPTY
+
+
+def test_a_silent_failure_with_nothing_to_show_has_no_message():
+    fields = failure_fields(silent("t", [CHAT, SEARCH, CHAT]), "s3")
+
+    assert fields == {"failing_span_name": "chat m", "error_type": None, "error_message": None}
+
+
+def test_a_step_that_recorded_its_error_keeps_its_own_message():
+    tree = silent("t", [CHAT, SEARCH] * REPEATED_ROUNDS)
+    failed = tree.children[1].model_copy(
+        update={"status": "error", "status_message": "source timed out"}
+    )
+    tree = tree.model_copy(update={"children": [tree.children[0], failed, *tree.children[2:]]})
+
+    assert failure_fields(tree, "s2")["error_message"] == "source timed out"
