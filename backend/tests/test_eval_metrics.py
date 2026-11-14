@@ -1,6 +1,8 @@
 """The eval's scores, on hand-made results where the right number is plain to see."""
 
-from eval.metrics import score
+import json
+
+from eval.metrics import export, score
 
 # Three timeouts, two bad tool calls, one store failure (the rare one) and one healthy request.
 KINDS = {
@@ -205,3 +207,26 @@ def test_kinds_that_share_a_cause_in_one_cluster_count_as_one_separated_fault():
     )
     assert scores["separation"] == (1, 1)
     assert scores["purity"] == (3, 3)
+
+
+def test_the_export_keeps_scores_and_metadata_of_every_scorable_file_and_no_diagnosis(tmp_path):
+    seeded = result(
+        [cluster("c0", "t1", "t2", "t3")], [diagnosis("c0", "infra_error", ("t1", "sp_t1"))]
+    )
+    seeded["diagnoses"][0]["root_cause"] = "PROSE THAT MUST NOT LEAVE"
+    seeded["model"] = "m"
+    control = result([], []) | {"control": True}
+    (tmp_path / "20260101T000000Z.json").write_text(json.dumps(seeded))
+    (tmp_path / "20260102T000000Z.json").write_text(json.dumps(control))
+    (tmp_path / "20260103T000000Z.json").write_text(json.dumps({"kinds": {}}))  # cannot be scored
+    out = tmp_path / "export.json"
+
+    assert export(tmp_path, out) == 2
+    text = out.read_text()
+    assert "PROSE" not in text and "source_timeout" not in text
+    first, second = json.loads(text)
+    assert first["id"] == "20260101T000000Z" and first["experiment"] == "seeded"
+    assert first["model"] == "m" and first["graded"] is False
+    assert first["scores"]["detection"] == {"hits": 1, "total": 3}
+    assert first["scores"]["cost_usd"] == 0.01
+    assert second["experiment"] == "control"

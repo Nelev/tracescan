@@ -15,7 +15,7 @@ import {
 import { MAX_JUDGED_TRACES, type RunRequest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useRunStatus } from "./run-stream";
-import { SEGMENT_ITEM, SEGMENT_LIST } from "./styles";
+import { SEGMENT_ACTIVE, SEGMENT_ITEM, SEGMENT_LIST } from "./styles";
 
 // The date picker (react-day-picker, date-fns) is only shown for the Custom window, so it is its
 // own chunk: about 50 KB gzipped less JavaScript on first load. The chunk starts loading when the
@@ -166,8 +166,7 @@ export function NewRun() {
                   className={cn(
                     SEGMENT_ITEM,
                     "flex-1 px-2",
-                    win === w.id &&
-                      "bg-primary text-primary-foreground hover:text-primary-foreground",
+                    win === w.id && SEGMENT_ACTIVE,
                   )}
                 >
                   <input

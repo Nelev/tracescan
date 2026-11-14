@@ -1,0 +1,1665 @@
+[
+  {
+    "id": "20261110T163822Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": null,
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 5,
+        "total": 5
+      },
+      "purity": {
+        "hits": 22,
+        "total": 22
+      },
+      "separation": {
+        "hits": 5,
+        "total": 5
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 22,
+        "total": 22
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_valid": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_relevant": {
+        "hits": 5,
+        "total": 5
+      },
+      "calls": 5,
+      "tokens": 27349,
+      "cost_usd": 0.0789,
+      "judge_cost_usd": 0,
+      "seconds": 10.4
+    }
+  },
+  {
+    "id": "20261110T164152Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": null,
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 5,
+        "total": 5
+      },
+      "purity": {
+        "hits": 22,
+        "total": 22
+      },
+      "separation": {
+        "hits": 5,
+        "total": 5
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 22,
+        "total": 22
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_valid": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_relevant": {
+        "hits": 5,
+        "total": 5
+      },
+      "calls": 5,
+      "tokens": 27245,
+      "cost_usd": 0.0779,
+      "judge_cost_usd": 0,
+      "seconds": 9.7,
+      "cause_accuracy": {
+        "hits": 5,
+        "total": 5
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261110T170516Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": null,
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 6,
+        "total": 8
+      },
+      "purity": {
+        "hits": 24,
+        "total": 36
+      },
+      "separation": {
+        "hits": 3,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 30,
+        "total": 34
+      },
+      "false_alarms": 1,
+      "category_accuracy": {
+        "hits": 6,
+        "total": 6
+      },
+      "evidence_valid": {
+        "hits": 6,
+        "total": 6
+      },
+      "evidence_relevant": {
+        "hits": 6,
+        "total": 6
+      },
+      "calls": 6,
+      "tokens": 34304,
+      "cost_usd": 0.0989,
+      "judge_cost_usd": 0,
+      "seconds": 10.7,
+      "cause_accuracy": {
+        "hits": 6,
+        "total": 6
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261110T173101Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": null,
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 5,
+        "total": 8
+      },
+      "purity": {
+        "hits": 23,
+        "total": 34
+      },
+      "separation": {
+        "hits": 2,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 4,
+        "total": 5
+      },
+      "evidence_valid": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_relevant": {
+        "hits": 5,
+        "total": 5
+      },
+      "calls": 5,
+      "tokens": 31554,
+      "cost_usd": 0.0967,
+      "judge_cost_usd": 0,
+      "seconds": 15.8,
+      "cause_accuracy": {
+        "hits": 5,
+        "total": 5
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261111T134907Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 7,
+        "total": 8
+      },
+      "purity": {
+        "hits": 24,
+        "total": 24
+      },
+      "separation": {
+        "hits": 3,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 24,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 10,
+        "total": 10
+      },
+      "evidence_valid": {
+        "hits": 10,
+        "total": 10
+      },
+      "evidence_relevant": {
+        "hits": 10,
+        "total": 10
+      },
+      "calls": 59,
+      "tokens": 197950,
+      "cost_usd": 0.1675,
+      "judge_cost_usd": 0.0237,
+      "seconds": 30.7,
+      "judge_recall": {
+        "hits": 24,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 14
+      },
+      "judge_blame": {
+        "hits": 24,
+        "total": 24
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 10,
+        "total": 10
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261111T135207Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 5,
+        "total": 8
+      },
+      "purity": {
+        "hits": 23,
+        "total": 37
+      },
+      "separation": {
+        "hits": 1,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 2,
+      "category_accuracy": {
+        "hits": 4,
+        "total": 5
+      },
+      "evidence_valid": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_relevant": {
+        "hits": 5,
+        "total": 5
+      },
+      "calls": 56,
+      "tokens": 188462,
+      "cost_usd": 0.1116,
+      "judge_cost_usd": 0.0237,
+      "seconds": 21.8,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 3,
+        "total": 14
+      },
+      "judge_blame": {
+        "hits": 32,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 4,
+        "total": 5
+      },
+      "root_cause_mean": 1.8
+    }
+  },
+  {
+    "id": "20261111T135251Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 5,
+        "total": 8
+      },
+      "purity": {
+        "hits": 23,
+        "total": 34
+      },
+      "separation": {
+        "hits": 2,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_valid": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_relevant": {
+        "hits": 5,
+        "total": 5
+      },
+      "calls": 53,
+      "tokens": 183293,
+      "cost_usd": 0.1128,
+      "judge_cost_usd": 0.0225,
+      "seconds": 20.3,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 14
+      },
+      "judge_blame": {
+        "hits": 32,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 5,
+        "total": 5
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261112T145040Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 6,
+        "total": 8
+      },
+      "purity": {
+        "hits": 27,
+        "total": 34
+      },
+      "separation": {
+        "hits": 2,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 5,
+        "total": 6
+      },
+      "evidence_valid": {
+        "hits": 6,
+        "total": 6
+      },
+      "evidence_relevant": {
+        "hits": 6,
+        "total": 6
+      },
+      "calls": 58,
+      "tokens": 212846,
+      "cost_usd": 0.1262,
+      "judge_cost_usd": 0.0263,
+      "seconds": 24.8,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 18
+      },
+      "judge_blame": {
+        "hits": 32,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 5,
+        "total": 6
+      },
+      "root_cause_mean": 1.83
+    }
+  },
+  {
+    "id": "20261112T145107Z",
+    "experiment": "control",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 0,
+        "total": 0
+      },
+      "purity": {
+        "hits": 1,
+        "total": 1
+      },
+      "separation": {
+        "hits": 0,
+        "total": 0
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "false_alarms": 1,
+      "category_accuracy": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_valid": {
+        "hits": 1,
+        "total": 1
+      },
+      "evidence_relevant": {
+        "hits": 1,
+        "total": 1
+      },
+      "calls": 54,
+      "tokens": 182023,
+      "cost_usd": 0.0397,
+      "judge_cost_usd": 0.0263,
+      "seconds": 21.7,
+      "judge_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_false_positives": {
+        "hits": 1,
+        "total": 52
+      },
+      "judge_blame": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_failures": 0
+    }
+  },
+  {
+    "id": "20261112T154735Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 6,
+        "total": 8
+      },
+      "purity": {
+        "hits": 29,
+        "total": 34
+      },
+      "separation": {
+        "hits": 2,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 6,
+        "total": 6
+      },
+      "evidence_valid": {
+        "hits": 6,
+        "total": 6
+      },
+      "evidence_relevant": {
+        "hits": 6,
+        "total": 6
+      },
+      "calls": 58,
+      "tokens": 219752,
+      "cost_usd": 0.1319,
+      "judge_cost_usd": 0.0265,
+      "seconds": 25.8,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 18
+      },
+      "judge_blame": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 6,
+        "total": 6
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261112T154749Z",
+    "experiment": "control",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 0,
+        "total": 0
+      },
+      "purity": {
+        "hits": 0,
+        "total": 0
+      },
+      "separation": {
+        "hits": 0,
+        "total": 0
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_valid": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_relevant": {
+        "hits": 0,
+        "total": 0
+      },
+      "calls": 52,
+      "tokens": 177401,
+      "cost_usd": 0.0243,
+      "judge_cost_usd": 0.0243,
+      "seconds": 9.6,
+      "judge_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 52
+      },
+      "judge_blame": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_failures": 0
+    }
+  },
+  {
+    "id": "20261112T201117Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 8,
+        "total": 8
+      },
+      "purity": {
+        "hits": 34,
+        "total": 34
+      },
+      "separation": {
+        "hits": 7,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_valid": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_relevant": {
+        "hits": 9,
+        "total": 9
+      },
+      "calls": 61,
+      "tokens": 235443,
+      "cost_usd": 0.174,
+      "judge_cost_usd": 0.0266,
+      "seconds": 24.7,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 18
+      },
+      "judge_blame": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261112T201130Z",
+    "experiment": "control",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 0,
+        "total": 0
+      },
+      "purity": {
+        "hits": 0,
+        "total": 0
+      },
+      "separation": {
+        "hits": 0,
+        "total": 0
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_valid": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_relevant": {
+        "hits": 0,
+        "total": 0
+      },
+      "calls": 52,
+      "tokens": 178098,
+      "cost_usd": 0.0246,
+      "judge_cost_usd": 0.0246,
+      "seconds": 8.6,
+      "judge_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 52
+      },
+      "judge_blame": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_failures": 0
+    }
+  },
+  {
+    "id": "20261114T070539Z",
+    "experiment": "medas",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 4,
+        "total": 6
+      },
+      "purity": {
+        "hits": 15,
+        "total": 15
+      },
+      "separation": {
+        "hits": 3,
+        "total": 6
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 15,
+        "total": 24
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 4,
+        "total": 5
+      },
+      "evidence_valid": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_relevant": {
+        "hits": 5,
+        "total": 5
+      },
+      "calls": 61,
+      "tokens": 253001,
+      "cost_usd": 0.1171,
+      "judge_cost_usd": 0.0292,
+      "seconds": 25.5,
+      "judge_recall": {
+        "hits": 15,
+        "total": 24
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 32
+      },
+      "judge_blame": {
+        "hits": 10,
+        "total": 15
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 2,
+        "total": 5
+      },
+      "root_cause_mean": 1.2
+    }
+  },
+  {
+    "id": "20261114T071123Z",
+    "experiment": "medas",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 3,
+        "total": 6
+      },
+      "purity": {
+        "hits": 12,
+        "total": 15
+      },
+      "separation": {
+        "hits": 2,
+        "total": 6
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 15,
+        "total": 24
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 2,
+        "total": 3
+      },
+      "evidence_valid": {
+        "hits": 3,
+        "total": 3
+      },
+      "evidence_relevant": {
+        "hits": 2,
+        "total": 3
+      },
+      "calls": 59,
+      "tokens": 277530,
+      "cost_usd": 0.1418,
+      "judge_cost_usd": 0.0308,
+      "seconds": 26.0,
+      "judge_recall": {
+        "hits": 15,
+        "total": 24
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 32
+      },
+      "judge_blame": {
+        "hits": 11,
+        "total": 15
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 1,
+        "total": 3
+      },
+      "root_cause_mean": 1.0
+    }
+  },
+  {
+    "id": "20261114T071737Z",
+    "experiment": "medas",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 4,
+        "total": 6
+      },
+      "purity": {
+        "hits": 13,
+        "total": 16
+      },
+      "separation": {
+        "hits": 1,
+        "total": 6
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 16,
+        "total": 24
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 5,
+        "total": 6
+      },
+      "evidence_valid": {
+        "hits": 6,
+        "total": 6
+      },
+      "evidence_relevant": {
+        "hits": 6,
+        "total": 6
+      },
+      "calls": 62,
+      "tokens": 287583,
+      "cost_usd": 0.1754,
+      "judge_cost_usd": 0.0309,
+      "seconds": 26.3,
+      "judge_recall": {
+        "hits": 16,
+        "total": 24
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 32
+      },
+      "judge_blame": {
+        "hits": 12,
+        "total": 16
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 1,
+        "total": 6
+      },
+      "root_cause_mean": 0.67
+    }
+  },
+  {
+    "id": "20261114T071811Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 8,
+        "total": 8
+      },
+      "purity": {
+        "hits": 34,
+        "total": 34
+      },
+      "separation": {
+        "hits": 7,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_valid": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_relevant": {
+        "hits": 9,
+        "total": 9
+      },
+      "calls": 61,
+      "tokens": 250431,
+      "cost_usd": 0.1798,
+      "judge_cost_usd": 0.029,
+      "seconds": 28.0,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 18
+      },
+      "judge_blame": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261114T071826Z",
+    "experiment": "control",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 0,
+        "total": 0
+      },
+      "purity": {
+        "hits": 0,
+        "total": 0
+      },
+      "separation": {
+        "hits": 0,
+        "total": 0
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_valid": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_relevant": {
+        "hits": 0,
+        "total": 0
+      },
+      "calls": 52,
+      "tokens": 193747,
+      "cost_usd": 0.0275,
+      "judge_cost_usd": 0.0275,
+      "seconds": 10.4,
+      "judge_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 52
+      },
+      "judge_blame": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_failures": 0
+    }
+  },
+  {
+    "id": "20261114T072846Z",
+    "experiment": "medas",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 4,
+        "total": 6
+      },
+      "purity": {
+        "hits": 15,
+        "total": 15
+      },
+      "separation": {
+        "hits": 3,
+        "total": 6
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 15,
+        "total": 24
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 2,
+        "total": 4
+      },
+      "evidence_valid": {
+        "hits": 4,
+        "total": 4
+      },
+      "evidence_relevant": {
+        "hits": 4,
+        "total": 4
+      },
+      "calls": 60,
+      "tokens": 284784,
+      "cost_usd": 0.1624,
+      "judge_cost_usd": 0.0312,
+      "seconds": 23.1,
+      "judge_recall": {
+        "hits": 15,
+        "total": 24
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 32
+      },
+      "judge_blame": {
+        "hits": 11,
+        "total": 15
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 0,
+        "total": 4
+      },
+      "root_cause_mean": 1.0
+    }
+  },
+  {
+    "id": "20261114T072917Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 8,
+        "total": 8
+      },
+      "purity": {
+        "hits": 34,
+        "total": 34
+      },
+      "separation": {
+        "hits": 7,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_valid": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_relevant": {
+        "hits": 9,
+        "total": 9
+      },
+      "calls": 61,
+      "tokens": 249244,
+      "cost_usd": 0.1794,
+      "judge_cost_usd": 0.0284,
+      "seconds": 26.2,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 18
+      },
+      "judge_blame": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261114T072933Z",
+    "experiment": "control",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 0,
+        "total": 0
+      },
+      "purity": {
+        "hits": 0,
+        "total": 0
+      },
+      "separation": {
+        "hits": 0,
+        "total": 0
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_valid": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_relevant": {
+        "hits": 0,
+        "total": 0
+      },
+      "calls": 52,
+      "tokens": 194235,
+      "cost_usd": 0.0277,
+      "judge_cost_usd": 0.0277,
+      "seconds": 10.6,
+      "judge_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 52
+      },
+      "judge_blame": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_failures": 0
+    }
+  },
+  {
+    "id": "20261114T073633Z",
+    "experiment": "medas",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 5,
+        "total": 6
+      },
+      "purity": {
+        "hits": 18,
+        "total": 18
+      },
+      "separation": {
+        "hits": 4,
+        "total": 6
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 18,
+        "total": 24
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 4,
+        "total": 6
+      },
+      "evidence_valid": {
+        "hits": 6,
+        "total": 6
+      },
+      "evidence_relevant": {
+        "hits": 6,
+        "total": 6
+      },
+      "calls": 62,
+      "tokens": 297169,
+      "cost_usd": 0.1905,
+      "judge_cost_usd": 0.0314,
+      "seconds": 24.0,
+      "judge_recall": {
+        "hits": 18,
+        "total": 24
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 32
+      },
+      "judge_blame": {
+        "hits": 13,
+        "total": 18
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 2,
+        "total": 6
+      },
+      "root_cause_mean": 1.33
+    }
+  },
+  {
+    "id": "20261114T073705Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 8,
+        "total": 8
+      },
+      "purity": {
+        "hits": 34,
+        "total": 34
+      },
+      "separation": {
+        "hits": 7,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_valid": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_relevant": {
+        "hits": 9,
+        "total": 9
+      },
+      "calls": 61,
+      "tokens": 253957,
+      "cost_usd": 0.1793,
+      "judge_cost_usd": 0.0291,
+      "seconds": 26.5,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 18
+      },
+      "judge_blame": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "root_cause_mean": 2.0
+    }
+  },
+  {
+    "id": "20261114T073720Z",
+    "experiment": "control",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 0,
+        "total": 0
+      },
+      "purity": {
+        "hits": 0,
+        "total": 0
+      },
+      "separation": {
+        "hits": 0,
+        "total": 0
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_valid": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_relevant": {
+        "hits": 0,
+        "total": 0
+      },
+      "calls": 52,
+      "tokens": 197286,
+      "cost_usd": 0.0276,
+      "judge_cost_usd": 0.0276,
+      "seconds": 9.9,
+      "judge_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 52
+      },
+      "judge_blame": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_failures": 0
+    }
+  },
+  {
+    "id": "20261114T074518Z",
+    "experiment": "medas",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 5,
+        "total": 6
+      },
+      "purity": {
+        "hits": 18,
+        "total": 18
+      },
+      "separation": {
+        "hits": 5,
+        "total": 6
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 18,
+        "total": 24
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 3,
+        "total": 5
+      },
+      "evidence_valid": {
+        "hits": 5,
+        "total": 5
+      },
+      "evidence_relevant": {
+        "hits": 4,
+        "total": 5
+      },
+      "calls": 61,
+      "tokens": 294320,
+      "cost_usd": 0.1818,
+      "judge_cost_usd": 0.0313,
+      "seconds": 24.3,
+      "judge_recall": {
+        "hits": 18,
+        "total": 24
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 32
+      },
+      "judge_blame": {
+        "hits": 13,
+        "total": 18
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 2,
+        "total": 5
+      },
+      "root_cause_mean": 1.2
+    }
+  },
+  {
+    "id": "20261114T074549Z",
+    "experiment": "seeded",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": true,
+    "scores": {
+      "detection": {
+        "hits": 8,
+        "total": 8
+      },
+      "purity": {
+        "hits": 34,
+        "total": 34
+      },
+      "separation": {
+        "hits": 7,
+        "total": 8
+      },
+      "rare_recall": {
+        "hits": 1,
+        "total": 1
+      },
+      "trace_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_valid": {
+        "hits": 9,
+        "total": 9
+      },
+      "evidence_relevant": {
+        "hits": 9,
+        "total": 9
+      },
+      "calls": 61,
+      "tokens": 253191,
+      "cost_usd": 0.1778,
+      "judge_cost_usd": 0.0288,
+      "seconds": 25.5,
+      "judge_recall": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 18
+      },
+      "judge_blame": {
+        "hits": 34,
+        "total": 34
+      },
+      "judge_failures": 0,
+      "cause_accuracy": {
+        "hits": 8,
+        "total": 9
+      },
+      "root_cause_mean": 1.89
+    }
+  },
+  {
+    "id": "20261114T074605Z",
+    "experiment": "control",
+    "model": "anthropic/claude-sonnet-5-5",
+    "judge_model": "anthropic/claude-haiku-5.5",
+    "graded": false,
+    "scores": {
+      "detection": {
+        "hits": 0,
+        "total": 0
+      },
+      "purity": {
+        "hits": 0,
+        "total": 0
+      },
+      "separation": {
+        "hits": 0,
+        "total": 0
+      },
+      "rare_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "trace_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "false_alarms": 0,
+      "category_accuracy": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_valid": {
+        "hits": 0,
+        "total": 0
+      },
+      "evidence_relevant": {
+        "hits": 0,
+        "total": 0
+      },
+      "calls": 52,
+      "tokens": 197577,
+      "cost_usd": 0.0277,
+      "judge_cost_usd": 0.0277,
+      "seconds": 10.5,
+      "judge_recall": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_false_positives": {
+        "hits": 0,
+        "total": 52
+      },
+      "judge_blame": {
+        "hits": 0,
+        "total": 0
+      },
+      "judge_failures": 0
+    }
+  }
+]
