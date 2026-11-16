@@ -600,7 +600,7 @@ The MVP gate passed on 2026-11-14. [`PLAN.md`](PLAN.md) has every task with its 
 - **Outputs:** dry-run issue files and regression cases; real GitHub issues in a private repo (`DRY_RUN=0`).
 - **Memory:** the healthy-span store and the known-issues memory (pgvector), both read by the diagnoser.
 - **The app:** Clerk sign-in, a dashboard, the runs list, a live run page (stepper, cluster map, findings with inline review, resume), the trace browser, the eval results page, and the json-render agent console.
-- **Durability:** Postgres checkpoints (a paused run survives a restart), run and review records, one review at a time per run, resumable runs, a rate limit of 10 runs per user per hour.
+- **Durability:** Postgres checkpoints (a paused run survives a restart), run and review records, one review at a time per run, resumable runs, a rate limit of 10 runs per user per hour, and per-app limits on the collector (exports and spans per minute).
 - **The eval:** a seeded day, a control day, and Medas's own fault switches, graded by a model from another vendor.
 
 ### Missing
