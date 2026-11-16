@@ -30,6 +30,10 @@ Run `docker compose --profile app up -d --build`, start a run on a seeded day an
 **Done when** the peak of all four containers is written down and fits in 4 GB with room to spare
 (if it does not, take the 8 GB plan).
 
+**Done 2026-11-16:** a run over the 52 seeded traces, through Caddy, up to the review: peak 776 MiB
+in all (backend 580, frontend 77, Postgres 76, Caddy 50), sampled every 2 s. 4 GB leaves plenty of
+room; the run itself would fit 2 GB, but `next build` and `uv sync` on the box want the headroom.
+
 ### 2. Add the production pieces to the repo
 
 - `deploy/Caddyfile`: the site name from an environment variable, `reverse_proxy frontend:3000`,
@@ -41,6 +45,10 @@ Run `docker compose --profile app up -d --build`, start a run on a seeded day an
 
 **Done when** the override starts locally with `SITE=localhost` (Caddy's local certificate) and the
 UI signs in through it.
+
+**Done 2026-11-16:** signed in on `https://localhost` and streamed a run to the review through Caddy.
+Leaving `/v1/traces` out of Caddy was not enough: the frontend's `/api/:path*` rewrite hands
+`POST /api/traces` to the collector, so the Caddyfile answers that route with a 404.
 
 ### 3. Create the server
 

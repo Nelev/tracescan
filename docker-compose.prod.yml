@@ -1,0 +1,40 @@
+# The demo deployment (docs/deploy-plan.md): the `app` profile of docker-compose.yml behind Caddy,
+# which serves the UI over HTTPS on SITE and keeps the trace collector off the internet.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile app up -d --build
+#
+# Put SITE (e.g. tracescan.203-0-113-7.sslip.io) and a strong POSTGRES_PASSWORD in the
+# gitignored .env next to this file, so every `docker compose` command sees them. Only Caddy is
+# published to the outside (80 and 443); Postgres, the backend and the frontend stay on the
+# server's localhost, as in the base file.
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    profiles: [app]
+    environment:
+      SITE: ${SITE:?set SITE to the site's host name}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates and the ACME account: kept, or every restart asks Let's Encrypt again.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  backend:
+    environment:
+      # A Clerk token is accepted only when it was issued for the public origin.
+      CLERK_AUTHORIZED_PARTIES: '["https://${SITE}"]'
+
+volumes:
+  caddy-data:
+  caddy-config:

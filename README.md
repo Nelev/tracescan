@@ -664,6 +664,20 @@ cd backend && uv run --env-file .env python -m scripts.seed_traces
 
 To run next to Medas (which uses ports 8000 and 3000), use 8010 and 3010, point Medas's `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at `http://localhost:8010/v1/traces`, and give Medas its token with `OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer%20<token>` (TraceScan's `COLLECTOR_TOKEN_MEDAS`).
 
+### On a server
+
+The hosted demo is the same Compose app on one VM, behind [Caddy](https://caddyserver.com) for HTTPS ([docs/deploy-plan.md](docs/deploy-plan.md) has the host, the steps and the teardown). On the server, with `backend/.env` and `frontend/.env.local` copied over, put the site's name and a strong database password in a `.env` at the repo root (a free [sslip.io](https://sslip.io) name works: `tracescan.<ip with dashes>.sslip.io`):
+
+```bash
+printf 'SITE=tracescan.203-0-113-7.sslip.io\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" > .env
+```
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile app up -d --build
+```
+
+Caddy gets the certificate from Let's Encrypt, publishes only 80 and 443, and sets `CLERK_AUTHORIZED_PARTIES` to `https://$SITE`. It refuses `POST /api/traces`, so the trace collector cannot be reached from outside: seed the traces through an SSH tunnel to the server's Postgres (`ssh -N -L 15433:127.0.0.1:5433 <user>@<server>`, then the seeder with `DATABASE_URL` on port 15433). `SITE=localhost` tries it on your machine with Caddy's own certificate.
+
 **Checks:**
 
 ```bash
