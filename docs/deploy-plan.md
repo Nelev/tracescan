@@ -92,6 +92,15 @@ Compose 5.7.1 and the 2 GB swap answer on the server.
 **Done when** `https://tracescan.<ip>.sslip.io` shows the sign-in page with a valid certificate and
 `/v1/traces` is not reachable from outside.
 
+**Done 2026-11-16:** the code went over as a `git archive` of the branch (no GitHub access on the
+server). The server's `backend/.env` is the local one without `GITHUB_TOKEN`/`GITHUB_REPO`, with
+`DRY_RUN=1` (the local file has it off), a new `COLLECTOR_TOKEN_MEDAS` and the demo OpenRouter
+key; the root `.env` (`SITE`, `POSTGRES_PASSWORD`) was generated on the server. Checked from
+outside: `/` redirects to the Clerk sign-in, which renders with no console error (the development
+instance accepts the `sslip.io` origin), a Let's Encrypt certificate, HTTP redirects to HTTPS,
+`/api/health` answers, `POST /api/traces` is a 404, `/api/runs` without a session a 401, and
+5433, 8010 and 3010 are closed.
+
 ### 5. Seed the traces
 
 From the laptop, through an SSH tunnel to the server's Postgres (bound to the server's localhost):
