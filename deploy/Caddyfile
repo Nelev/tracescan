@@ -1,0 +1,24 @@
+# The demo's HTTPS front (docs/deploy-plan.md), used by docker-compose.prod.yml.
+# SITE is the host name, e.g. tracescan.203-0-113-7.sslip.io: Caddy gets and renews its
+# certificate from Let's Encrypt. With SITE=localhost it uses its own local CA instead.
+{$SITE} {
+	# The trace collector stays off the internet: the frontend's /api/:path* rewrite would hand
+	# POST /api/traces to the backend's POST /v1/traces. GET /api/traces is the trace browser.
+	@collector {
+		method POST
+		path /api/traces /api/traces/*
+	}
+	respond @collector 404
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		-Server
+	}
+
+	# No `encode`: compression would buffer the run's event stream. Caddy flushes a
+	# text/event-stream response as it comes.
+	reverse_proxy frontend:3000
+}
