@@ -14,6 +14,8 @@ Four minutes, narrated and subtitled: the dashboard, the traces, a live triage r
 
 https://github.com/user-attachments/assets/b16113dd-300b-4f03-a9d5-d70d5d579a54
 
+See the project on the [Turing College showcase](https://showcase.turingcollege.com/project/2ea21003-6a40-4df0-a672-43b5b15cf414).
+
 ### Where to read what
 
 | If you want to… | Read |
