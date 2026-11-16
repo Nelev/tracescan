@@ -2,9 +2,17 @@
 # Runs the ruff pinned in backend/uv.lock, so the hook and CI never disagree.
 # Install once: cd backend && uv sync && uv run pre-commit install
 # Fix what it reports: cd backend && uv run ruff check --fix . && uv run ruff format .
+# Also refuses any commit on main: main changes only through a pull request (the ruleset on
+# GitHub enforces the same for pushes).
 repos:
   - repo: local
     hooks:
+      - id: no-commit-to-main
+        name: no commit on main (branch first)
+        entry: sh -c 'test "$(git branch --show-current)" != main || { echo "Commit on a branch, not main"; exit 1; }'
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: ruff-check
         name: ruff check
         entry: uv run --project backend --frozen ruff check
