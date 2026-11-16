@@ -88,7 +88,7 @@ cd frontend && npm run dev
 
 `npm run build` builds, `npm run lint` runs Biome, `npx tsc --noEmit` typechecks, and `npm test` runs the unit tests of the pure modules in `lib/` with Node's built-in runner (no dependency; those modules import each other with `.ts` extensions, which `allowImportingTsExtensions` allows, so `node --test` can load them). The UI needs the backend running too; if ports 3000 or 8000 are taken, start the backend with `--port 8010` and the frontend with `BACKEND_URL=http://localhost:8010 npm run dev -- --port 3010`.
 
-Backend checks (run from `backend/`; the Backend CI workflow runs all four). Pyright reads `pyrightconfig.json` at the repo root, the same config the editor uses, hence `-p ..`:
+Backend checks (run from `backend/`; the `backend` job of the CI workflow, `.github/workflows/ci.yml`, runs all four). Pyright reads `pyrightconfig.json` at the repo root, the same config the editor uses, hence `-p ..`:
 
 ```bash
 cd backend && uv run ruff check . && uv run ruff format --check . && uv run pyright -p .. && uv run pytest
@@ -100,7 +100,9 @@ The eval on seeded traces (needs `DATABASE_URL`, `TRACE_DATABASE_URL` and `OPENR
 
 `uv run ruff check --fix .` and `uv run ruff format .` fix what they report. Ruff is configured in `backend/pyproject.toml` (rules `E,F,I,UP,B`, line length 100).
 
-A pre-commit hook (`.pre-commit-config.yaml` at the repo root, `pre-commit` a backend dev dependency) runs the same two ruff checks on staged backend Python and refuses the commit when one fails; install it once per clone with `cd backend && uv run pre-commit install`. It runs the ruff in `uv.lock` through `uv run --project backend --frozen`, so it needs `uv` on the PATH git sees.
+A pre-commit hook (`.pre-commit-config.yaml` at the repo root, `pre-commit` a backend dev dependency) runs the same two ruff checks on staged backend Python and refuses the commit when one fails; install it once per clone with `cd backend && uv run pre-commit install`. It runs the ruff in `uv.lock` through `uv run --project backend --frozen`, so it needs `uv` on the PATH git sees. It also refuses any commit on `main`.
+
+`main` is protected on GitHub by a ruleset: no deletion, no force push, changes only through a pull request, and the `ci` check must pass. `ci` is the last job of `.github/workflows/ci.yml`: a `changes` job runs the `backend` and `frontend` jobs only when their part of the repo changed (both on a push to `main`), and `ci` always reports, failing when either of them failed, so a docs-only pull request is never left waiting. Merged branches are deleted automatically.
 
 Planned: `langgraph dev` for Studio (compile without a local checkpointer/store and point `langgraph.json` at the module's `graph`).
 
