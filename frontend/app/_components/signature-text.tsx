@@ -21,9 +21,11 @@ export function SignatureText({ parts }: { parts: SignaturePart[] }) {
       {part.kind === "text" ? (
         part.text
       ) : (
+        // `relative` keeps the absolute sr-only text inside the mark, so a truncated line clips it
+        // too; without it, the text sits past the clip and widens the page on a phone.
         <abbr
           title={MASKED[part.kind].meaning}
-          className="text-muted-foreground italic no-underline"
+          className="relative text-muted-foreground italic no-underline"
         >
           <span aria-hidden="true">{MASKED[part.kind].shown}</span>
           <span className="sr-only">{MASKED[part.kind].meaning}</span>

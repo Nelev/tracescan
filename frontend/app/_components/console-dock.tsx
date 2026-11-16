@@ -31,17 +31,12 @@ const HIT = "relative after:absolute after:-inset-1.5 after:content-['']";
  * open (read out once, as a phrase). Open, the panel holds the run's messages (or its raw events),
  * a link to the run, and where the run stands, with Cancel while it streams. It is not a modal:
  * the page stays usable, Escape minimizes it and gives focus back to the launcher. A run started
- * in this window opens it once; minimized during that run, it stays minimized. The shell owns
- * whether it is open, so the page can leave room for it.
+ * in this window opens it once; minimized during that run, it stays minimized. The open panel
+ * floats over the page.
  */
-export function ConsoleDock({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
+export function ConsoleDock() {
   const run = useRun();
+  const [open, setOpen] = useState(false);
   const [raw, setRaw] = useState(false);
   // How many messages had arrived when the panel was last closed: everything up to there is
   // seen. Set by the close itself, not by an effect, so an open panel does not re-render twice
@@ -59,8 +54,8 @@ export function ConsoleDock({
     if (run.runId === null || run.runId === lastRun.current) return;
     lastRun.current = run.runId;
     setSeen(0);
-    if (run.phase === "running") onOpenChange(true);
-  }, [run.runId, run.phase, onOpenChange]);
+    if (run.phase === "running") setOpen(true);
+  }, [run.runId, run.phase]);
 
   useEffect(() => {
     if (open && focusOnOpen.current) {
@@ -81,12 +76,12 @@ export function ConsoleDock({
   function toggle() {
     if (open) setSeen(total);
     else focusOnOpen.current = true;
-    onOpenChange(!open);
+    setOpen(!open);
   }
 
   function minimize() {
     setSeen(total);
-    onOpenChange(false);
+    setOpen(false);
     launcher.current?.focus();
   }
 
@@ -106,7 +101,7 @@ export function ConsoleDock({
           aria-labelledby="console-dock-title"
           tabIndex={-1}
           onKeyDown={onKeyDown}
-          className="surface-raised pointer-events-auto flex h-(--dock-height) w-(--dock-width) max-w-[calc(100vw-2*var(--dock-inset))] origin-bottom-right flex-col overflow-hidden rounded-2xl border outline-none motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+          className="surface-floating pointer-events-auto flex h-(--dock-height) w-(--dock-width) max-w-[calc(100vw-2*var(--dock-inset))] origin-bottom-right flex-col overflow-hidden rounded-2xl border outline-none motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
         >
           <header className="flex items-center gap-2 border-b px-4 py-2">
             <MessagesSquare
