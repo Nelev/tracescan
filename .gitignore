@@ -10,3 +10,6 @@ __pycache__/
 # dry-run output of apply_actions (issues, regression cases)
 # (backend/out when the app runs from backend/)
 out/
+
+# Local demo recordings and voice samples (the published video is a GitHub attachment)
+demo/
