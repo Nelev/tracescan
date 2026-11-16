@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from limits import parse
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
     ExportTraceServiceResponse,
@@ -14,9 +15,10 @@ from opentelemetry.proto.trace.v1.trace_pb2 import Span as OtlpSpan
 from opentelemetry.proto.trace.v1.trace_pb2 import Status
 from sqlalchemy import text
 
+from api.rate_limit import COLLECTOR_REQUESTS, COLLECTOR_SPANS, charge_spans
 from api.traces import PROTOBUF, CollectorTokens, ExportTooLarge, decode, token_variable
 from main import app
-from tests.conftest import bearer, collector_headers
+from tests.conftest import COLLECTOR_TOKEN, bearer, collector_headers
 from trace_store.const import (
     APP_VERSION_MAX,
     MAX_EXPORT_BYTES,
@@ -320,3 +322,66 @@ async def test_text_postgres_refuses_is_stored_cleaned(collector, spans_engine):
     async with spans_engine.connect() as conn:
         attributes = (await conn.execute(text("SELECT attributes FROM spans"))).scalar()
     assert attributes == {"text": "ab", "nan": None, "inf": None, "fine": 0.5}
+
+
+# --- the collector's limits (api.rate_limit)
+
+EXPORTS_PER_WINDOW = parse(COLLECTOR_REQUESTS).amount
+SPANS_PER_WINDOW = parse(COLLECTOR_SPANS).amount
+OTHER_TOKEN = "test-collector-token-for-another-app-0"
+
+
+@pytest.mark.anyio
+async def test_exports_past_the_limit_are_429_before_the_body_is_read(collector):
+    # Another app's export: accepted, stores nothing, so no database is needed to fill the budget.
+    for _ in range(EXPORTS_PER_WINDOW):
+        assert (await post(collector, export("someone-else"))).status_code == 200
+
+    read: list[bytes] = []
+
+    async def body():
+        read.append(b"chunk")
+        yield export()
+
+    refused = await collector.post("/v1/traces", content=body(), headers=collector_headers())
+    assert refused.status_code == 429
+    assert int(refused.headers["Retry-After"]) > 0
+    assert read == []
+
+
+@pytest.mark.anyio
+async def test_a_refused_token_or_content_type_uses_up_no_export(collector):
+    for _ in range(EXPORTS_PER_WINDOW + 1):
+        assert (await post(collector, b"{}", "application/json")).status_code == 415
+        unknown = await collector.post("/v1/traces", content=export(), headers=bearer("x" * 40))
+        assert unknown.status_code == 401
+    assert (await post(collector, export("someone-else"))).status_code == 200
+
+
+@pytest.mark.anyio
+async def test_the_export_limit_is_per_app(collector):
+    app.state.collector_tokens = CollectorTokens({"medas": COLLECTOR_TOKEN, "other": OTHER_TOKEN})
+    for _ in range(EXPORTS_PER_WINDOW):
+        await post(collector, export("someone-else"))
+    assert (await post(collector, export("someone-else"))).status_code == 429
+
+    other = collector_headers(OTHER_TOKEN)
+    response = await collector.post("/v1/traces", content=export("someone-else"), headers=other)
+    assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_an_export_past_the_span_limit_is_refused_whole(collector):
+    charge_spans("medas", SPANS_PER_WINDOW - 1)  # one span of budget left; the export has two
+
+    # No engine on the app: storing would fail the request, so a 429 shows nothing was stored.
+    refused = await post(collector, export())
+    assert refused.status_code == 429
+    assert int(refused.headers["Retry-After"]) > 0
+    charge_spans("medas", 1)  # the refused export counted none of its spans
+
+
+def test_only_the_spans_an_app_would_store_count():
+    charge_spans("medas", SPANS_PER_WINDOW)
+    charge_spans("other", 1)  # another app's budget is its own
+    charge_spans("medas", 0)  # an export that stores nothing costs nothing

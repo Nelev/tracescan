@@ -227,11 +227,11 @@ The MVP shows one path end to end: failed traces in, evidence-backed issue propo
 **Stretch (if time allows)**
 
 - [ ] Replay-based reproducer in a sandbox
-- [ ] Known-issues memory with semantic matching
+- [ ] Known-issues memory with semantic matching (half built: decided diagnoses are remembered and shown to the diagnoser; a repeat failure does not update its issue yet)
 - [x] Real GitHub issue creation
 - [ ] MAST-Data agreement study
-- [ ] Scheduled daily triage run and a deployed demo
-- [ ] Next.js review dashboard over the FastAPI backend (runs list, run detail, trace viewer, review screen and results page built)
+- [ ] Scheduled daily triage run and a deployed demo (the app runs in Docker Compose; neither a hosted deploy nor a schedule exists)
+- [x] Next.js review dashboard over the FastAPI backend (dashboard, runs list, run page with inline review, trace browser and results page)
 - [ ] LLM judge for groundedness in the scoring job
 
 The phases below are in working days, since no start date is fixed yet.
@@ -318,9 +318,9 @@ Do these in order and stop where time runs out; each one is useful on its own.
 - [x] **Switch to Postgres.** Postgres checkpointer and store instead of the in-memory versions. The checkpointer is done (`AsyncPostgresSaver` in `main.py`); the store is still `InMemoryStore` (the healthy spans and scores have their own Postgres tables). Done when a paused run survives a restart: checked on 2026-11-13, a run waiting for review was reviewed through a restarted backend and completed.
 - [x] **Record runs, users and reviews.** Three tables next to the checkpoints (`users`, `runs`, `reviews`), created by Alembic migrations, and a run store the runs module writes to: who started a run, how it ended (`failed` and `aborted` included), who decided what. Users are recorded by name from a header; there is no login. `GET /v1/runs` lists the runs. Done when the run store tests pass against Postgres (`TEST_DATABASE_URL`) and the app refuses to start before the migration has run.
 - [x] **Sign in with Clerk.** A TraceScan application in Clerk of its own (not Medas's), sign-up restricted to invited accounts, `name` and `email` added to the session token. Backend: every route but `/health` and the collector verifies a Clerk session token (`backend/auth/`), and runs and reviews are recorded under the token's name, not the `X-User-Name` header (built). Frontend: `ClerkProvider`, a `proxy.ts` that sends signed-out pages to `/sign-in`, `<UserButton/>` in the header, and `lib/api.ts` sending `Authorization: Bearer` from `getToken()` on every call, the run stream included (built). The collector has its own credential (`COLLECTOR_TOKEN_MEDAS`). Still open: the Clerk user id stored next to each name (`started_by_id`, `reviewer_id`). Done when a signed-out browser lands on `/sign-in`, a signed-in one can start and review a run recorded under its name, and a request with no token gets a `401`: checked on 2026-11-13. Running Medas's UI on localhost:3000 in the same browser can leave TraceScan's Clerk cookies stale (a redirect loop on `/sign-in`); clearing the `__session_*`, `__client_uat_*` and `__clerk_db_jwt_*` cookies with TraceScan's suffix fixes it.
-- [ ] **Deploy.** Docker Compose with Medas, TraceScan, the trace collector and Postgres. Done when a triage run works on the deployed version.
+- [ ] **Deploy.** Docker Compose with Medas, TraceScan, the trace collector and Postgres. Done when a triage run works on the deployed version. Half done: `docker compose --profile app up -d --build` runs TraceScan and its Postgres (PR 118); Medas runs from its own repo, and a hosted demo is planned in `docs/deploy-plan.md` (one VM, seeded traces, no public collector). A recorded demo is enough for the capstone if the hosted one slips.
 - [ ] **Schedule a daily run.** A cron job that triages the last 24 hours and waits for review. Done when one scheduled run has produced proposals.
-- [ ] **Write the README.** Problem, architecture diagram, how to run, eval results, limitations. Done when someone new could run the demo from it.
+- [ ] **Write the README.** Problem, architecture diagram, how to run, eval results, limitations. Done when someone new could run the demo from it. Written (a tour with screenshots, the pipeline, the APIs, the system, the eval results, what's built and missing, and how to run it, locally or in Docker), with `docs/guide.md` beside it; the check itself, someone new running the demo from it, is still to do.
 - [ ] **Record the demo.** Three minutes: switch on a fault, run traffic, run triage, approve, show the issue. Done when the video is linked in the README.
 - [ ] **Keep half a day as buffer.** For whatever slipped earlier.
 

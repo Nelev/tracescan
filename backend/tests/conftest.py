@@ -25,8 +25,9 @@ def no_retry_wait(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def fresh_run_limit():
-    """Every test starts with no runs counted: the limiter is one instance for the process."""
+def fresh_limits():
+    """Every test starts with nothing counted (runs, exports, spans): the limiter is one instance
+    for the process."""
     limiter.reset()
 
 

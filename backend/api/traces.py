@@ -7,7 +7,8 @@ Binary protobuf, uncompressed: the OTel exporters' default. The token says which
 token cannot write another's traces. Medas's exporter sends it through
 `OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer%20<token>`.
 
-An export is at most MAX_EXPORT_BYTES and MAX_EXPORT_SPANS (413 past either). On the way in, NUL
+An export is at most MAX_EXPORT_BYTES and MAX_EXPORT_SPANS (413 past either), and each app has a
+budget of exports and of spans per minute (api.rate_limit: a 429 with Retry-After past either). On the way in, NUL
 characters are stripped and non-finite numbers become null (Postgres refuses both, and with them
 the whole batch), names and status messages are cut, and spans that start in the future are
 dropped, as are spans with an id OpenTelemetry does not allow or that end before they start. Nothing here logs a span.
@@ -35,6 +36,7 @@ from opentelemetry.proto.trace.v1.trace_pb2 import Status
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from api.rate_limit import charge_export, charge_spans
 from auth import bearer_scheme, unauthorized
 from db.models import Span
 from trace_store.const import (
@@ -253,10 +255,15 @@ async def _read_body(request: Request) -> bytes:
 
 
 @router.post("/traces")
-async def receive_traces(request: Request, app: Annotated[str, Depends(sending_app)]) -> Response:
+async def receive_traces(
+    request: Request, response: Response, app: Annotated[str, Depends(sending_app)]
+) -> Response:
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type != PROTOBUF:
         raise HTTPException(415, f"send {PROTOBUF}")
+    # Counted before the body is read, so a flood is refused without reading it; a 401 or a 415
+    # above counts nothing.
+    await charge_export(request, response, app)
     not_after = datetime.now(UTC) + timedelta(seconds=MAX_CLOCK_SKEW_S)
     try:
         rows = decode(await _read_body(request), app)
@@ -265,6 +272,8 @@ async def receive_traces(request: Request, app: Annotated[str, Depends(sending_a
     except ExportTooLarge:
         raise _too_large() from None
     rows = [row for row in rows if row["start_time"] <= not_after]
+    # Only what would be stored counts: another app's spans and invalid ones are not.
+    charge_spans(app, len(rows))
     if rows:
         try:
             await store_spans(request.app.state.engine, rows)

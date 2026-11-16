@@ -49,13 +49,13 @@ Metrics are taken from the source document's evaluation plan; targets are not ye
 
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
-| 1 | Medas traces visible | The author can view Medas runs, failures and scores in a trace viewer built on the project's own trace store | pending | — |
-| 2 | Triage report on Medas | A run over a time window produces grouped, diagnosed failures drafted as issue proposals | pending | — |
-| 3 | Human-gated actions | Nothing is written until a person approves each proposal; approved items produce dry-run output | pending | — |
-| 4 | Fault-injection evaluation | Detection, accuracy, false-positive, duplicate, cost and time results for the 6 injected faults (MVP gate, day 10) | pending | — |
-| 5 | Confirmed, deduplicated issues (stretch) | Causes confirmed by replay; repeat failures update existing issues; real GitHub issues with regression tests | pending | — |
-| 6 | Benchmark and review UI (stretch) | MAST-Data comparison and a review dashboard | pending | — |
-| 7 | Shippable capstone | Deployed or recorded demo, README and three-minute demo (days 15–16) | pending | — |
+| 1 | Medas traces visible | The author can view Medas runs, failures and scores in a trace viewer built on the project's own trace store | complete | PLAN.md phases 1–2; trace browser at `/traces` |
+| 2 | Triage report on Medas | A run over a time window produces grouped, diagnosed failures drafted as issue proposals | complete | PLAN.md phases 2–3 |
+| 3 | Human-gated actions | Nothing is written until a person approves each proposal; approved items produce dry-run output | complete | PLAN.md phase 3 (review gate, dry run) |
+| 4 | Fault-injection evaluation | Detection, accuracy, false-positive, duplicate, cost and time results for the 6 injected faults (MVP gate, day 10) | complete | MVP gate passed 2026-11-14; README "The evaluation" |
+| 5 | Confirmed, deduplicated issues (stretch) | Causes confirmed by replay; repeat failures update existing issues; real GitHub issues with regression tests | in-progress | Real GitHub issues and regression cases built; replay and issue updates not |
+| 6 | Benchmark and review UI (stretch) | MAST-Data comparison and a review dashboard | in-progress | Review dashboard built; MAST-Data not started |
+| 7 | Shippable capstone | Deployed or recorded demo, README and three-minute demo (days 15–16) | in-progress | README and guide written, app runs in Docker Compose; demo video and hosted deploy to do |
 
 ## Open Questions
 - [ ] Is the 16-day scope realistic, or should some stretch goals be cut now?
@@ -78,4 +78,4 @@ Metrics are taken from the source document's evaluation plan; targets are not ye
 | Sensitive clinical data in traces | Unknown | High | TBD — needs validation (see open question) |
 
 ---
-*Status: DRAFT — requirements only. Implementation planning pending via /plan.*
+*Status: requirements as first written; the plan is [PLAN.md](../../PLAN.md). Milestone statuses updated 2026-11-16.*
