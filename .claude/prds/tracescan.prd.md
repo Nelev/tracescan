@@ -55,7 +55,7 @@ Metrics are taken from the source document's evaluation plan; targets are not ye
 | 4 | Fault-injection evaluation | Detection, accuracy, false-positive, duplicate, cost and time results for the 6 injected faults (MVP gate, day 10) | complete | MVP gate passed 2026-11-14; README "The evaluation" |
 | 5 | Confirmed, deduplicated issues (stretch) | Causes confirmed by replay; repeat failures update existing issues; real GitHub issues with regression tests | in-progress | Real GitHub issues and regression cases built; replay and issue updates not |
 | 6 | Benchmark and review UI (stretch) | MAST-Data comparison and a review dashboard | in-progress | Review dashboard built; MAST-Data not started |
-| 7 | Shippable capstone | Deployed or recorded demo, README and three-minute demo (days 15–16) | in-progress | README and guide written, app runs in Docker Compose; demo video and hosted deploy to do |
+| 7 | Shippable capstone | Deployed or recorded demo, README and three-minute demo (days 15–16) | in-progress | README and guide written, app runs in Docker Compose, demo video recorded and embedded in the README; hosted deploy to do |
 
 ## Open Questions
 - [ ] Is the 16-day scope realistic, or should some stretch goals be cut now?

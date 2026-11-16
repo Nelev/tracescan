@@ -8,6 +8,12 @@ TraceScan reads an app's traces and decides which requests actually failed their
 
 The first app it watches is **Medas**, a clinician-facing RAG assistant. Medas traces can touch clinical data, so TraceScan reads traces without copying their content around. Names, statuses, error types and counts travel through the pipeline; prompts, answers and patient records never do.
 
+### Watch the demo
+
+Four minutes, narrated and subtitled: the dashboard, the traces, a live triage run over a seeded day of Medas traces (the trace judge, the clustering, the parallel diagnoses and the agent console), the cluster map, a finding with its evidence, the review, and the eval results. The traces are synthetic and the review is not submitted.
+
+https://github.com/user-attachments/assets/b16113dd-300b-4f03-a9d5-d70d5d579a54
+
 ### Where to read what
 
 | If you want to… | Read |
@@ -610,7 +616,7 @@ The MVP gate passed on 2026-11-14. [`PLAN.md`](PLAN.md) has every task with its 
 - **Detection gaps.** The weak-model fault is never judged failed, and causes are named for 2 of the 5 Medas faults caught (see the eval).
 - **Repeated eval runs.** Every number above is one run; the models' variance is not measured yet.
 - **MAST-Data agreement study.**
-- **Ship:** a hosted deployment (the app runs in Docker Compose, see [Running it](#running-it); the hosted demo is planned in [docs/deploy-plan.md](docs/deploy-plan.md)), a scheduled daily run, and the demo video.
+- **Ship:** a hosted deployment (the app runs in Docker Compose, see [Running it](#running-it); the hosted demo is planned in [docs/deploy-plan.md](docs/deploy-plan.md)) and a scheduled daily run.
 - **Smaller gaps:** a dedicated read-only database role for the trace server (the session is read-only, the role isn't created); Clerk user ids stored next to names; run duration and the judge's spend in the run list; a personal-data scan of issue text before it is filed; retrying `apply_actions` after a failed resume past the review.
 - **Parked:** tracing TraceScan itself and LangGraph Studio, both cut from the MVP.
 

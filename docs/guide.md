@@ -855,7 +855,7 @@ For example, a `progress` event becomes a badge and a line of text. A `proposal`
 - **Reproducer**: diagnoses stay `unverified`.
 - **Known issues, second half**: a repeat fault drafts a new issue instead of commenting on the old one; no reject reason is recorded.
 - **Weak-model detection**, and causes for silent failures (needs more safe signals from Medas).
-- **Ship**: Docker Compose with Medas, a scheduled daily run, the demo video.
+- **Ship**: Docker Compose with Medas, a scheduled daily run.
 - **Smaller**: a dedicated read-only DB role (the session is read-only, the role isn't created), a personal-data scan of issue text before filing.
 
 ### Next steps, in order
