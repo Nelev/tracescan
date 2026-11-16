@@ -115,6 +115,11 @@ cd backend && DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:15433/post
 
 **Done when** the Traces page on the server lists 52 traces.
 
+**Done 2026-11-16:** 52 traces, 216 spans, a day ending 12:29 UTC; the root spans run from
+2026-11-15 12:29 to 2026-11-16 12:01 UTC. In a script, start the tunnel in the foreground shell
+(`ssh -N -L ... &` on its own line, then `kill` its pid): chained into `cd ... && S=... && ssh ... &`
+the whole chain runs in a subshell, and a leftover tunnel holds the port for the next try.
+
 ### 6. Check a run end to end
 
 Sign in, start a run over the seeded day, watch it stream, review it, approve one finding.
