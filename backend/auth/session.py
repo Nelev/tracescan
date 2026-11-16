@@ -29,9 +29,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from db.models import NAME_MAX
 
-# The origins a token may be issued for by default: the UI as `frontend-3010` and `npm run dev`
-# serve it.
-DEFAULT_AUTHORIZED_PARTIES = ("http://localhost:3010", "http://localhost:3000")
+# The origins a token may be issued for by default: the UI as `frontend-3010`, `npm run dev` and
+# `frontend-dev-3020` serve it.
+DEFAULT_AUTHORIZED_PARTIES = (
+    "http://localhost:3010",
+    "http://localhost:3000",
+    "http://localhost:3020",
+)
 
 
 @dataclass(frozen=True)

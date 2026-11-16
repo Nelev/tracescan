@@ -43,8 +43,8 @@ function Bar({ stage }: { stage: Stage }) {
  */
 export function PipelineStepper({ stages }: { stages: Stage[] }) {
   return (
-    // Columns follow the stepper's own width, not the window's: the nav and an open console dock
-    // take room, and seven stages in one row need about 170px each to keep their chips whole.
+    // Columns follow the stepper's own width, not the window's: the nav takes room, and seven
+    // stages in one row need about 170px each to keep their chips whole.
     <div className="@container">
       <ol
         aria-label="Pipeline"

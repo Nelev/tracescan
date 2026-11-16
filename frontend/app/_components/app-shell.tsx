@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, Suspense, useState } from "react";
+import { type ReactNode, Suspense } from "react";
 import { runPath, shortId } from "@/lib/runs";
 import { cn } from "@/lib/utils";
 import { AccountMenu } from "./account-menu";
@@ -126,12 +126,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 /**
  * The frame inside the run's provider, so it knows whether this window has a run: then the console
- * dock shows in the corner, the page keeps room at its foot for the launcher, and on a wide screen
- * it narrows while the dock is open, so the panel never covers it.
+ * dock shows in the corner and the page keeps room at its foot for the launcher. The open panel
+ * floats over the page.
  */
 function Frame({ children }: { children: ReactNode }) {
   const { runId } = useRunStatus();
-  const [dockOpen, setDockOpen] = useState(false);
   const docked = runId !== null;
   return (
     <>
@@ -155,12 +154,7 @@ function Frame({ children }: { children: ReactNode }) {
           {/* The bar spans the window; its controls sit in the page's own column, so their right
               edge lines up with the content's on a screen wider than that column. */}
           <header className="sticky top-0 z-header border-b bg-background">
-            <div
-              className={cn(
-                "mx-auto flex h-14 w-full max-w-[96rem] items-center justify-end gap-3 px-4 sm:px-6",
-                docked && dockOpen && "xl:pr-(--dock-reserve)",
-              )}
-            >
+            <div className="mx-auto flex h-14 w-full max-w-[96rem] items-center justify-end gap-3 px-4 sm:px-6">
               <ServerStatus />
               <NewRun />
               <AccountMenu />
@@ -170,14 +164,13 @@ function Frame({ children }: { children: ReactNode }) {
             className={cn(
               "mx-auto flex w-full max-w-[96rem] flex-1 flex-col px-4 py-6 sm:px-6",
               docked && "pb-24",
-              docked && dockOpen && "xl:pr-(--dock-reserve)",
             )}
           >
             {children}
           </main>
         </div>
       </div>
-      <ConsoleDock open={dockOpen} onOpenChange={setDockOpen} />
+      <ConsoleDock />
     </>
   );
 }
